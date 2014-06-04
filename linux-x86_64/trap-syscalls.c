@@ -1,20 +1,20 @@
-/* Basic idea: we are a preloaded library whose constructor 
- * - write-protects all executable pages 
- *     -- using /proc/self/maps to enumerate them? 
+/* Basic idea: we are a preloaded library whose constructor
+ * - write-protects all executable pages
+ *     -- using /proc/self/maps to enumerate them?
  *        YES, but must read using raw syscalls.
- * 
- * - makes them writable, breakpoint any syscall instrs 
+ *
+ * - makes them writable, breakpoint any syscall instrs
  * - ... and then makes them unwritable again
- * 
+ *
  * PROBLEM: vdso and vsyscall pages probably can't be write-protected
  * -- can we just override them? HMM.
- * 
+ *
  * */
 
 #define _GNU_SOURCE
-/* Don't use C library calls from this code! We run before the 
+/* Don't use C library calls from this code! We run before the
  * C library is initialised. Also, the definitions in asm/ conflict
- * with some libc headers, particularly typedefs related to signal 
+ * with some libc headers, particularly typedefs related to signal
  * handling. We use inline assembly to make the few system calls
  * that we need. */
 #include <unistd.h>
@@ -31,7 +31,7 @@
 #include <sys/mman.h>
 #include <stdint.h>
 
-/* Our callee-save registers are 
+/* Our callee-save registers are
  *         rbp, rbx, r12, r13, r14, r15
  * but all others need to be in the clobber list.
  *         rdi, rsi, rax, rcx, rdx, r8, r9, r10, r11
@@ -52,7 +52,7 @@
 
 #define UNFIX_STACK_ALIGNMENT \
 	"addq %%r12, %%rsp\n"
-	
+
 /* If we build a standalone executable, we include a test trap. */
 #ifdef EXECUTABLE
 static void *ignore_ud2_addr;
@@ -79,8 +79,8 @@ static int __attribute__((noinline)) raw_open(const char *pathname, int flags)
 	long int ret;
 	long int op = SYS_open;
 	long int longflags = flags;
-	
-	/* We have to do it all in one big asm statement, since the compiler 
+
+	/* We have to do it all in one big asm statement, since the compiler
 	 * can change what's in registers in between asm statements. */
 	__asm__ volatile ("movq %1, %%rdi      # \n\
 	                   movq %2, %%rsi      # \n\
@@ -93,13 +93,13 @@ static int __attribute__((noinline)) raw_open(const char *pathname, int flags)
 	return ret;
 }
 
-static int __attribute__((noinline)) raw_nanosleep(struct timespec *req, 
+static int __attribute__((noinline)) raw_nanosleep(struct timespec *req,
 			struct timespec *rem)
 {
 	long int ret;
 	long int op = SYS_nanosleep;
-	
-	/* We have to do it all in one big asm statement, since the compiler 
+
+	/* We have to do it all in one big asm statement, since the compiler
 	 * can change what's in registers in between asm statements. */
 	__asm__ volatile ("movq %1, %%rdi      # \n\
 	                   movq %2, %%rsi      # \n\
@@ -199,7 +199,7 @@ static void assert_fail(const char *msg)
 #define assert(cond) \
 	do { ((cond) ? ((void) 0) : (assert_fail("Assertion failed: \"" stringify((cond)) "\", file " __FILE__ ))); }  while (0)
 
-static int is_syscall_instr(const char *p, const char *end)
+static int is_syscall_instr(unsigned const char *p, unsigned const char *end)
 {
 	if ((end >= p + 2) && *p == 0x0f && *(p+1) == 0x05) return 2;
 	return 0;
@@ -208,7 +208,8 @@ static int is_syscall_instr(const char *p, const char *end)
 static unsigned long read_hex_num(const char **p_c, const char *end)
 {
 	unsigned long cur = 0;
-	while (*p_c != end && (**p_c >= '0' && **p_c <= '9') || (**p_c >= 'a' && **p_c <= '\f'))
+	while ((*p_c != end && (**p_c >= '0' && **p_c <= '9'))
+                        || (**p_c >= 'a' && **p_c <= '\f'))
 	{
 		cur <<= 4;
 		cur += ((**p_c >= '0' && **p_c <= '9') ? **p_c - '0'
@@ -234,7 +235,8 @@ static void saw_mapping(const char *pos, const char *end)
 	char w = *pos++;
 	char x = *pos++;
 	char p = *pos++;
-	
+
+
 	/* If this is our text mapping, skip it but remember our load address. */
 	if ((const unsigned char *) begin_addr <= (const unsigned char *) &raw_open
 			&& (const unsigned char *) end_addr > (const unsigned char *) &raw_open)
@@ -243,7 +245,7 @@ static void saw_mapping(const char *pos, const char *end)
 		our_text_end_address = (const void *) end_addr;
 		return;
 	}
-	
+
 	if (x == 'x')
 	{
 		if (w != 'w')
@@ -253,7 +255,7 @@ static void saw_mapping(const char *pos, const char *end)
 				PROT_READ | PROT_WRITE | PROT_EXEC);
 			assert(ret == 0);
 		}
-		
+
 		// it's executable; scan for syscall instructions
 		unsigned char *pos = (unsigned char *) begin_addr;
 		unsigned char *end_pos = (unsigned char *) end_addr;
@@ -265,7 +267,7 @@ static void saw_mapping(const char *pos, const char *end)
 				write_string("Replacing syscall at ");
 				raw_write(2, fmt_hex_num((unsigned long) pos), 18);
 				write_string(" with trap.\n");
-				
+
 				while (syscall_instr_len > 0)
 				{
 					//if (syscall_instr_len == 1) *pos++ = 0xcc;
@@ -273,7 +275,7 @@ static void saw_mapping(const char *pos, const char *end)
 					// use UD2
 					if (syscall_instr_len == 2) *pos++ = 0x0f;
 					else if (syscall_instr_len == 1) *pos++ = 0x0b;
-					
+
 					--syscall_instr_len;
 				}
 			}
@@ -282,13 +284,13 @@ static void saw_mapping(const char *pos, const char *end)
 				++pos;
 			}
 		}
-		
+
 		// restore original perms
 		if (w != 'w')
 		{
-			int ret = raw_mprotect((const void *) begin_addr, 
+			int ret = raw_mprotect((const void *) begin_addr,
 				(const char *) end_addr - (const char *) begin_addr,
-				(r == 'r' ? PROT_READ : 0) 
+				(r == 'r' ? PROT_READ : 0)
 			|   (w == 'w' ? PROT_WRITE : 0)
 			|   (x == 'x' ? PROT_EXEC : 0));
 			assert(ret == 0);
@@ -299,7 +301,7 @@ static void saw_mapping(const char *pos, const char *end)
 static void handle_sigill(int num);
 
 #ifndef EXECUTABLE
-static void __attribute__((constructor)) startup(void) 
+static void __attribute__((constructor)) startup(void)
 {
 #else
 static void *ignore_ud2_addr;
@@ -313,13 +315,13 @@ int main(void)
 	struct timespec tm = { /* seconds */ 5, /* nanoseconds */ 0 };
 	raw_nanosleep(&tm, NULL);
 #endif
-	
+
 	int fd = raw_open("/proc/self/maps", O_RDONLY);
 	if (fd != -1)
 	{
 		// we use a circular buffer and a read loop
 		char buf[8192];
-		int ret;
+		unsigned int ret;
 		char *buf_pos = &buf[0];         // the next character to be written
 		char *entry_start_pos = &buf[0]; // the position
 		size_t size_requested;
@@ -334,12 +336,12 @@ int main(void)
 			// do we have a complete entry yet?
 			char *seek_pos = entry_start_pos;
 			do
-			{	
+			{
 				while (seek_pos != buf_pos && seek_pos != buf + sizeof buf && *seek_pos != '\n')
 				{ ++seek_pos; }
 				if (seek_pos == buf_pos) break; // we need to read more
-			} while (seek_pos == buf + sizeof buf);  // wrap around 
-					
+			} while (seek_pos == buf + sizeof buf);  // wrap around
+
 			if (*seek_pos == '\n')
 			{
 				// we have a complete entry; read it and advance entry_start_pos
@@ -349,7 +351,7 @@ int main(void)
 		} while (ret == size_requested);
 		raw_close(fd);
 	}
-	
+
 	/* Install our SIGILL (was SIGTRAP, but that interferes with gdb) handler.
 	 * Linux seems to require us to provide a restorer; the code is inlined
 	 * at the bottom of this function. */
@@ -364,14 +366,15 @@ int main(void)
 	raw_rt_sigaction(SIGILL, &action, &oldaction);
 
 	/* Un-executablize our own code, excpet for the signal handler and the remainder of
-	 * this function and those afterwards. 
-	 * 
+	 * this function and those afterwards.
+	 *
 	 * For this, we need our load address. How can we get this? We've already seen it! */
 	long int len = &&exit_and_return - our_text_begin_address;
 	long int ret;
 	long int longprot = PROT_NONE;
 	long int op = SYS_mprotect;
-	
+
+
 	__asm__ (".align 4096");
 exit_and_return:
 	__asm__ volatile ("movq %0, %%rdi      # \n\
@@ -408,17 +411,17 @@ static void  __attribute__((optimize("O0"))) handle_sigill(int n)
 	/* HACK: force -O0 because getting the right break pointer is really important. */
 	unsigned long entry_bp;
 	__asm__("movq %%rbp, %0\n" : "=r"(entry_bp));
-	
-	/* In kernel-speak this is a "struct sigframe" / "struct rt_sigframe" -- 
+
+	/* In kernel-speak this is a "struct sigframe" / "struct rt_sigframe" --
 	 * sadly no user-level header defines it. But it seems to be vaguely standard
 	 * per-architecture (here Intel iBCS). */
-	struct 
+	struct
 	{
 		char *pretcode;
 		struct ucontext uc;
 		struct siginfo info;
 	} *p_frame = (void*) (entry_bp + 8);
-	
+
 	/* Decode the syscall using sigcontext. */
 	write_string("Took a trap from instruction at ");
 	raw_write(2, fmt_hex_num((unsigned long) p_frame->uc.uc_mcontext.rip), 18);
@@ -433,10 +436,10 @@ static void  __attribute__((optimize("O0"))) handle_sigill(int n)
 	unsigned long syscall_num = (unsigned long) p_frame->uc.uc_mcontext.rax;
 	raw_write(2, fmt_hex_num(syscall_num), 18);
 	write_string("\n");
-	
-	/* Check whether it creates executable mappings; if so, 
+
+	/* Check whether it creates executable mappings; if so,
 	 * we make them nx, do the rewrite, then make them x. */
-	
+
 	/* Otherwise run the syscall directly. */
 	if (syscall_num == SYS_exit)
 	{
@@ -449,9 +452,9 @@ static void  __attribute__((optimize("O0"))) handle_sigill(int n)
 		                  "UNFIX_STACK_ALIGNMENT " \n"
 		  : /* no output*/ : "rm"(retcode), "rm"(op) : "r12", SYSCALL_CLOBBER_LIST);
 	}
-	
+
 	/* Resume from *after* the faulting instruction. */
-out: 
+out:
 	// this doesn't work!
 	p_frame->uc.uc_mcontext.rip += 2;
 	// this does!
