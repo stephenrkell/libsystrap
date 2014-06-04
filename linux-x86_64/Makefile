@@ -1,26 +1,29 @@
 CFLAGS += -g
+CFLAGS += -Wall -Wextra -Wno-unused-label -Wno-unused-function -Wno-unused-parameter -Wno-unused-variable
 
 # I can think of a few ways of achieving syscall interposition:
-# 
+#
 # - (in a dynamically linked binary) overriding the C library's wrappers
 # - (in a statically linked binary)  ptrace(TRACE_ME)
 # - (in either case)                 breakpointing on any syscall instruction (HMM, CFI-style problems)
 #
 # other things: vsyscall page, vdso
-# 
-# Problem with libc: wrappers do not have publicly available names, nor 
+#
+# Problem with libc: wrappers do not have publicly available names, nor
 # consistent names.
-# 
+#
 # Problem with ptrace(TRACE_ME) -- you need a separate thread to trace from.
 # BUT otherwise that might not be so bad.
-# 
-# Problem with breakpointing: self-modifying code (JIT), 
+#
+# Problem with breakpointing: self-modifying code (JIT),
+
+all: trap-syscalls.so
 
 default: test trap-syscalls trap-syscalls.so
 
 test-programs/hello-static: test-programs/hello.c
 	$(CC) -static -o "$@" $(CFLAGS) "$<" $(LDFLAGS) $(LDLIBS)
-	
+
 test-programs/hello-dynamic: test-programs/hello.c
 	$(CC) -o "$@" $(CFLAGS) "$<" $(LDFLAGS) $(LDLIBS)
 
@@ -30,11 +33,11 @@ test-programs/hello-dynamic: test-programs/hello.c
 # NOW we are bound to take a breakpoint before any *more* executable mappings are created.
 # So we are a robust gatekeeper.
 
-trap-syscalls: trap-syscalls.c
-	$(CC) $(CFLAGS) -DEXECUTABLE -o "$@" "$<" $(LDFLAGS) $(LDLIBS)
+trap-syscalls: trap-syscalls.c do_syscall.c
+	$(CC) $(CFLAGS) -DEXECUTABLE -o "$@" $^ $(LDFLAGS) $(LDLIBS)
 
-trap-syscalls.so: trap-syscalls.c
-	$(CC) $(CFLAGS) -fPIC -shared -o "$@" "$<" $(LDFLAGS) $(LDLIBS)
+trap-syscalls.so: trap-syscalls.c do_syscall.c
+	$(CC) $(CFLAGS) -fPIC -shared -o "$@" $^ $(LDFLAGS) $(LDLIBS)
 
 # true is the smallest dynamically linked executable we can build
 test-programs/true: test-programs/true.s
@@ -46,5 +49,5 @@ clean:
 	rm -f test-programs/hello-static test-programs/hello-dynamic test-programs/true
 
 .PHONY: test
-test: trap-syscalls.so test-programs/true
+test: trap-syscalls.so do_syscall.o test-programs/true
 	LD_PRELOAD=`pwd`/trap-syscalls.so ./test-programs/true

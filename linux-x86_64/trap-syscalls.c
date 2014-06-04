@@ -31,6 +31,8 @@
 #include <sys/mman.h>
 #include <stdint.h>
 
+#include "do_syscall.h"
+
 /* Our callee-save registers are
  *         rbp, rbx, r12, r13, r14, r15
  * but all others need to be in the clobber list.
@@ -440,18 +442,19 @@ static void  __attribute__((optimize("O0"))) handle_sigill(int n)
 	/* Check whether it creates executable mappings; if so,
 	 * we make them nx, do the rewrite, then make them x. */
 
-	/* Otherwise run the syscall directly. */
-	if (syscall_num == SYS_exit)
-	{
-		long retcode = /* what was in rdi? */(unsigned long) p_frame->uc.uc_mcontext.rdi;
-		long op = SYS_exit;
-		__asm__ volatile ("movq %0, %%rdi      # \n\
-		                  "FIX_STACK_ALIGNMENT " \n\
-		                   movq %1, %%rax      # \n\
-		                   syscall             # do the syscall \n\
-		                  "UNFIX_STACK_ALIGNMENT " \n"
-		  : /* no output*/ : "rm"(retcode), "rm"(op) : "r12", SYSCALL_CLOBBER_LIST);
-	}
+        struct generic_syscall gs
+                = { .syscall_number = syscall_num,
+                    .arg0 = p_frame->uc.uc_mcontext.rdi,
+                    .arg1 = p_frame->uc.uc_mcontext.rsi,
+                    .arg2 = p_frame->uc.uc_mcontext.rdx,
+                    .arg3 = p_frame->uc.uc_mcontext.r10,
+                    .arg4 = p_frame->uc.uc_mcontext.r8,
+                    .arg5 = p_frame->uc.uc_mcontext.r9};
+
+        long int ret = do_syscall((struct syscall *) &gs);
+
+        /* Set the return value of the emulated syscall */
+        p_frame->uc.uc_mcontext.rax = ret;
 
 	/* Resume from *after* the faulting instruction. */
 out:
