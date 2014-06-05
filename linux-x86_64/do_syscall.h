@@ -3,6 +3,8 @@
 
 #include <sys/syscall.h>
 
+typedef long time_t;
+
 #define __user
 
 #define PADDED(x) x; long : 0;
@@ -16,6 +18,9 @@
 struct sys_exit_args {
         PADDED(int status)
 };
+struct sys_time_args {
+        PADDED(time_t __user *tloc)
+};
 
 /*
  * This is the main argument of the do_syscall function.
@@ -26,6 +31,7 @@ struct syscall {
         PADDED(int syscall_number)
         union {
                 struct sys_exit_args sys_exit_args;
+                struct sys_time_args sys_time_args;
         } syscall_args;
 };
 

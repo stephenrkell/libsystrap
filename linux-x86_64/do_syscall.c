@@ -1,5 +1,4 @@
-#include <unistd.h>
-#include <sys/time.h>
+// #include <unistd.h>
 
 #include "do_syscall.h"
 
@@ -76,8 +75,14 @@ long int do_syscall (struct syscall *sys)
         struct generic_syscall *gsp = (struct generic_syscall *) sys;
         long ret = -1;
         switch (sys->syscall_number) {
+                case SYS_getpid:
+                        ret = do_syscall0(gsp);
+                        break;
                 case SYS_exit:
-                        do_syscall1(gsp);
+                        ret = do_syscall1(gsp);
+                        break;
+                case SYS_time:
+                        ret = do_syscall1(gsp);
                         break;
                 default:
                         panic();

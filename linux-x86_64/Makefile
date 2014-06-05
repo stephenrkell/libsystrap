@@ -43,11 +43,26 @@ trap-syscalls.so: trap-syscalls.c do_syscall.c
 test-programs/true: test-programs/true.s
 	$(CC) -Wl,--export-dynamic -o "$@" -nostartfiles -nostdlib -Bdynamic "$<" /lib64/ld-linux-x86-64.so.2
 
+test-programs/my_time: test-programs/my_time.s
+	$(CC) -g -Wl,--export-dynamic -o "$@" -nostartfiles -nostdlib -Bdynamic "$<" /lib64/ld-linux-x86-64.so.2
+
+test-programs/my_getpid: test-programs/my_getpid.s
+	$(CC) -g -Wl,--export-dynamic -o "$@" -nostartfiles -nostdlib -Bdynamic "$<" /lib64/ld-linux-x86-64.so.2
+
 .PHONY: clean
 clean:
 	rm -f sigill trap-syscalls trap-syscalls.so
 	rm -f test-programs/hello-static test-programs/hello-dynamic test-programs/true
+	rm -f do_syscall.o
 
 .PHONY: test
-test: trap-syscalls.so do_syscall.o test-programs/true
+test: trap-syscalls.so test-programs/true
 	LD_PRELOAD=`pwd`/trap-syscalls.so ./test-programs/true
+
+.PHONY: test-my_time
+test-my_time: trap-syscalls.so test-programs/my_time
+	LD_PRELOAD=`pwd`/trap-syscalls.so ./test-programs/my_time
+
+.PHONY: test-my_time
+test-my_getpid: trap-syscalls.so test-programs/my_getpid
+	LD_PRELOAD=`pwd`/trap-syscalls.so ./test-programs/my_getpid
