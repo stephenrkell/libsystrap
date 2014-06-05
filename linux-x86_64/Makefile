@@ -33,10 +33,10 @@ test-programs/hello-dynamic: test-programs/hello.c
 # NOW we are bound to take a breakpoint before any *more* executable mappings are created.
 # So we are a robust gatekeeper.
 
-trap-syscalls: trap-syscalls.c do_syscall.c
+trap-syscalls: trap-syscalls.c do_syscall.c restorer.o
 	$(CC) $(CFLAGS) -DEXECUTABLE -o "$@" $^ $(LDFLAGS) $(LDLIBS)
 
-trap-syscalls.so: trap-syscalls.c do_syscall.c
+trap-syscalls.so: trap-syscalls.c do_syscall.c restorer.o
 	$(CC) $(CFLAGS) -fPIC -shared -o "$@" $^ $(LDFLAGS) $(LDLIBS)
 
 # true is the smallest dynamically linked executable we can build

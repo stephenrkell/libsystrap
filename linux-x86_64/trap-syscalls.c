@@ -300,6 +300,7 @@ static void saw_mapping(const char *pos, const char *end)
 	}
 }
 
+void restore_rt(void); /* in restorer.s */
 static void handle_sigill(int num);
 
 #ifndef EXECUTABLE
@@ -362,7 +363,7 @@ int main(void)
 		.sa_handler = &handle_sigill,
 		.sa_mask = 0,
 		.sa_flags = /*SA_SIGINFO |*/ 0x04000000u /* SA_RESTORER */ | SA_RESTART,
-		.sa_restorer = &&restore_rt
+		.sa_restorer = restore_rt
 	};
 	struct sigaction oldaction;
 	raw_rt_sigaction(SIGILL, &action, &oldaction);
@@ -399,12 +400,6 @@ ud2_addr:
 	// that will now cause traps (this isn't necessary in the shared library case)
 	DO_EXIT_SYSCALL
 #endif
-	goto out;
-restore_rt:
-	/* do the "return from signal handler" (sigret) syscall */
-	asm volatile("movq $0xf, %rax\n\
-		 syscall");
-out:
 	return;
 }
 
@@ -458,10 +453,10 @@ static void  __attribute__((optimize("O0"))) handle_sigill(int n)
 
 	/* Resume from *after* the faulting instruction. */
 out:
-	// this doesn't work!
+	// adjust the saved program counter to point past the trapping instr
 	p_frame->uc.uc_mcontext.rip += 2;
-	// this does!
-	p_frame->pretcode += 2;
+	// this doesn't work if you specify a restorer! because pretcode points there
+	// p_frame->pretcode += 2;
 	return;
 }
 
