@@ -377,16 +377,16 @@ int main(void)
 	long int op = SYS_mprotect;
 
 
-	__asm__ (".align 4096");
+        //	__asm__ (".align 4096");
 exit_and_return:
-	__asm__ volatile ("movq %0, %%rdi      # \n\
-	                   movq %1, %%rsi      # \n\
-	                   movq %2, %%rdx      # \n\
-	                  "FIX_STACK_ALIGNMENT " \n\
-	                   movq %3, %%rax      # \n\
-	                   syscall             # do the syscall \n\
-	                  "UNFIX_STACK_ALIGNMENT " \n"
-	  : /* no output*/ : "rm"(our_text_begin_address), "rm"(len), "rm"(longprot), "rm"(op) :  "%rax", "r12", SYSCALL_CLOBBER_LIST);
+	//__asm__ volatile ("movq %0, %%rdi      # \n\
+	//                   movq %1, %%rsi      # \n\
+	//                   movq %2, %%rdx      # \n\
+	//                  "FIX_STACK_ALIGNMENT " \n\
+	//                   movq %3, %%rax      # \n\
+	//                   syscall             # do the syscall \n\
+	//                  "UNFIX_STACK_ALIGNMENT " \n"
+	//  : /* no output*/ : "rm"(our_text_begin_address), "rm"(len), "rm"(longprot), "rm"(op) :  "%rax", "r12", SYSCALL_CLOBBER_LIST);
 
 #ifdef EXECUTABLE
 	// HACK for testing: do a ud2 right now!
@@ -401,8 +401,8 @@ ud2_addr:
 #endif
 	goto out;
 restore_rt:
-	/* do the "retun from signal handler" (sigret) syscall */
-	asm("movq $0xf, %rax\n\
+	/* do the "return from signal handler" (sigret) syscall */
+	asm volatile("movq $0xf, %rax\n\
 		 syscall");
 out:
 	return;
