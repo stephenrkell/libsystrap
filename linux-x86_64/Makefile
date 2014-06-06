@@ -1,6 +1,3 @@
-CFLAGS += -g
-CFLAGS += -Wall -Wextra -Wno-unused-label -Wno-unused-function -Wno-unused-parameter -Wno-unused-variable
-
 # I can think of a few ways of achieving syscall interposition:
 #
 # - (in a dynamically linked binary) overriding the C library's wrappers
@@ -16,6 +13,15 @@ CFLAGS += -Wall -Wextra -Wno-unused-label -Wno-unused-function -Wno-unused-param
 # BUT otherwise that might not be so bad.
 #
 # Problem with breakpointing: self-modifying code (JIT),
+
+WFLAGS = -Wall 								\
+	 -Wextra 							\
+	 -Wno-unused-label 						\
+	 -Wno-unused-function 						\
+	 -Wno-unused-parameter 						\
+	 -Wno-unused-variable
+OFLAGS = -O0 # XXX At this moment, any optimization breaks the code.
+CFLAGS += $(WFLAGS) $(OFLAGS) -g
 
 all: trap-syscalls.so
 
@@ -39,30 +45,22 @@ trap-syscalls: trap-syscalls.c do_syscall.c restorer.o
 trap-syscalls.so: trap-syscalls.c do_syscall.c restorer.o
 	$(CC) $(CFLAGS) -fPIC -shared -o "$@" $^ $(LDFLAGS) $(LDLIBS)
 
-# true is the smallest dynamically linked executable we can build
-test-programs/true: test-programs/true.s
-	$(CC) -Wl,--export-dynamic -o "$@" -nostartfiles -nostdlib -Bdynamic "$<" /lib64/ld-linux-x86-64.so.2
+test-programs:
+	mkdir -p test-programs
 
-test-programs/my_time: test-programs/my_time.s
-	$(CC) -g -Wl,--export-dynamic -o "$@" -nostartfiles -nostdlib -Bdynamic "$<" /lib64/ld-linux-x86-64.so.2
-
-test-programs/my_getpid: test-programs/my_getpid.s
-	$(CC) -g -Wl,--export-dynamic -o "$@" -nostartfiles -nostdlib -Bdynamic "$<" /lib64/ld-linux-x86-64.so.2
+test-programs/%: test-src/%.s test-programs
+	$(CC) -Wl,--export-dynamic -o $@ -nostartfiles -nostdlib -Bdynamic $< \
+		/lib64/ld-linux-x86-64.so.2
 
 .PHONY: clean
 clean:
 	rm -f sigill trap-syscalls trap-syscalls.so
-	rm -f test-programs/hello-static test-programs/hello-dynamic test-programs/true
+	rm -f test-programs/*
 	rm -f do_syscall.o
+	rm -f restorer.o
 
 .PHONY: test
-test: trap-syscalls.so test-programs/true
-	LD_PRELOAD=`pwd`/trap-syscalls.so ./test-programs/true
+test: test-true
 
-.PHONY: test-my_time
-test-my_time: trap-syscalls.so test-programs/my_time
-	LD_PRELOAD=`pwd`/trap-syscalls.so ./test-programs/my_time
-
-.PHONY: test-my_time
-test-my_getpid: trap-syscalls.so test-programs/my_getpid
-	LD_PRELOAD=`pwd`/trap-syscalls.so ./test-programs/my_getpid
+test-%: trap-syscalls.so test-programs/%
+	LD_PRELOAD=`pwd`/trap-syscalls.so ./test-programs/$*
