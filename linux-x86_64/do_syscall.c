@@ -2,6 +2,10 @@
 
 #include "do_syscall.h"
 
+#define SYSCALL_MAX 543
+#define DECL_SYSCALL(x) [SYS_ ## x ] = do_ ## x ,
+typedef long int (*syscall)(struct generic_syscall *);
+
 #define PERFORM_SYSCALL \
           FIX_STACK_ALIGNMENT "   \n\
           movq %[ret], %%rax      \n\
@@ -23,6 +27,16 @@
 #define UNFIX_STACK_ALIGNMENT \
         "addq %%r12, %%rsp\n"
 
+/*
+ * The x86-64 syscall argument passing convention goes like this:
+ * RAX: syscall_number
+ * RDI: ARG0
+ * RSI: ARG1
+ * RDX: ARG2
+ * R10: ARG3
+ * R8:  ARG4
+ * R9:  ARG5
+ */
 long int __attribute__((noinline)) do_syscall0 (struct generic_syscall *gsp)
 {
         long int ret;
@@ -70,23 +84,47 @@ long int __attribute__((noinline)) do_syscall6 (struct generic_syscall *gsp)
         return ret;
 }
 
+long int do_exit (struct generic_syscall *gsp)
+{
+        return do_syscall1(gsp);
+}
+
+long int do_getpid (struct generic_syscall *gsp)
+{
+        return do_syscall0(gsp);
+}
+
+long int do_time (struct generic_syscall *gsp)
+{
+        long int ret;
+        time_t *old_arg0 = (time_t *) gsp->arg0;
+
+        if (old_arg0) {
+                // Save the address, replace it with own.
+                time_t tmp;
+                gsp->arg0 = (long int) &tmp;
+        }
+
+       ret = do_syscall1(gsp);
+
+        if (old_arg0) {
+
+                *old_arg0 = (time_t) *((time_t *)gsp->arg0);
+                gsp->arg0 = (long int) old_arg0;
+        }
+        return ret;
+}
+
+static syscall syscalls[SYSCALL_MAX] = {
+        DECL_SYSCALL(exit)
+        DECL_SYSCALL(getpid)
+        DECL_SYSCALL(time)
+};
+
 long int do_syscall (struct syscall *sys)
 {
         struct generic_syscall *gsp = (struct generic_syscall *) sys;
-        long ret = -1;
-        switch (sys->syscall_number) {
-                case SYS_getpid:
-                        ret = do_syscall0(gsp);
-                        break;
-                case SYS_exit:
-                        ret = do_syscall1(gsp);
-                        break;
-                case SYS_time:
-                        ret = do_syscall1(gsp);
-                        break;
-                default:
-                        panic();
-        }
+        long ret = syscalls[sys->syscall_number](gsp);
 
         return ret;
 }
