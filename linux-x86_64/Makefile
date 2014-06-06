@@ -39,10 +39,10 @@ test-programs/hello-dynamic: test-programs/hello.c
 # NOW we are bound to take a breakpoint before any *more* executable mappings are created.
 # So we are a robust gatekeeper.
 
-trap-syscalls: trap-syscalls.c do_syscall.c restorer.o
+trap-syscalls: trap-syscalls.c do_syscall.c syscall_handlers.c restorer.o
 	$(CC) $(CFLAGS) -DEXECUTABLE -o "$@" $^ $(LDFLAGS) $(LDLIBS)
 
-trap-syscalls.so: trap-syscalls.c do_syscall.c restorer.o
+trap-syscalls.so: trap-syscalls.c do_syscall.c syscall_handlers.c restorer.o
 	$(CC) $(CFLAGS) -fPIC -shared -o "$@" $^ $(LDFLAGS) $(LDLIBS)
 
 test-programs:

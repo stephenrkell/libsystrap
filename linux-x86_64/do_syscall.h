@@ -50,9 +50,4 @@ struct generic_syscall {
  */
 long int do_syscall (struct syscall *sys);
 
-static inline void panic (void)
-{
-        while(1) ;
-}
-
 #endif // __DO_SYSCALL_H__
