@@ -1,12 +1,12 @@
 #include "do_syscall.h"
 #include "syscall_handlers.h"
 
-#define PERFORM_SYSCALL \
+#define PERFORM_SYSCALL             \
           FIX_STACK_ALIGNMENT "   \n\
-          movq %[ret], %%rax      \n\
+          movq %[op], %%rax       \n\
           syscall                 \n\
          "UNFIX_STACK_ALIGNMENT " \n\
-          movq %%rax, %[op]       \n"
+          movq %%rax, %[ret]      \n"
 
 #define SYSCALL_CLOBBER_LIST \
   "%rdi", "%rsi", "%rax", "%rcx", "%rdx", "%r8", "%r9", "%r10", "%r11", \
