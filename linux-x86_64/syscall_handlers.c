@@ -1,5 +1,6 @@
 #include "do_syscall.h"
 #include "syscall_handlers.h"
+#include "raw_syscalls.h"
 
 #define PERFORM_SYSCALL             \
           FIX_STACK_ALIGNMENT "   \n\
@@ -7,20 +8,6 @@
           syscall                 \n\
          "UNFIX_STACK_ALIGNMENT " \n\
           movq %%rax, %[ret]      \n"
-
-#define SYSCALL_CLOBBER_LIST \
-  "%rdi", "%rsi", "%rax", "%rcx", "%rdx", "%r8", "%r9", "%r10", "%r11", \
-  "%xmm0", "%xmm1", "%xmm2", "%xmm3", "%xmm4", "%xmm5", "%xmm6", "%xmm7", "%xmm8", \
-  "%xmm9", "%xmm10", "%xmm11", "%xmm12", "%xmm13", "%xmm14", "%xmm15", \
-  "cc"
-#define FIX_STACK_ALIGNMENT \
-         "movq %%rsp, %%rax\n\
-          andq $0xf, %%rax    # now we have either 8 or 0 in rax \n\
-          subq %%rax, %%rsp   # fix the stack pointer \n\
-          movq %%rax, %%r12   # save the amount we fixed it up by in r12 \n\
-          "
-#define UNFIX_STACK_ALIGNMENT \
-        "addq %%r12, %%rsp\n"
 
 /*
  * The x86-64 syscall argument passing convention goes like this:
@@ -32,10 +19,10 @@
  * R8:  ARG4
  * R9:  ARG5
  */
-
 long int __attribute__((noinline)) do_syscall0 (struct generic_syscall *gsp)
 {
         long int ret;
+
         __asm__ volatile (PERFORM_SYSCALL
           : [ret] "=r" (ret)
           : [op]  "rm" ((long int) gsp->syscall_number)
@@ -47,6 +34,13 @@ long int __attribute__((noinline)) do_syscall0 (struct generic_syscall *gsp)
 long int __attribute__((noinline)) do_syscall1 (struct generic_syscall *gsp)
 {
         long int ret;
+
+#ifdef DUMP_SYSCALLS
+        write_string("Passing arguments:              ");
+        raw_write(2, fmt_hex_num(gsp->arg0), 18);
+        write_string("\n");
+#endif
+
         __asm__ volatile ("movq %[arg0], %%rdi \n"
                            PERFORM_SYSCALL
           : [ret]  "=r" (ret)
@@ -114,7 +108,8 @@ static long int do_time (struct generic_syscall *gsp)
         return ret;
 }
 
-syscall syscalls[SYSCALL_MAX] = {
+
+long int (*syscalls[SYSCALL_MAX])(struct generic_syscall *) = {
         DECL_SYSCALL(exit)
         DECL_SYSCALL(getpid)
         DECL_SYSCALL(time)

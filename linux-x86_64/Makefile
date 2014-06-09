@@ -14,12 +14,15 @@
 #
 # Problem with breakpointing: self-modifying code (JIT),
 
+SRC = trap-syscalls.c do_syscall.c syscall_handlers.c raw_syscalls.c
+
 WFLAGS = -Wall 								\
 	 -Wextra 							\
 	 -Wno-unused-label 						\
 	 -Wno-unused-function 						\
 	 -Wno-unused-parameter 						\
-	 -Wno-unused-variable
+	 -Wno-unused-variable						\
+	 -Wno-comment
 OFLAGS = -O0 # XXX At this moment, any optimization breaks the code.
 CFLAGS += $(WFLAGS) $(OFLAGS) -g
 
@@ -27,10 +30,10 @@ all: trap-syscalls.so
 
 default: test trap-syscalls trap-syscalls.so
 
-test-programs/hello-static: test-programs/hello.c
+test-programs/hello-static: test-src/hello.c
 	$(CC) -static -o "$@" $(CFLAGS) "$<" $(LDFLAGS) $(LDLIBS)
 
-test-programs/hello-dynamic: test-programs/hello.c
+test-programs/hello-dynamic: test-src/hello.c
 	$(CC) -o "$@" $(CFLAGS) "$<" $(LDFLAGS) $(LDLIBS)
 
 # Turn off write permission on all executable pages. (HARD to do atomically)
@@ -39,10 +42,10 @@ test-programs/hello-dynamic: test-programs/hello.c
 # NOW we are bound to take a breakpoint before any *more* executable mappings are created.
 # So we are a robust gatekeeper.
 
-trap-syscalls: trap-syscalls.c do_syscall.c syscall_handlers.c restorer.o
+trap-syscalls: $(SRC) restorer.o
 	$(CC) $(CFLAGS) -DEXECUTABLE -o "$@" $^ $(LDFLAGS) $(LDLIBS)
 
-trap-syscalls.so: trap-syscalls.c do_syscall.c syscall_handlers.c restorer.o
+trap-syscalls.so: $(SRC) restorer.o
 	$(CC) $(CFLAGS) -fPIC -shared -o "$@" $^ $(LDFLAGS) $(LDLIBS)
 
 test-programs:

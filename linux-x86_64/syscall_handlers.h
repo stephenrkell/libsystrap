@@ -3,8 +3,7 @@
 
 #define SYSCALL_MAX 543
 #define DECL_SYSCALL(x) [SYS_ ## x ] = do_ ## x ,
-typedef long int (*syscall)(struct generic_syscall *);
 
-extern syscall syscalls[SYSCALL_MAX];
+extern long int (*syscalls[SYSCALL_MAX])(struct generic_syscall *);
 
 #endif // __SYSCALL_HANDLERS_H__
