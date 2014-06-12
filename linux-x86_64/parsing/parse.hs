@@ -42,7 +42,7 @@ line = do gt <- parseGentype
                 _        -> do args <- between (char '(') (char ')') parseArgs
                                return $ Sys gt name args
 
-parseArgs = sepBy parseArg (string ",\n")
+parseArgs = sepBy parseArg (try (string ",\n") <|> try (string ","))
 
 parseArg = do my_mut  <- parseMutable
               spaces
@@ -67,3 +67,6 @@ parseMutable = liftM choose $ option "simple" (try (string "mut")
                                         "const"  -> Const
 
 parseFile = parse file "(unknown)"
+text="AUTO sys_gettid(void);\nAUTO sys_time(mut time_t __user *tloc);\nAUTO sys_stime(const time_t __user *tptr);\nAUTO sys_gettimeofday(mut struct timeval __user *tv,\nmut struct timezone __user *tz);"
+
+Right parsed = parseFile text
