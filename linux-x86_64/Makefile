@@ -51,6 +51,10 @@ trap-syscalls.so: $(SRC) restorer.o
 test-programs:
 	mkdir -p test-programs
 
+test-programs/%: test-src/%.c test-programs
+	$(CC) -Wl,--export-dynamic -o $@ -nostartfiles -nostdlib -Bdynamic $< \
+		/lib64/ld-linux-x86-64.so.2
+
 test-programs/%: test-src/%.s test-programs
 	$(CC) -Wl,--export-dynamic -o $@ -nostartfiles -nostdlib -Bdynamic $< \
 		/lib64/ld-linux-x86-64.so.2

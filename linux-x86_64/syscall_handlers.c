@@ -51,6 +51,23 @@ long int __attribute__((noinline)) do_syscall1 (struct generic_syscall *gsp)
         return ret;
 }
 
+long int __attribute__((noinline)) do_syscall3 (struct generic_syscall *gsp)
+{
+        long int ret;
+        __asm__ volatile ("movq %[arg0], %%rdi \n\
+                           movq %[arg1], %%rsi \n\
+                           movq %[arg2], %%rdx \n"
+                           PERFORM_SYSCALL
+          : [ret]  "=r" (ret)
+          : [op]   "rm" ((long int) gsp->syscall_number)
+          , [arg0] "rm" ((long int) gsp->arg0)
+          , [arg1] "rm" ((long int) gsp->arg1)
+          , [arg2] "rm" ((long int) gsp->arg2)
+          : "r12", SYSCALL_CLOBBER_LIST);
+
+        return ret;
+}
+
 /*
  * Here comes do_syscallN for N <- [2..5]
  */
@@ -108,9 +125,24 @@ static long int do_time (struct generic_syscall *gsp)
         return ret;
 }
 
+static long int do_write (struct generic_syscall *gsp)
+{
+        return do_syscall3(gsp);
+}
+
+static long int do_read (struct generic_syscall *gsp)
+{
+        /*
+         * XXX What we should really do here is remap the buffer via
+         * malloc(), but we don’t have a malloc yet.
+         */
+        return do_syscall3(gsp);
+}
 
 long int (*syscalls[SYSCALL_MAX])(struct generic_syscall *) = {
-        DECL_SYSCALL(exit)
+        DECL_SYSCALL(read)
+        DECL_SYSCALL(write)
         DECL_SYSCALL(getpid)
+        DECL_SYSCALL(exit)
         DECL_SYSCALL(time)
 };

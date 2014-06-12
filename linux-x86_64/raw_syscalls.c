@@ -71,8 +71,6 @@ int __attribute__((noinline)) raw_read(int fd, void *buf, size_t count)
 	return ret;
 }
 
-ssize_t __attribute__((noinline)) raw_write(int fd, const void *buf, size_t count);
-
 int __attribute__((noinline)) raw_close(int fd)
 {
 	long int ret;
@@ -134,6 +132,7 @@ void assert_fail(const char *msg)
 	raw_write(2, msg, msg_end - msg - 1);
 	raw_exit(128 + /* SIGABRT */ 6);
 }
+
 ssize_t __attribute__((noinline)) raw_write(int fd, const void *buf, size_t count)
 {
 	long int ret;

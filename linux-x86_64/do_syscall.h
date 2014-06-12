@@ -1,8 +1,14 @@
 #ifndef __DO_SYSCALL_H__
 #define __DO_SYSCALL_H__
 
-#include <sys/syscall.h>
+// #include <sys/syscall.h>
+#include <unistd.h> /* For some of the types. */
 
+/*
+ * This is quite a bad workaround. Importing the proper headers creates
+ * bad namespace collisions though. Not given much thought to how to
+ * solve this yet.
+ */
 typedef long time_t;
 
 #define __user
@@ -17,6 +23,18 @@ typedef long time_t;
  * These should be, ultimately, mostly auto-generated from the syscall
  * headers file, BSD-style.
  */
+struct sys_read_args {
+        PADDED(int fd)
+        PADDED(void *buf)
+        PADDED(size_t count)
+};
+struct sys_write_args {
+        PADDED(int fd)
+        PADDED(const void *buf)
+        PADDED(size_t count)
+};
+struct sys_getpid_args {
+};
 struct sys_exit_args {
         PADDED(int status)
 };
@@ -32,6 +50,8 @@ struct sys_time_args {
 struct syscall {
         PADDED(int syscall_number)
         union {
+                struct sys_write_args sys_write_args;
+                struct sys_getpid_args sys_getpid_args;
                 struct sys_exit_args sys_exit_args;
                 struct sys_time_args sys_time_args;
         } syscall_args;
