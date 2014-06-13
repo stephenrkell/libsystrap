@@ -44,7 +44,8 @@ line = do gt <- parseGentype
 
 parseArgs = sepBy parseArg (try (string ",\n") <|> try (string ","))
 
-parseArg = do my_mut  <- parseMutable
+parseArg = do spaces
+              my_mut  <- parseMutable
               spaces
               my_type <- liftM (intercalate " ") $
                                 many1 $ try $ c_symbol >>=
