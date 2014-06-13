@@ -16,6 +16,7 @@ typedef long time_t;
 #define PADDED(x) x; long : 0;
 
 #define DUMP_SYSCALLS
+#define DEBUG_REMAP
 
 /*
  * Syscall arguments structures

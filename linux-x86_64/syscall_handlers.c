@@ -1,3 +1,6 @@
+#include <string.h>
+#include <malloc.h>
+
 #include "do_syscall.h"
 #include "syscall_handlers.h"
 #include "raw_syscalls.h"
@@ -8,6 +11,15 @@
           syscall                 \n\
          "UNFIX_STACK_ALIGNMENT " \n\
           movq %%rax, %[ret]      \n"
+
+#define REPLACE_ARGN(n_arg, count)                                      \
+        long int arg ## n_arg = gsp->arg ## n_arg ;                     \
+        gsp->arg ## n_arg =                                             \
+                (long int) lock_memory(arg ## n_arg , (count), 0);
+
+#define RESTORE_ARGN(n_arg, count)                                      \
+        free_memory(gsp->arg ## n_arg, arg ## n_arg, (count));          \
+        gsp->arg ## n_arg = arg ## n_arg;
 
 /*
  * The x86-64 syscall argument passing convention goes like this:
@@ -94,6 +106,55 @@ long int __attribute__((noinline)) do_syscall6 (struct generic_syscall *gsp)
 
         return ret;
 }
+
+static void *lock_memory(long int addr, size_t count, int copy)
+{
+        void *ptr = (void *) addr;
+        if (!ptr) {
+                return NULL;
+        }
+#ifdef DEBUG_REMAP
+        {
+                void *ret = malloc(count);
+                if (copy) {
+                        memcpy(ret, ptr, count);
+                } else {
+                        memset(ret, 0, count);
+                }
+#ifdef DUMP_SYSCALLS
+                write_string("    Replacing guest address: ");
+                raw_write(2, fmt_hex_num(addr), 18);
+                write_string("\n");
+                write_string("    with host address:       ");
+                raw_write(2, fmt_hex_num((long int) ret), 18);
+                write_string("\n");
+#endif // DUMP_SYSCALLS
+
+
+                return ret;
+        }
+#else
+        return ptr;
+#endif
+}
+
+static void free_memory(long int host_addr, long int guest_addr, size_t count)
+{
+        void *host_ptr = (void *) host_addr;
+        void *guest_ptr = (void *) guest_addr;
+#ifdef DEBUG_REMAP
+        if (!host_ptr) {
+                return;
+        } else if (host_ptr == guest_ptr) {
+                return;
+        } else if (count > 0) {
+                memcpy(guest_ptr, host_ptr, count);
+        }
+
+        free(host_ptr);
+#endif
+}
+
 static long int do_exit (struct generic_syscall *gsp)
 {
         return do_syscall1(gsp);
@@ -107,21 +168,13 @@ static long int do_getpid (struct generic_syscall *gsp)
 static long int do_time (struct generic_syscall *gsp)
 {
         long int ret;
-        time_t *old_arg0 = (time_t *) gsp->arg0;
 
-        if (old_arg0) {
-                // Save the address, replace it with own.
-                time_t tmp;
-                gsp->arg0 = (long int) &tmp;
-        }
+        REPLACE_ARGN(0, sizeof(time_t));
 
-       ret = do_syscall1(gsp);
+        ret = do_syscall1(gsp);
 
-        if (old_arg0) {
+        RESTORE_ARGN(0, sizeof(time_t));
 
-                *old_arg0 = (time_t) *((time_t *)gsp->arg0);
-                gsp->arg0 = (long int) old_arg0;
-        }
         return ret;
 }
 
@@ -130,19 +183,24 @@ static long int do_write (struct generic_syscall *gsp)
         return do_syscall3(gsp);
 }
 
+
 static long int do_read (struct generic_syscall *gsp)
 {
-        /*
-         * XXX What we should really do here is remap the buffer via
-         * malloc(), but we don’t have a malloc yet.
-         */
-        return do_syscall3(gsp);
+        long int ret;
+
+        REPLACE_ARGN(1, gsp->arg2);
+
+        ret = do_syscall3(gsp);
+
+        RESTORE_ARGN(1, gsp->arg2);
+
+        return ret;
 }
 
 long int (*syscalls[SYSCALL_MAX])(struct generic_syscall *) = {
         DECL_SYSCALL(read)
-        DECL_SYSCALL(write)
-        DECL_SYSCALL(getpid)
-        DECL_SYSCALL(exit)
-        DECL_SYSCALL(time)
+                DECL_SYSCALL(write)
+                DECL_SYSCALL(getpid)
+                DECL_SYSCALL(exit)
+                DECL_SYSCALL(time)
 };

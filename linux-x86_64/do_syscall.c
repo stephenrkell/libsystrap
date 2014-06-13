@@ -17,7 +17,7 @@ long int do_syscall (struct syscall *sys)
         long int ret = syscalls[sys->syscall_number](gsp);
 
 #ifdef DUMP_SYSCALLS
-        write_string("Which returned value: ");
+        write_string("Syscall returned value: ");
         raw_write(2, fmt_hex_num(ret), 18);
         write_string("\n");
 #endif
