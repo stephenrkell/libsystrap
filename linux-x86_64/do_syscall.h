@@ -3,6 +3,7 @@
 
 // #include <sys/syscall.h>
 #include <unistd.h> /* For some of the types. */
+#include <asm/types.h>
 
 /*
  * This is quite a bad workaround. Importing the proper headers creates
@@ -34,6 +35,11 @@ struct sys_write_args {
         PADDED(const void *buf)
         PADDED(size_t count)
 };
+struct sys_open_args {
+        PADDED(const char __user* filename)
+        PADDED(int flags)
+        PADDED(umode_t mode)
+};
 struct sys_getpid_args {
 };
 struct sys_exit_args {
@@ -51,7 +57,9 @@ struct sys_time_args {
 struct syscall {
         PADDED(int syscall_number)
         union {
+                struct sys_read_args sys_read_args;
                 struct sys_write_args sys_write_args;
+                struct sys_open_args sys_open_args;
                 struct sys_getpid_args sys_getpid_args;
                 struct sys_exit_args sys_exit_args;
                 struct sys_time_args sys_time_args;

@@ -196,11 +196,18 @@ static long int do_read (struct generic_syscall *gsp)
 
         return ret;
 }
+static long int do_open (struct generic_syscall *gsp)
+{
+        long int ret;
+        ret = do_syscall3(gsp);
+        return ret;
+}
 
 long int (*syscalls[SYSCALL_MAX])(struct generic_syscall *) = {
         DECL_SYSCALL(read)
-                DECL_SYSCALL(write)
-                DECL_SYSCALL(getpid)
-                DECL_SYSCALL(exit)
-                DECL_SYSCALL(time)
+        DECL_SYSCALL(write)
+        DECL_SYSCALL(open)
+        DECL_SYSCALL(getpid)
+        DECL_SYSCALL(exit)
+        DECL_SYSCALL(time)
 };
