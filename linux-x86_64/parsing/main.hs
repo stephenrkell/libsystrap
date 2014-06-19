@@ -11,5 +11,5 @@ main = do inh <- openFile "syscalls.h" ReadMode
                                     putStrLn $ genStructFile x
                                     putStrLn "\nsyscalls_handlers.c:"
                                     putStrLn $ genHandlerFile x
-                      Left y  -> putStrLn $ "Could not parse."
+                      Left _  -> putStrLn $ "Could not parse."
           hClose inh

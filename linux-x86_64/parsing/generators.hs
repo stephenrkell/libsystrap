@@ -4,22 +4,20 @@ import Data.List(intercalate)
 
 import Parse
 
+indent :: String
 indent = "        "
 
 genArgStruct :: Sys -> [Char]
-genArgStruct sys =
-        "struct sys_" ++ (sys_name sys) ++ "_args {\n"
-                ++ (intercalate "\n" $ map genPaddedArg (args sys))
-        ++ "\n};"
-        where genPaddedArg :: Argument -> [Char]
-              genPaddedArg a = indent ++ "PADDED("
-                      ++ (from_mut $ mut a)
-                      ++ argtype a ++ " "
-                      ++ argname a
+genArgStruct sys = "struct sys_"
+                ++ (sys_name sys)
+                ++ "_args {\n"
+                ++ (intercalate "\n" $ map genPaddedArg (arguments sys))
+                ++ "\n};"
+        where genPaddedArg a = indent ++ "PADDED("
+                      ++ arg_type a
+                      ++ " "
+                      ++ arg_name a
                       ++ ")"
-                      where from_mut m = case m of
-                              Const -> "const "
-                              _     -> ""
 
 genBigStruct :: [Sys] -> [Char]
 genBigStruct ss =
@@ -28,52 +26,50 @@ genBigStruct ss =
              ++ indent ++ "union {\n"
                      ++ (intercalate "\n" $ map declArg ss)
              ++ "\n" ++ indent ++ "} syscall_args;\n};"
-        where declArg (Sys _ n _) = indent ++ indent ++ "struct sys_" ++ n ++ "_args "
-                                        ++ "sys_" ++ n ++ "args;"
+        where declArg (Sys n _) = indent ++ indent
+                               ++ "struct sys_" ++ n ++ "_args "
+                               ++ "sys_" ++ n ++ "args;"
 
 genStructFile :: [Sys] -> [Char]
 genStructFile ss = (intercalate "\n" $ map genArgStruct ss) ++ "\n\n" ++ genBigStruct ss
 
 -- XXX At this time, this does nothing and is a bit stupid.
 genHandler :: Sys -> [Char]
-genHandler (Sys gt n as) = case gt of
-        None -> ""
-        Stub -> "/*\n"
-             ++ " * TODO: This handler is a stub and should be edited manually.\n"
-             ++ " */\n" ++ genHandler (Sys Auto n as)
-        Auto -> header ++ "\n" ++ struct_shape ++ "\n{\n" ++ body ++ "\n}"
-        where len = length as
-              header = "static long int do_" ++ n ++ " (struct generic_syscall *gsp)"
-              struct_shape =
-                        "/*\n * struct sys_" ++ n ++ "_args {\n * "
-                                ++ (intercalate ";\n * " $ map genArg as)
-                        ++ ";\n * };\n */"
-              genArg a = indent ++ (from_mut $ mut a)
-                      ++ argtype a ++ " " ++ argname a
-                      where from_mut m = case m of
-                              Const -> "const "
-                              Mut   -> "mut "
-                              _     -> ""
-              body   = indent ++ intercalate ("\n" ++ indent) (
-                                ["long int ret;"]
-                             ++ save_args as 0
-                             ++ ["ret = do_syscall" ++ (show len) ++ "(gsp);"]
-                             ++ restore_args as 0
-                             ++ ["return ret;"])
-              save_args [] _ = []
-              save_args (x:xs) num = case (mut x) of
-                Mut -> ("REPLACE_ARGN("
+genHandler s = case sys_name s of
+        -- Leave the possibility of special generation according to the name.
+        _ -> intercalate "\n" [header, struct_shape, "\n{", body, "}"]
+        where len = length (arguments s)
+              header       = "static long int do_"
+                          ++ sys_name s
+                          ++ " (struct generic_syscall *gsp)"
+              struct_shape = "/*\n * struct sys_"
+                          ++ sys_name s
+                          ++ "_args {\n * "
+                          ++ intercalate ";\n * " (map genArg (arguments s))
+                          ++ ";\n * };\n */"
+              genArg a     = indent ++ arg_type a ++ " " ++ arg_name a
+              body         = indent ++ intercalate ("\n" ++ indent) (
+                                   ["long int ret;"]
+                                ++ save_args (arguments s) 0
+                                ++ ["ret = do_syscall"
+                                 ++ (show len)
+                                 ++ "(gsp);"]
+                                ++ restore_args (arguments s) 0
+                                ++ ["return ret;"])
+              save_args [] _       = []
+              save_args (a:as) num = case (arg_space a) of
+                User -> ("REPLACE_ARGN("
                                 ++ show num
                                 ++ ", 0 /* XXX length */);")
-                        : save_args xs (num + 1)
-                _   -> save_args xs (num + 1)
+                        : save_args as (num + 1)
+                _    -> save_args as (num + 1)
               restore_args [] _ = []
-              restore_args (x:xs) num = case (mut x) of
-                Mut -> ("RESTORE_ARGN("
+              restore_args (a:as) num = case (arg_space a) of
+                User -> ("RESTORE_ARGN("
                         ++ show num
                         ++ ", 0 /* XXX length */);")
-                        :restore_args xs (num + 1)
-                _   -> restore_args xs (num + 1)
+                        :restore_args as (num + 1)
+                _   -> restore_args as (num + 1)
 
 
 genTab :: [Sys] -> [Char]
