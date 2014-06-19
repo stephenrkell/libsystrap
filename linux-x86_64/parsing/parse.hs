@@ -1,10 +1,13 @@
 {-# LANGUAGE NoMonomorphismRestriction #-}
 
-module Parse where
+module Parse(parseFile
+            ,Sys(..)
+            ,Argument(..)
+            ,Space(..)
+            ) where
 
 import Text.ParserCombinators.Parsec
-import Control.Monad(liftM)
-import Data.List(intercalate, delete)
+import Data.List(intercalate)
 import Data.Maybe(catMaybes)
 
 -- We mean to parse a syscall header with the general form
@@ -30,58 +33,116 @@ import Data.Maybe(catMaybes)
 --           - its type with type modifiers (not including __user)
 --           - whether it belongs to userspace
 
+-- An argument to a syscall can be tagged __user, in which case it means
+-- the memory belongs to userspace and is potentially modified. We want
+-- to keep track of those.
+--
 data Space = User | Copy deriving (Show)
 
-data Argument = Argument {sp      :: Space
-                         ,argtype :: String
-                         ,argname :: String
+data Argument = Argument {arg_space :: Space
+                         ,arg_type  :: String
+                         ,arg_name  :: String
                          } deriving (Show)
 
-data Sys = Sys {sys_name :: String
-               ,args     :: [Argument]
+data Sys = Sys {sys_name  :: String
+               ,arguments :: [Argument]
                } deriving (Show)
 
 -- XXX Obviously this accepts invalid C symbols, but fixing it is low priority.
 c_symbol = many1 $ try alphaNum <|> char '_'
-spaces1  = many1 space
 
--- file = endBy line (try (string ";\n") <|> try (string ";"))
-file = do maybe_syscalls <- endBy blabla (char '\n')
+c_type = (try $ do struct      <- string "struct"
+                   spaces
+                   struct_name <- c_symbol
+                   return $ struct ++ " " ++ struct_name)
+     <|> (try c_symbol)
+
+c_modifier = (try $ string "signed")
+         <|> (try $ string "unsigned")
+         <|> (try $ string "const")
+         <|> (try $ string "volatile")
+         <|> (try $ string "auto")
+         <|> (try $ string "register")
+         <|> (try $ string "static")
+         <|> (try $ string "extern")
+
+
+file = do maybe_syscalls <- sepBy line (char '\n')
           return $ catMaybes maybe_syscalls
-        where blabla = do ret <- (try $ do l <- line; return $ Just l) <|> (try $ do many $ noneOf "\n"; return Nothing); return ret
+        where line = (try $ header     >>= return . Just)
+                 <|> (try $ ignoreline >>  return Nothing)
+              ignoreline = many $ noneOf "\n"
 
-line = do spaces
-          string "asmlinkage long sys_"
-          name <- c_symbol
-          spaces
-          void <- option [] $ try $ string "(void)"
-          ret <- case void of
-                "(void)" -> return $ Sys name []
-                _        -> do args <- between (char '(') (char ')') parseArgs
-                               return $ Sys name args
-          char ';'
-          return ret
+header = do spaces
+            _    <- string "asmlinkage long sys_"
+            name <- c_symbol
+            spaces
+            void <- option [] $ try $ string "(void)"
+            ret  <- case void of
+                   "(void)" -> return $ Sys name []
+                   _        -> do args <- between
+                                         (char '(') (char ')') parseArgs
+                                  return $ Sys name args
+            _ <- string ";"
+            return ret
+        where parseArgs = sepBy parseArg sepArg
+              sepArg = (try (string ",\n") <|> try (string ","))
 
 
-parseArgs = sepBy parseArg sepArg
-        where sepArg   = (try (string ",\n") <|> try (string ","))
+-- The description of an argument can take various forms. In the absence
+-- of knowledge about the types, we must be clever if we want to parse
+-- them correctly.
 
-parseArg = do spaces
-              types <- many1 $ try c_symbol_space
-              star  <- (try $ string "*") <|> string ""
-              argname  <- c_symbol
-              argspace <- return $ if ("__user" `elem` types)
-                                       then User else Copy
-              argtype  <- return $ (intercalate " " (delete "__user" types))
-                                       ++ star
-              return $ Argument argspace argtype argname
-           where  c_symbol_space = do ret <- c_symbol
-                                      spaces1
-                                      return $ ret
+parseArg = (try pointerWithNoName)
+       <|> (try pointerWithName)
+       <|> (try nonPointerWithName)
+       <|> (try nonPointerWithNoName)
 
+pointerWithNoName = do x <- many1 $
+                        do spaces
+                           y     <- endBy c_symbol spaces
+                           star  <- string "*"
+                           return $ y ++ [star]
+                       y    <- return $ concat x
+                       user <- return $ if "__user" `elem` y
+                                                 then User
+                                                 else Copy
+                       argtype <- return $ intercalate " " y
+                       return $ Argument user argtype ""
+
+pointerWithName = do x    <- many1 . try $
+                      do y <- many $ try (spaces >> c_symbol)
+                         spaces
+                         star <- string "*"
+                         return $ y ++ [star]
+                     spaces
+                     argname <- c_symbol
+                     y    <- return $ concat x
+                     user <- return $ if "__user" `elem` y
+                                               then User
+                                               else Copy
+                     argtype <- return $ intercalate " " y
+                     return $ Argument user argtype argname
+
+nonPointerWithNoName = do spaces
+                          modlist <- endBy c_modifier spaces
+                          modifiers <- case modlist of
+                                  [] -> return ""
+                                  _  -> return $ (intercalate " " modlist) ++ " "
+                          argtype <- c_type
+                          return $ Argument Copy
+                                (modifiers ++ argtype) ""
+
+nonPointerWithName = do spaces
+                        modlist <- endBy c_modifier spaces
+                        modifiers <- case modlist of
+                                [] -> return ""
+                                _  -> return $ (intercalate " " modlist) ++ " "
+                        argtype <- c_type
+                        spaces
+                        argname <- c_symbol
+                        return $ Argument Copy
+                              (modifiers ++ argtype) argname
+
+parseFile :: [Char] -> Either ParseError [Sys]
 parseFile = parse file "(unknown)"
-text="asmlinkage long sys_gettid(void);\nIGNORE THIS LINE\nasmlinkage long sys_time(mut time_t __user *tloc);\nasmlinkage long sys_stime(const time_t __user *tptr);\nasmlinkage long sys_gettimeofday(mut struct timeval __user *tv,\nmut struct timezone __user *tz);"
-
-parseLine = parse line "(not a line)"
-
-Right parsed = parseFile text
