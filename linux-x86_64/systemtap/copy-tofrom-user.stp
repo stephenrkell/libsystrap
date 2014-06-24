@@ -1,0 +1,87 @@
+/* What functions do we need to trace?
+   We can trace inlined and out-of-line calls, but 
+   we do so separately in each case.
+
+   On Linux/x86_64 these seem to be 
+   (from the relevant uaccess.h header)
+   
+   copy_user_generic  (might be either)
+   copy_to_user       (might be either)
+   copy_from_user     (might be either)
+   copy_in_user       (always inline)
+   __copy_from_user   (always inline)
+   __copy_to_user     (always inline)
+
+      and NOTE that copy_to_user and copy_from_user call copy_user_generic
+      for non-statically-known sizes and sizes outside {1,2,4,8,10,16}
+      so we risk double reporting... unless inlining will completely erase the outer call?
+
+   __strncpy_from_user (might be either)
+   __strncpy_from_user (might be either)
+   strnlen_user        (might be either)
+   __strnlen_user      (might be either)
+   strlen_user         (might be either)
+
+   clear_user        (might be either)
+   __clear_user      (might be either)
+
+   __copy_from_user_inatomic         (might be either)
+   __copy_to_user_inatomic           (might be either)
+   __copy_user_nocache               (might be either)
+   __copy_from_user_nocache          (might be either)
+   __copy_from_user_inatomic_nocache (might be either)
+
+
+   FIXME: check that 3.x-series kernels don't depart from this list.
+*/
+
+// let's just deal with the first 6 for now
+
+probe kernel.function("copy_user_generic").inline
+{
+	if (pid() == target()) printf("saw inline copy_user_generic with %s\n", $$parms)
+}
+
+// stap claims this one isn't present, at least on my kernel. -srk
+//probe kernel.function("copy_user_generic").call
+//{
+//	if (pid() == target()) printf("saw out-of-line copy_user_generic of %u bytes from %p to %p\n", $len, $from, $to)
+//}
+
+probe kernel.function("copy_to_user").inline
+{
+	if (pid() == target()) printf("saw inline copy_to_user with %s\n", $$parms)
+}
+
+// stap claims this one isn't present, at least on my kernel. -srk
+// probe kernel.function("copy_to_user").call
+// {
+// 	if (pid() == target()) print ("saw out-of-line copy_to_user with %s\n", $$parms)
+// }
+
+probe kernel.function("copy_from_user").inline
+{
+	if (pid() == target()) printf("saw inline copy_from_user with %s\n", $$parms)
+}
+
+probe kernel.function("copy_from_user").call
+{
+	if (pid() == target()) printf("saw out-of-line copy_from_user with %s\n", $$parms)
+}
+
+// stap claims this one isn't present, at least on my kernel. -srk
+// probe kernel.function("copy_in_user").inline
+// {
+// 	if (pid() == target()) printf("saw inline copy_in_user with %s\n", $$parms)
+// }
+
+probe kernel.function("__copy_from_user").inline
+{
+	if (pid() == target()) printf("saw inline __copy_from_user with %s\n", $$parms)
+}
+
+probe kernel.function("__copy_to_user").inline
+{
+	if (pid() == target()) printf("saw inline __copy_to_user with %s\n", $$parms)
+}
+
