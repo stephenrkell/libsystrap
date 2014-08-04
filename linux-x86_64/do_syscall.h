@@ -4,13 +4,27 @@
 // #include <sys/syscall.h>
 #include <unistd.h> /* For some of the types. */
 #include <asm/types.h>
-
+#include <asm/posix_types.h>
 /*
  * This is quite a bad workaround. Importing the proper headers creates
  * bad namespace collisions though. Not given much thought to how to
  * solve this yet.
+ * 
+ * srk adds: it shouldn't be necessary to include libc headers. Most
+ * of the typedefs (etc) that we need will be in /usr/include/asm,
+ * /usr/include/linux/ and /usr/include/<arch>.
+ * In this case, __kernel_time_t (defined in /usr/include/asm-generic/posix_types.h,
+ * included from /usr/include/x86_64-linux-gnu/asm/posix_types.h)
+ * is the definition to use. Note that man pages (even in section 2) are not
+ * very reliable, since they document the libc wrapper's signature and not
+ * the actual system call.
  */
-typedef long time_t;
+//typedef long time_t;
+
+
+/* srk: a similar hack. In this case it seems unavoidable since on my machine
+ * I can't find a header defining umode_t. */
+typedef unsigned short umode_t;
 
 #define __user
 
@@ -46,7 +60,7 @@ struct sys_exit_args {
         PADDED(int status)
 };
 struct sys_time_args {
-        PADDED(time_t __user *tloc)
+        PADDED(__kernel_time_t __user *tloc)
 };
 
 /*

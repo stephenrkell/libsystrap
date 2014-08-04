@@ -14,21 +14,28 @@
 #
 # Problem with breakpointing: self-modifying code (JIT),
 
-SRC = trap-syscalls.c do_syscall.c syscall_handlers.c raw_syscalls.c
+default: test trap-syscalls trap-syscalls.so
 
-WFLAGS = -Wall 								\
+SRC := trap-syscalls.c do_syscall.c syscall_handlers.c raw_syscalls.c
+DEPS := $(patsubst %.c,.%.d,$(SRC))
+
+$(DEPS): .%.d: %.c
+	$(CC) -MM $(CFLAGS) "$<" > "$@"
+
+-include $(DEPS)
+
+
+WFLAGS := -Wall 								\
 	 -Wextra 							\
 	 -Wno-unused-label 						\
 	 -Wno-unused-function 						\
 	 -Wno-unused-parameter 						\
 	 -Wno-unused-variable						\
 	 -Wno-comment
-OFLAGS = -O0 # XXX At this moment, any optimization breaks the code.
+OFLAGS := -O0 # XXX At this moment, any optimization breaks the code.
 CFLAGS += $(WFLAGS) $(OFLAGS) -g
 
 all: trap-syscalls.so
-
-default: test trap-syscalls trap-syscalls.so
 
 test-programs/hello-static: test-src/hello.c
 	$(CC) -static -o "$@" $(CFLAGS) "$<" $(LDFLAGS) $(LDLIBS)

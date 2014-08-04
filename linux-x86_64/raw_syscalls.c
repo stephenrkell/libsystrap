@@ -34,6 +34,24 @@ int __attribute__((noinline)) raw_open(const char *pathname, int flags)
 	return ret;
 }
 
+int __attribute__((noinline)) raw_fstat(int fd, struct stat *buf)
+{
+	long int ret;
+	long int op = SYS_fstat;
+
+	/* We have to do it all in one big asm statement, since the compiler
+	 * can change what's in registers in between asm statements. */
+	__asm__ volatile ("movq %1, %%rdi      # \n\
+	                   movq %2, %%rsi      # \n\
+	                  "FIX_STACK_ALIGNMENT " \n\
+	                   movq %3, %%rax      # \n\
+	                   syscall             # do the syscall \n\
+	                  "UNFIX_STACK_ALIGNMENT " \n\
+	                   movq %%rax, %0\n"
+	  : "=r"(ret) : "rm"(fd), "rm"(buf), "rm"(op) : "r12", SYSCALL_CLOBBER_LIST);
+	return ret;
+}
+
 int __attribute__((noinline)) raw_nanosleep(struct timespec *req,
 			struct timespec *rem)
 {

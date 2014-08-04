@@ -6,6 +6,7 @@
 #include <asm/sigcontext.h>
 #include <asm/siginfo.h>
 #include <asm/ucontext.h>
+#include <asm-generic/stat.h>
 // #include <ucontext.h>
 #include <sys/syscall.h>
 // #include <sys/types.h>
@@ -45,17 +46,18 @@
 #define write_string(s) raw_write(2, (s), sizeof (s) - 1)
 
 void raw_exit(int status);
-int __attribute__((noinline)) raw_open(const char *pathname, int flags);
-int __attribute__((noinline)) raw_nanosleep(struct timespec *req,
-                struct timespec *rem);
-int __attribute__((noinline)) raw_read(int fd, void *buf, size_t count);
-ssize_t __attribute__((noinline)) raw_write(int fd, const void *buf,
-                size_t count);
-int __attribute__((noinline)) raw_close(int fd);
-int __attribute__((noinline)) raw_mprotect(const void *addr, size_t len,
-                int prot);
-int __attribute__((noinline)) raw_rt_sigaction(int signum, const struct sigaction *act,
-                     struct sigaction *oldact);
+int raw_open(const char *pathname, int flags) __attribute__((noinline));
+int raw_fstat(int fd, struct stat *buf) __attribute__((noinline));
+int raw_nanosleep(struct timespec *req,
+                struct timespec *rem) __attribute__((noinline));
+int raw_read(int fd, void *buf, size_t count) __attribute__((noinline));
+ssize_t raw_write(int fd, const void *buf,
+                size_t count) __attribute__((noinline));
+int raw_close(int fd) __attribute__((noinline));
+int raw_mprotect(const void *addr, size_t len,
+                int prot) __attribute__((noinline));
+int raw_rt_sigaction(int signum, const struct sigaction *act,
+                     struct sigaction *oldact) __attribute__((noinline));
 void assert_fail(const char *msg);
 const char *fmt_hex_num(unsigned long n);
 

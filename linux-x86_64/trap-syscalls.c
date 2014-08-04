@@ -31,6 +31,7 @@
 #include <sys/mman.h>
 #include <stdint.h>
 
+#include "trap-syscalls.h"
 #include "raw_syscalls.h"
 #include "do_syscall.h"
 
@@ -49,7 +50,7 @@ static unsigned long read_hex_num(const char **p_c, const char *end)
 {
 	unsigned long cur = 0;
 	while ((*p_c != end && (**p_c >= '0' && **p_c <= '9'))
-                        || (**p_c >= 'a' && **p_c <= '\f'))
+                        || (**p_c >= 'a' && **p_c <= 'f'))
 	{
 		cur <<= 4;
 		cur += ((**p_c >= '0' && **p_c <= '9') ? **p_c - '0'
@@ -90,7 +91,15 @@ static void saw_mapping(const char *pos, const char *end)
 			int ret = raw_mprotect((const void *) begin_addr,
 				(const char *) end_addr - (const char *) begin_addr,
 				PROT_READ | PROT_WRITE | PROT_EXEC);
-			assert(ret == 0);
+			/* If we failed, it might be on the vdso page. */
+			assert(ret == 0 || (signed long long) begin_addr < 0);
+			if ((signed long long) begin_addr < 0)
+			{
+				write_string("Couldn't rewrite nor protect vdso mapping at ");
+				raw_write(2, fmt_hex_num(begin_addr), 18);
+				write_string("\n");
+				return;
+			}
 		}
 
 		// it's executable; scan for syscall instructions
@@ -138,16 +147,42 @@ static void saw_mapping(const char *pos, const char *end)
 void restore_rt(void); /* in restorer.s */
 static void handle_sigill(int num);
 
+_Bool __write_footprints;
+
 #ifndef EXECUTABLE
+#define RETURN_VALUE
 static void __attribute__((constructor)) startup(void)
 {
 #else
+#define RETURN_VALUE 0
 static void *ignore_ud2_addr;
 // scratch test code
 int main(void)
 {
 #endif
-
+	/* Is fd 7 open? If so, it's the input fd for our sanity check info 
+	 * from systemtap. */
+	struct stat buf;
+	int stat_ret = raw_fstat(7, &buf);
+	if (stat_ret == 0)
+	{
+		write_string("File descriptor 7 is open; outputting systemtap cross-check info\n");
+		
+		/* PROBLEM: ideally we'd read in the stap script's output ourselves, and process
+		 * it at every system call. But by reading in stuff from stap, we're doing more 
+		 * copying to/from userspace, so creating a feedback loop. This loop seems like
+		 * it would blow up.
+		 * 
+		 * Instead we write out what we think we touched, and do a diff outside the process.
+		 * This also adds noise to stap's output, but without the feedback cycle: we ourselves
+		 * won't read the extra output, hence won't write() more stuff in response.
+		 */
+		__write_footprints = 1;
+	}
+	else
+	{
+		write_string("File descriptor 7 is not open; skipping systemtap cross-check info\n");
+	}
 #if !defined(EXECUTABLE) && !defined(NDEBUG)
 	write_string("In debug mode; pausing for five seconds\n");
 	struct timespec tm = { /* seconds */ 5, /* nanoseconds */ 0 };
@@ -157,10 +192,10 @@ int main(void)
 	int fd = raw_open("/proc/self/maps", O_RDONLY);
 	if (fd != -1)
 	{
-		// we use a circular buffer and a read loop
+		// we use a simple buffer and a read loop
 		char buf[8192];
 		unsigned int ret;
-		char *buf_pos = &buf[0];         // the next character to be written
+		char *buf_pos = &buf[0]; // the next position to fill in the buffer
 		char *entry_start_pos = &buf[0]; // the position
 		size_t size_requested;
 		do
@@ -168,23 +203,44 @@ int main(void)
 			// read some stuff, perhaps filling up the buffer
 			size_requested = sizeof buf - (buf_pos - buf);
 			ret = raw_read(fd, buf_pos, size_requested);
-			buf_pos += ret;
-			// if we filled up the buffer, wrap around
-			if (buf_pos == buf + sizeof buf) buf_pos = &buf[0];
-			// do we have a complete entry yet?
-			char *seek_pos = entry_start_pos;
-			do
+			char *buf_limit = buf_pos + ret;
+			
+			// we have zero or more complete entries in the buffer; iterate over them
+			char *seek_pos;
+			while (1)
 			{
-				while (seek_pos != buf_pos && seek_pos != buf + sizeof buf && *seek_pos != '\n')
+				seek_pos = entry_start_pos;
+				// search forward for a newline
+				while (seek_pos != buf_limit && *seek_pos != '\n')
 				{ ++seek_pos; }
-				if (seek_pos == buf_pos) break; // we need to read more
-			} while (seek_pos == buf + sizeof buf);  // wrap around
-
-			if (*seek_pos == '\n')
-			{
+				
+				// did we find one?
+				if (seek_pos == buf_limit)
+				{
+					// no! 
+					// but we have a partial entry in the buffer 
+					// between entry_start_pos and seek_pos; 
+					// copy it to the start, re-set and continue
+					unsigned i;
+					for (i = 0; i < seek_pos - entry_start_pos; ++i)
+					{
+						buf[i] = buf[(entry_start_pos - buf) + i];
+					}
+					buf_pos = &buf[i];
+					entry_start_pos = &buf[0];
+					break;
+				}
+				// else yes
+				// assert(*seek_pos == '\n');
 				// we have a complete entry; read it and advance entry_start_pos
 				saw_mapping(entry_start_pos, seek_pos);
 				entry_start_pos = seek_pos + 1;
+				// if the newline was the last in the buffer, break and read more
+				if (entry_start_pos == buf_pos + sizeof buf) 
+				{ buf_pos = entry_start_pos = &buf[0]; break; }
+				
+				// else we might have another entry; go round again
+				continue;
 			}
 		} while (ret == size_requested);
 		raw_close(fd);
@@ -233,9 +289,9 @@ ud2_addr:
 	// we must also exit without running any libdl exit handlers,
 	// because we're an executable so our csu/startfiles include some cleanup
 	// that will now cause traps (this isn't necessary in the shared library case)
-	DO_EXIT_SYSCALL
+	raw_exit(0);
 #endif
-	return;
+	return RETURN_VALUE;
 }
 
 static void  __attribute__((optimize("O0"))) handle_sigill(int n)

@@ -1,6 +1,7 @@
 #include <string.h>
 #include <malloc.h>
 
+#include "trap-syscalls.h"
 #include "do_syscall.h"
 #include "syscall_handlers.h"
 #include "raw_syscalls.h"
@@ -20,6 +21,14 @@
 #define RESTORE_ARGN(n_arg, count)                                      \
         free_memory(gsp->arg ## n_arg, arg ## n_arg, (count));          \
         gsp->arg ## n_arg = arg ## n_arg;
+
+static void write_footprint(void *base, size_t len)
+{
+	write_string("n=");
+	raw_write(7, fmt_hex_num(len), 18);
+	write_string(" base=");
+	raw_write(7, fmt_hex_num((uintptr_t) base), 18);
+}
 
 /*
  * The x86-64 syscall argument passing convention goes like this:
@@ -113,6 +122,8 @@ static void *lock_memory(long int addr, size_t count, int copy)
         if (!ptr) {
                 return NULL;
         }
+        /* FIXME: am I using the right address here? */
+        if (__write_footprints) write_footprint((void*) addr, count);
 #ifdef DEBUG_REMAP
         {
                 void *ret = malloc(count);
@@ -169,11 +180,11 @@ static long int do_time (struct generic_syscall *gsp)
 {
         long int ret;
 
-        REPLACE_ARGN(0, sizeof(time_t));
+        REPLACE_ARGN(0, sizeof(__kernel_time_t));
 
         ret = do_syscall1(gsp);
 
-        RESTORE_ARGN(0, sizeof(time_t));
+        RESTORE_ARGN(0, sizeof(__kernel_time_t));
 
         return ret;
 }
