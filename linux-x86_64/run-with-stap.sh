@@ -21,15 +21,22 @@ pipename=/tmp/stap-sync-$$
 mkfifo "$pipename"
 
 stap_filter () {
-	while read line; do
-		case "$line" in
-			(saw*)
-				echo "$line" | sed -r 's/.* with (n|sz|size|len|length)=\((0x)?[0-9a-f]*\) *(src|source)=\((0x)?[0-9a-f]*\) *(dst|dest)=\((0x)?[0-9a-f]*\)/len=\1 src=\2 dest=\3/'
-			;;
-			(*) echo "$line"
-			;;
-		esac
-	done
+    while read line; do
+        case "$line" in
+            (saw*)
+                echo -n "$line" | sed -r 's/.* with *//' | \
+                sed -r 's/ *([a-zA-Z0-9_]*=)/\n\1/g' | \
+                sed -r 's/(n|sz|size|len|length)=((0x)?[0-9a-f\?]*)/n=\2/' | \
+                sed -r 's/(src|source|from)=((0x)?[0-9a-f\?]*)/src=\2/' | \
+                sed -r 's/(dst|dest|to)=((0x)?[0-9a-f\?]*)/dst=\2/' | \
+                sed '/^$/ d' | \
+                sort -t= -k1 | tr '\n' ' '
+                echo # for the newline
+            ;;
+            (*) echo "$line"
+            ;;
+        esac
+    done
 }
 
 # start the process -- our footprint summary goes to fd 7
