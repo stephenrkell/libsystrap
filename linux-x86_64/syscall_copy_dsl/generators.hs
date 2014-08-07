@@ -38,7 +38,7 @@ copyArg arg = case (pointer (snd arg), struct (snd arg)) of
         (True, True)  -> intercalate "\n" $ filter (/= "") [make_copy arg,
                           copy_struct_if_needed (snd arg)]
         (True, False) -> if is_char_pointer
-                                then copy_string (snd arg)
+                                then copy_string (fst arg)
                                 else make_copy arg
         (_,_)         -> []
         where make_copy a = "copy_buf(syscall_arg[" ++ (show $ fst a) ++ "]"
@@ -47,7 +47,7 @@ copyArg arg = case (pointer (snd arg), struct (snd arg)) of
                                 $ getSimpleType $ arg_type (snd a)) ++ "));"
                                 ++ " // " ++ (arg_name $ snd a)
               is_char_pointer = "char" `elem` (arg_type (snd arg))
-              copy_string a = "unsafe_copy_zts(" ++ arg_name a ++ ");"
+              copy_string n = "unsafe_copy_zts(syscall_arg[" ++ show n ++ "]);"
               copy_struct_if_needed a =
                 let (_:xs) = dropWhile (/=' ') $ head $ getSimpleType $ arg_type a
                     struct_name = xs
@@ -55,7 +55,7 @@ copyArg arg = case (pointer (snd arg), struct (snd arg)) of
                    then "rec_copy_struct(" ++ arg_name a ++ ");"
                    else if struct_name `elem` no_recursive_copy_structs
                         then ""
-                        else "undefined semantics for struct " ++ arg_name a
+                        else "undefined semantics for struct " ++ struct_name
 
 genSwitch :: [Sys] -> [Char]
 genSwitch ss = (intercalate "\n" $

@@ -1,10 +1,87 @@
-
 We assume that the arguments of syscall_arg are 64-bit aligned.
 
+modifications from the default behaviour of the generator
+=========================================================
 
+SYS_getgroups: need to adjust number of bytes copied.
+SYS_setgroups: need to adjust number of bytes copied.
+SYS_reboot is a fairly complicated one.
+SYS_kexec_load: need to adjust number of bytes copied.
+SYS_statfs64: no manpage, semantics of param sz unknown.
+SYS_fstatfs64: no manpage, semantics of param sz unknown.
+SYS_setxattr: copy_buf(syscall_arg[3], sizeof(void))
+                -> copy_buf(syscall_arg[3], syscall_arg[4])
+SYS_lsetxattr: copy_buf(syscall_arg[3], sizeof(void))
+                -> copy_buf(syscall_arg[3], syscall_arg[4])
+SYS_fsetxattr: copy_buf(syscall_arg[3], sizeof(void))
+                -> copy_buf(syscall_arg[3], syscall_arg[4])
+SYS_getxattr: copy_buf(syscall_arg[3], sizeof(void))
+                -> copy_buf(syscall_arg[3], syscall_arg[4])
+SYS_lgetxattr: copy_buf(syscall_arg[3], sizeof(void))
+                -> copy_buf(syscall_arg[3], syscall_arg[4])
+SYS_fgetxattr: copy_buf(syscall_arg[3], sizeof(void))
+                -> copy_buf(syscall_arg[3], syscall_arg[4])
+SYS_listxattr: unsafe_copy_zts(syscall_arg[2])
+                -> copy_buf(syscall_arg[2], syscall_arg[3])
+SYS_llistxattr: unsafe_copy_zts(syscall_arg[2])
+                -> copy_buf(syscall_arg[2], syscall_arg[3])
+SYS_flistxattr: unsafe_copy_zts(syscall_arg[2])
+                -> copy_buf(syscall_arg[2], syscall_arg[3])
+SYS_mincore: weird weird weird
+  From man 2 mincore:
+  "The  vec  argument must point to an array containing at least
+    (length+PAGE_SIZE-1) / PAGE_SIZE bytes. On return, the least
+    significant bit of each byte will be set if the corresponding
+    page is currently resident in memory, and be clear otherwise."
+SYS_pipe: copy_buf(syscall_arg[1], sizeof(int))
+           -> copy_buf(syscall_arg[1], 2 * sizeof(int))
+SYS_pipe2: copy_buf(syscall_arg[1], sizeof(int))
+           -> copy_buf(syscall_arg[1], 2 * sizeof(int))
+SYS_io_setup: complicated.
+SYS_io_getevents: complicated.
+SYS_sendfile:
+    switch (syscall_arg[3]) {
+      case 0: break;
+      default: copy_buf(syscall_arg[3], sizeof(syscall_arg[4])); // offset
+               break;
+    }
+SYS_sendfile64: no manpage
+SYS_readlink: unsafe_copy_zts(syscall_arg[2])
+               -> copy_buf(syscall_arg[2], syscall_arg[3])
+SYS_getgroups16: no manpage
+SYS_setgroups16: no manpage
+SYS_readv: complicated
+SYS_write: unsafe_copy_zts(syscall_arg[2])
+            -> copy_buf(syscall_arg[2], syscall_arg[3])
+SYS_writev: complicated
+  copy_buf(syscall_arg[2], sizeof(struct iovec))
+  -> copy_buf(syscall_arg[2], syscall_arg[3] * sizeof(struct iovec));
+SYS_pread64: no manpage
+SYS_pwrite64: no manpage
+SYS_preadv: copy_buf(syscall_arg[2], sizeof(struct iovec))
+            -> copy_buf(syscall_arg[2], syscall_arg[3] * sizeof(struct iovec))
+SYS_pwritev: copy_buf(syscall_arg[2], sizeof(struct iovec))
+            -> copy_buf(syscall_arg[2], syscall_arg[3] * sizeof(struct iovec))
+case SYS_getcwd: unsafe_copy_zts(syscall_arg[1])
+                -> copy_buf(syscall_arg[1], syscall_arg[2])
+SYS_lookup_dcookie: unsafe_copy_zts(syscall_arg[2])
+                    -> copy_buf(syscall_arg[2], syscall_arg[3])
+SYS_quotactl: weird weird weird
+SYS_getdents: copy_buf(syscall_arg[2], sizeof(struct linux_dirent))
+              -> copy_buf(syscall_arg[2], syscall_arg[2])
+SYS_getdents64: no manpage
+SYS_setsockopt: unsafe_copy_zts(syscall_arg[4])
+                -> copy_buf(syscall_arg[4], syscall_arg[5])
+SYS_getsockopt: unsafe_copy_zts(syscall_arg[4])
+                -> copy_buf(syscall_arg[4], ((int *) syscall_arg[5])[1])
+SYS_bind: copy_buf(syscall_arg[2], sizeof(struct sockaddr))
+          -> copy_buf(syscall_arg[2], syscall_arg[3])
+SYS_connect: copy_buf(syscall_arg[2], sizeof(struct sockaddr))
+          -> copy_buf(syscall_arg[2], syscall_arg[3])
+SYS_accept: deal with null case
 
-types used by syscalls
-======================
+types used by syscalls (uncomplete)
+===================================
 
 __s32
 __sighandler_t
