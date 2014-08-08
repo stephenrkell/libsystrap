@@ -78,7 +78,82 @@ SYS_bind: copy_buf(syscall_arg[2], sizeof(struct sockaddr))
           -> copy_buf(syscall_arg[2], syscall_arg[3])
 SYS_connect: copy_buf(syscall_arg[2], sizeof(struct sockaddr))
           -> copy_buf(syscall_arg[2], syscall_arg[3])
-SYS_accept: deal with null case
+SYS_accept:
+    switch(syscall_arg[2]) {
+            case 0: break;
+            default: copy_buf(syscall_arg[2], syscall_arg[3][1])
+                     copy_buf(syscall_arg[3], sizeof(int))
+                     break;
+    }
+SYS_accept4:
+    switch(syscall_arg[2]) {
+            case 0: break;
+            default: copy_buf(syscall_arg[2], syscall_arg[3][1])
+                     copy_buf(syscall_arg[3], sizeof(int))
+                     break;
+    }
+SYS_getsockname: copy_buf(syscall_arg[2], sizeof(struct sockaddr))
+                -> copy_buf(syscall_arg[2], syscall_arg[3][1])
+SYS_getpeername: copy_buf(syscall_arg[2], sizeof(struct sockaddr))
+                -> copy_buf(syscall_arg[2], syscall_arg[3][1])
+SYS_sendmmsg: copy_buf(syscall_arg[2], sizeof(struct mmsghdr))
+                -> copy_buf(syscall_arg[2], syscall_arg[3] * sizeof(struct mmsghdr))
+SYS_recvmmsg:  copy_buf(syscall_arg[2], sizeof(struct mmsghdr))
+                -> copy_buf(syscall_arg[2], syscall_arg[3] * sizeof(struct mmsghdr))
+SYS_socketpair: copy_buf(syscall_arg[4], sizeof(int))
+                 -> copy_buf(syscall_arg[4], 2 * sizeof(int))
+SYS_socketcall: ??? unclear what the size of arg4 is.
+SYS_poll: copy_buf(syscall_arg[1], sizeof(struct pollfd))
+        -> copy_buf(syscall_arg[1], syscall_arg[2] * sizeof(struct pollfd))
+SYS_old_select: no man
+SYS_epoll_wait:
+    switch (syscall_arg[3]) {
+            case 0: break;
+            default: copy_buf(syscall_arg[2], syscall_arg[3] * sizeof(struct epoll_event));
+                     rec_copy_struct(events);
+                     break;
+    }
+SYS_epoll_pwait:
+    switch (syscall_arg[3]) {
+            case 0: break;
+            default: copy_buf(syscall_arg[2], syscall_arg[3] * sizeof(struct epoll_event));
+                     rec_copy_struct(events);
+                     copy_buf(syscall_arg[5], sizeof(sigset_t));
+                     break;
+    }
+SYS_gethostname: unsafe_copy_zts(syscall_arg[1])
+                 -> copy_buf(syscall_arg[1], syscall_arg[3]);
+SYS_sethostname: unsafe_copy_zts(syscall_arg[1])
+                 -> copy_buf(syscall_arg[1], syscall_arg[3]);
+SYS_setdomainname: unsafe_copy_zts(syscall_arg[1])
+                 -> copy_buf(syscall_arg[1], syscall_arg[3]);
+SYS_newuname: see thing with man, unclear.
+SYS_uname: see thing with man, unclear.
+SYS_olduname: see thing with man, unclear.
+SYS_prlimit64: no man.
+SYS_msgsnd: copy_buf(syscall_arg[2], sizeof(struct msgbuf))
+        -> copy_buf(syscall_arg[2], sizeof(long) + syscall_arg[3])
+        XXX: this might be slightly wrong, because of struct alignment.
+        See man.
+SYS_msgrcv: copy_buf(syscall_arg[2], sizeof(struct msgbuf))
+        -> copy_buf(syscall_arg[2], sizeof(long) + syscall_arg[3])
+        XXX: this might be slightly wrong, because of struct alignment.
+        See man.
+SYS_semop: copy_buf(syscall_arg[2], sizeof(struct sembuf))
+            -> copy_buf(syscall_arg[2], syscall_arg[3] * sizeof(struct sembuf))
+            sembuf not detailed.
+SYS_semtimedop: copy_buf(syscall_arg[2], sizeof(struct sembuf))
+            -> copy_buf(syscall_arg[2], syscall_arg[3] * sizeof(struct sembuf))
+            sembuf not detailed.
+SYS_shmat: treat syscall_arg[2] as a normal argument.
+SYS_shmdt: treat syscall_arg[2] as a normal argument.
+SYS_shmctl: shmid_ds not clearly defined.
+SYS_ipc: man doesn’t help.
+SYS_mq_open: no info on mq_attr
+SYS_mq_timedsend: unsafe_copy_zts(syscall_arg[2])
+                  -> copy_buf(syscall_arg[2], syscall_arg[3])
+SYS_mq_timedceceive: unsafe_copy_zts(syscall_arg[2])
+                  -> copy_buf(syscall_arg[2], syscall_arg[3])
 
 types used by syscalls (uncomplete)
 ===================================

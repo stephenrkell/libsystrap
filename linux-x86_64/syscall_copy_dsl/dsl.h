@@ -1547,8 +1547,12 @@ switch(syscall_arg[0]) {
      *         struct sockaddr __user * ;
      *         int __user * ;
      */
-    copy_buf(syscall_arg[2], sizeof(struct sockaddr)); //
-    copy_buf(syscall_arg[3], sizeof(int)); //
+    switch(syscall_arg[2]) {
+            case 0: break;
+            default: copy_buf(syscall_arg[2], syscall_arg[3][1]);
+                     copy_buf(syscall_arg[3], sizeof(int));
+                     break;
+    }
     break;
   case SYS_accept4:
     /*
@@ -1557,8 +1561,12 @@ switch(syscall_arg[0]) {
      *         int __user * ;
      *         int ;
      */
-    copy_buf(syscall_arg[2], sizeof(struct sockaddr)); //
-    copy_buf(syscall_arg[3], sizeof(int)); //
+    switch(syscall_arg[2]) {
+            case 0: break;
+            default: copy_buf(syscall_arg[2], syscall_arg[3][1]);
+                     copy_buf(syscall_arg[3], sizeof(int));
+                     break;
+    }
     break;
   case SYS_getsockname:
     /*
@@ -1566,8 +1574,8 @@ switch(syscall_arg[0]) {
      *         struct sockaddr __user * ;
      *         int __user * ;
      */
-    copy_buf(syscall_arg[2], sizeof(struct sockaddr)); //
-    copy_buf(syscall_arg[3], sizeof(int)); //
+    copy_buf(syscall_arg[2], syscall_arg[3][1]);
+    copy_buf(syscall_arg[3], sizeof(int));
     break;
   case SYS_getpeername:
     /*
@@ -1702,8 +1710,12 @@ switch(syscall_arg[0]) {
      *         int maxevents;
      *         int timeout;
      */
-    copy_buf(syscall_arg[2], sizeof(struct epoll_event)); // events
-    rec_copy_struct(events);
+    switch (syscall_arg[3]) {
+            case 0: break;
+            default: copy_buf(syscall_arg[2], syscall_arg[3] * sizeof(struct epoll_event));
+                     rec_copy_struct(events);
+                     break;
+    }
     break;
   case SYS_epoll_pwait:
     /*
@@ -1714,16 +1726,20 @@ switch(syscall_arg[0]) {
      *         const sigset_t __user * sigmask;
      *         size_t sigsetsize;
      */
-    copy_buf(syscall_arg[2], sizeof(struct epoll_event)); // events
-    rec_copy_struct(events);
-    copy_buf(syscall_arg[5], sizeof(sigset_t)); // sigmask
+    switch (syscall_arg[3]) {
+            case 0: break;
+            default: copy_buf(syscall_arg[2], syscall_arg[3] * sizeof(struct epoll_event));
+                     rec_copy_struct(events);
+                     copy_buf(syscall_arg[5], sizeof(sigset_t));
+                     break;
+    }
     break;
   case SYS_gethostname:
     /*
      *         char __user * name;
      *         int len;
      */
-    unsafe_copy_zts(syscall_arg[1]);
+    copy_buf(syscall_arg[1], syscall_arg[3]);
     break;
   case SYS_sethostname:
     /*
@@ -1873,7 +1889,6 @@ switch(syscall_arg[0]) {
      *         char __user * shmaddr;
      *         int shmflg;
      */
-    unsafe_copy_zts(syscall_arg[2]);
     break;
   case SYS_shmget:
     /*
@@ -1886,7 +1901,6 @@ switch(syscall_arg[0]) {
     /*
      *         char __user * shmaddr;
      */
-    unsafe_copy_zts(syscall_arg[1]);
     break;
   case SYS_shmctl:
     /*
