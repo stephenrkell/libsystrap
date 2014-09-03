@@ -23,8 +23,11 @@ struct = do spaces
             spaces
             _ <- char ';'
             return $ Struct (name) fields
-        where parseFields = sepBy parseField sepField
-              sepField    = (try (string ";\n") <|> try (string ";"))
+        where parseFields = do x <- endBy parseField endField
+                               spaces
+                               return x
+              endField    = do string ";"
+                               spaces
 
 parseField = (try parsePointer)
          <|> (try parseValue)
@@ -36,13 +39,10 @@ parsePointer = do spaces
                   spaces
                   nm   <- c_symbol
                   spaces
-                  _    <- string ";"
-                  spaces
                   return $ Field nm (ts ++ [star])
 
 parseValue = do spaces
-                symbols <- endBy (try c_symbol)
-                                 (try spaces1 <|> string ";")
+                symbols <- sepBy (try c_symbol) spaces1
                 spaces
                 return $ Field (last symbols)
                                (init symbols)
@@ -55,5 +55,3 @@ file = do maybe_structs <- sepBy line spaces1
 
 parseFile :: [Char] -> Either ParseError [Struct]
 parseFile = parse file "(unknown)"
-
-sss = "struct __sysctl_args { int    *name; int     nlen; void   *oldval; size_t *oldlenp; void   *newval; size_t  newlen; };"
