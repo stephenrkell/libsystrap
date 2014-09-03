@@ -25,13 +25,6 @@ type basicType =
         | Int64
         | UInt64
 
-type lvalue =
-        | Argument              of argument_name
-        | Array_access          of lvalue * ctype * expression
-        | Pointer_deref         of lvalue * ctype
-        | Member_access         of lvalue * member_name
-        | Member_deref          of lvalue * member_name
-
 type ctype =
         | Void
         | Basic         of basicType
@@ -47,7 +40,14 @@ type ctype =
         | Union         of union_tag    *
                                 (member_id * modifiable * ctype) list
 
-type expression =
+and lvalue =
+        | Argument              of argument_name
+        | Array_access          of lvalue * ctype * expression
+        | Pointer_deref         of lvalue * ctype
+        | Member_access         of lvalue * member_name
+        | Member_deref          of lvalue * member_name
+
+and expression =
         | Int           of int
         | Index         of index_name
         | LValue        of lvalue
