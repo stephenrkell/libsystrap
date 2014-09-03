@@ -34,10 +34,11 @@ import Data.Maybe(catMaybes)
 -- An argument to a syscall can be tagged __user, in which case it means
 -- the memory belongs to userspace and is potentially modified. We want
 -- to keep track of those.
---
+
 data Argument = Argument {userspace :: Bool
                          ,pointer   :: Bool
                          ,struct    :: Bool
+                         ,const     :: Bool
                          ,arg_type  :: [String]
                          ,arg_name  :: String
                          } deriving (Show)
@@ -104,8 +105,9 @@ pointerWithNoName = do x        <- many1 $
                        y        <- return $ concat x
                        user     <- return $ "__user" `elem` y
                        struct   <- return $ "struct" `elem` y
+                       const    <- return $ "const"  `elem` y
                        argtype  <- return $ y
-                       return $ Argument user True struct argtype ""
+                       return $ Argument user True struct const argtype ""
 
 pointerWithName = do x          <- many1 . try $
                       do y <- many $ try (spaces >> c_symbol)
@@ -117,13 +119,14 @@ pointerWithName = do x          <- many1 . try $
                      y          <- return $ concat x
                      user       <- return $ "__user" `elem` y
                      struct     <- return $ "struct" `elem` y
+                     const      <- return $ "const"  `elem` y
                      argtype    <- return $ y
-                     return $ Argument user True struct argtype argname
+                     return $ Argument user True struct const argtype argname
 
 nonPointerWithNoName = do spaces
                           modlist <- endBy c_modifier spaces
                           argtype <- c_type
-                          return $ Argument False False False
+                          return $ Argument False False False False
                                 (modlist ++ [argtype]) ""
 
 nonPointerWithName = do spaces
@@ -131,7 +134,7 @@ nonPointerWithName = do spaces
                         argtype <- c_type
                         spaces
                         argname <- c_symbol
-                        return $ Argument False False False
+                        return $ Argument False False False False
                               (modlist ++ [argtype]) argname
 
 parseFile :: [Char] -> Either ParseError [Sys]

@@ -4,19 +4,59 @@ import Data.List(intercalate, insert, nub)
 
 import Parse
 
+data OCamlStruct = OCS { ocs_name       :: String
+                       , ocs_lines      :: [String]
+}
+
 c_keywords :: [String]
 c_keywords = ["signed", "unsigned", "const", "volatile", "auto", "register", "static", "extern"]
 indent :: String
 indent = "        "
 
-fusionStruct :: [[Char]] -> [[Char]]
-fusionStruct (x:y:xs) | x == "struct" = (x ++ " " ++ y) : fusionStruct xs
-fusionStruct (x:xs)                   = x        : fusionStruct xs
-fusionStruct x = x
+fusionStruct :: [[Char]] -> [Char] -> [[Char]]
+fusionStruct (x:y:xs) inter | x == "struct" =
+                                (x ++ inter ++ y)       : fusionStruct xs inter
+fusionStruct (x:xs) inter = x           : fusionStruct xs inter
+fusionStruct x _ = x
 
 getSimpleType :: [[Char]] -> [[Char]]
 getSimpleType args = filter (\x -> notElem x $ "__user" : "*" : c_keywords)
-                        $ fusionStruct args
+                        $ fusionStruct args " "
+
+structTag :: [[Char]] -> [Char]
+structTag (x:y:xs) | x == "struct" = x ++ "_" ++ y
+                   | otherwise     = structTag (y:xs)
+structTag _ = []
+
+data CType = Void
+           | BasicCType String
+           | Array CType String
+           | Function CType [(String, CType)] Bool
+           | Pointer String String
+           | Atomic CType
+           | Struct String [(String, String, CType)]
+           | Union String [(String, String, CType)]
+
+data Footprint =
+          FPVoid
+        | FPBasic String CType
+        | FPStruct String CType
+        | FPArray String CType String
+        | FPSeparation_star [Footprint]
+        | FPIndexed_separation_star String String String Footprint
+
+genOCamlType :: Argument -> CType
+genOCamlType arg =         case (pointer arg, struct arg) of
+        (False,_) -> BasicCType $ intercalate " " $ getSimpleType $ arg_type arg
+        (_,True)  -> Pointer (if Parse.const arg then "const" else "\"\"")
+                                ((structTag . arg_type) arg)
+        (_,_)     -> Pointer (if Parse.const arg then "const" else "\"\"") $
+                                intercalate " " $ getSimpleType $ arg_type arg
+
+h2o_ctype :: CType -> [Char]
+h2o_ctype (BasicCType x) = "Basic(" ++ x ++ ")"
+h2o_ctype (Pointer mods ptype) = "Pointer(" ++ mods ++ ", " ++ ptype ++")"
+h2o_ctype _ = undefined
 
 genSyscallCopier :: Sys -> [[Char]]
 genSyscallCopier sys = ["case SYS_" ++ (sys_name sys) ++ ":"]
@@ -30,32 +70,64 @@ genSyscallCopier sys = ["case SYS_" ++ (sys_name sys) ++ ":"]
                           ++ [" */"]
               genArg a     = indent ++ (intercalate " " $ arg_type a) ++ " " ++ arg_name a
 
+genOCamlStruct :: Sys -> OCamlStruct
+genOCamlStruct sys = let args = arguments sys in
+        OCS (sys_name sys) $
+        ("let sys_" ++ sys_name sys ++ " = {")          :
+        ("name = \"sys_" ++ sys_name sys ++ "\";")      :
+        ("number = SYS_" ++ sys_name sys ++ ";")        :
+        ["arguments = ["] ++ map genOCamlArgument args ++ ["];"]
+        ++ ["footprint = "] ++ footprint args ++ ["}"]
+
+genOCamlArgument :: (Int, Argument) -> [Char]
+genOCamlArgument (_, arg) = "(\"" ++ arg_name arg ++ "\", "
+                ++ ((h2o_ctype . genOCamlType) arg) ++ ");"
+
+-- TODO
+footprint :: [(Int, Argument)] -> [[Char]]
+footprint xs = case filter (pointer . snd) xs of
+        []      -> ["Void;"]
+        [x]     -> [fp x]
+        l       -> ["Separation_star(["] ++ map fp l ++ ["]);"]
+    where fp (_,arg) =
+            if (struct arg)
+              then structFootprint arg
+            else basicFootprint arg
+          basicFootprint arg = "Basic(Argument(" ++ arg_name arg
+                ++ "), " ++ (h2o_ctype . genOCamlType) arg ++ ");"
+--          structFootprint arg = "Struct(Argument(" ++ arg_name arg
+--                ++ "), " ++ (h2o_ctype . genOCamlType) arg ++ ");"
+          structFootprint arg = structTag (arg_type arg)
+                ++ "_footprint Argument(\"" ++ arg_name arg ++ "\");"
+
 copyArgs :: [(Int, Argument)] -> [[Char]]
 copyArgs args = filter (/= []) $ map copyArg args
 
 copyArg :: (Int, Argument) -> [Char]
-copyArg arg = case (pointer (snd arg), struct (snd arg)) of
-        (True, True)  -> intercalate "\n" $ filter (/= "") [make_copy arg,
-                          copy_struct_if_needed (snd arg)]
+copyArg (_, arg) = case (pointer arg, struct arg) of
+        (True, True)  -> intercalate "\n" $ filter (/= "") [make_copy,
+                          copy_struct_if_needed]
         (True, False) -> if is_char_pointer
-                                then copy_string (fst arg)
-                                else make_copy arg
+                                then copy_zts
+                                else make_copy
         (_,_)         -> []
-        where make_copy a = "copy_buf(syscall_arg[" ++ (show $ fst a) ++ "]"
+        where make_copy = "copy_buf(" ++ (arg_name arg)
                            ++ ", sizeof("
                            ++ (intercalate " "
-                                $ getSimpleType $ arg_type (snd a)) ++ "));"
-                                ++ " // " ++ (arg_name $ snd a)
-              is_char_pointer = "char" `elem` (arg_type (snd arg))
-              copy_string n = "unsafe_copy_zts(syscall_arg[" ++ show n ++ "]);"
-              copy_struct_if_needed a =
-                let (_:xs) = dropWhile (/=' ') $ head $ getSimpleType $ arg_type a
+                                $ getSimpleType $ arg_type arg) ++ "));"
+                                ++ " // " ++ (arg_name arg)
+              is_char_pointer = "char" `elem` (arg_type arg)
+              copy_zts = "unsafe_copy_zts(" ++ arg_name arg ++ ");"
+              copy_struct_if_needed =
+                let (_:xs) = dropWhile (/=' ') $ head $
+                         getSimpleType $ arg_type arg
                     struct_name = xs
                 in if struct_name `elem` recursive_copy_structs
-                   then "rec_copy_struct(" ++ arg_name a ++ ");"
+                   then "rec_copy_struct(" ++ arg_name arg ++ ");"
                    else if struct_name `elem` no_recursive_copy_structs
                         then ""
-                        else "undefined semantics for struct " ++ struct_name
+                        else "undefined semantics for struct "
+                                ++ struct_name
 
 genSwitch :: [Sys] -> [Char]
 genSwitch ss = (intercalate "\n" $
@@ -78,6 +150,20 @@ genTypeList ss = intercalate "\n" $ nub $ capture_args ss []
               insert_all_args (x:xs) l  = insert_all_args xs
                                         $ insert (intercalate " "
                                         $ getSimpleType ( arg_type x)) l
+
+genOCaml :: [Sys] -> [Char]
+genOCaml ss = intercalate "\n" $
+                map (\x -> intercalate "\n" $ ocs_lines $
+                                                genOCamlStruct x) ss
+
+genStrings :: Sys -> [Char]
+genStrings sys = intercalate "\n" $ map (makeLine . snd) $ arguments sys
+        where makeLine arg = intercalate " " (arg_type arg) ++ " "
+--                ++ arg_name arg
+
+
+bla :: [Sys] -> [Char]
+bla ss = intercalate "\n" $ map genStrings ss
 
 -- Lines that are commented out indicate structs whose internals are
 -- unknown at the moment.

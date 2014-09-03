@@ -154,6 +154,14 @@ SYS_mq_timedsend: unsafe_copy_zts(syscall_arg[2])
                   -> copy_buf(syscall_arg[2], syscall_arg[3])
 SYS_mq_timedceceive: unsafe_copy_zts(syscall_arg[2])
                   -> copy_buf(syscall_arg[2], syscall_arg[3])
+SYS_pcionfig_read: not defined SO WELL in man. Tentatively:
+copy_buf(syscall_arg[5], sizeof(void))
+        -> copy_buf(syscall_arg[5], syscall_arg[4])
+SYS_pcionfig_write: not defined SO WELL in man. Tentatively:
+copy_buf(syscall_arg[5], sizeof(void))
+        -> copy_buf(syscall_arg[5], syscall_arg[4])
+SYS_syslog: unsafe_copy_zts(syscall_arg[2])
+             -> copy_buf(syscall_arg[2], syscall_arg[3])
 
 types used by syscalls (uncomplete)
 ===================================
@@ -255,7 +263,7 @@ struct linux_dirent {
   // offset is (d_reclen - 1))
    */
 
-}
+};
 struct linux_dirent64 // XXX not in manpages
 struct mmap_arg_struct // XXX no man
 struct mmsghdr {

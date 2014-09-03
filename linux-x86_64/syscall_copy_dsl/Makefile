@@ -4,7 +4,10 @@ all: main
 dsl: main
 	./main > dsl.h
 
-main: main.hs generators.hs parse.hs
+caml: main
+	./main > caml.ml
+
+main: main.hs generators.hs parse.hs gen_structs.hs parse_structs.hs
 	ghc --make $^ -Wall
 
 .PHONY: clean
