@@ -1,5 +1,3 @@
-{-# LANGUAGE NoMonomorphismRestriction #-}
-
 module Parse(parseFile
             ,Sys(..)
             ,Argument(..)
@@ -44,7 +42,7 @@ data Argument = Argument {userspace :: Bool
                          } deriving (Show)
 
 data Sys = Sys {sys_name  :: String
-               ,arguments :: [(Int, Argument)]
+               ,arguments :: [Argument]
                } deriving (Show)
 
 -- XXX Obviously this accepts invalid C symbols, but fixing it is low priority.
@@ -81,7 +79,7 @@ header = do spaces
                    "(void)" -> return $ Sys name []
                    _        -> do args <- between
                                          (char '(') (char ')') parseArgs
-                                  return $ Sys name (zip [1..] args)
+                                  return $ Sys name args
             _ <- string ";"
             return ret
         where parseArgs = sepBy parseArg sepArg

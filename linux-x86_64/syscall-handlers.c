@@ -1,3 +1,9 @@
+/*
+ * syscall-handlers.c
+ *
+ * This provides the implementations of the various functions to be
+ * substituted to the performing of the system calls.
+ */
 #include <string.h>
 #include <malloc.h>
 

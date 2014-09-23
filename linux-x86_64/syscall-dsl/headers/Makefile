@@ -1,7 +1,5 @@
-all: main
-
-gen: main
-	./main > headers.ml
+headers.ml: main
+	./main | indent > headers.ml
 
 main: main.hs generator.hs parser.hs
 	ghc --make $^ -Wall

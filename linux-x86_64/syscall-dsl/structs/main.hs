@@ -7,6 +7,8 @@ main = do inh' <- openFile "structs.h" ReadMode
           contents' <- hGetContents inh'
           let parsed = parseFile contents'
                 in case parsed of
-                        Right x -> do putStrLn $ genOCaml x
+                        Right x -> do putStrLn $ genOCamlStruct x
+                                      putStrLn ""
+                                      putStrLn $ genOCamlFootprint x
                         _       -> putStrLn $ "Could not parse."
           hClose inh'

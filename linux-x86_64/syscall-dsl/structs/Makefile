@@ -1,7 +1,5 @@
-all: main
-
-gen: main
-	./main > structs.ml
+structs.ml: main
+	./main | indent > structs.ml
 
 main: main.hs generator.hs parser.hs
 	ghc --make $^ -Wall

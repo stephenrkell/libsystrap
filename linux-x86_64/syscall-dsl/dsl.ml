@@ -16,6 +16,8 @@ type modifiable =
 type basicType =
         | Int
         | UInt
+        | Long
+        | Char
         | Int8
         | UInt8
         | Int16
@@ -24,6 +26,7 @@ type basicType =
         | UInt32
         | Int64
         | UInt64
+        | Typedef of string
 
 type ctype =
         | Void
@@ -61,6 +64,7 @@ type footprint =
         | Basic                         of lvalue * ctype
         | Struct                        of lvalue * ctype
         | Array                         of lvalue * ctype * expression
+        | Zts                           of lvalue
         | Separation_star               of footprint list
         | Indexed_separation_star       of index_name                   *
                                                 expression (*base*)     *
@@ -69,7 +73,7 @@ type footprint =
 
 type syscall_data = {
         name      : string;
-        number    : int;
+        number    : string;
         arguments : (argument_name * ctype) list;
         footprint : footprint;
 }

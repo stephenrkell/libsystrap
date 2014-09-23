@@ -1,3 +1,10 @@
+/*
+ * raw-syscalls.c
+ *
+ * This contains hand implementations of the system calls required by the
+ * trap-syscall library.
+ */
+
 #include "raw-syscalls.h"
 #define DO_EXIT_SYSCALL \
 	long retcode = 0; \

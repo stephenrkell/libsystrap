@@ -1,4 +1,9 @@
-// #include <unistd.h>
+/*
+ * do-syscall.c
+ *
+ * This file contains the do_syscall() function, which performs the
+ * action expected from the trapped system call.
+ */
 
 #include "do-syscall.h"
 #include "syscall-handlers.h"

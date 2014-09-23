@@ -1,3 +1,11 @@
+/*
+ * trap-syscalls.c
+ *
+ * This is the mechanism that reads the code to be run, and replace
+ * system call instructions with traps to gain control of the execution
+ * flow.
+ */
+
 /* Basic idea: we are a preloaded library whose constructor
  * - write-protects all executable pages
  *     -- using /proc/self/maps to enumerate them?
