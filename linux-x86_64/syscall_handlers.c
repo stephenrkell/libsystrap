@@ -122,8 +122,11 @@ static void *lock_memory(long int addr, size_t count, int copy)
         if (!ptr) {
                 return NULL;
         }
-        /* FIXME: am I using the right address here? */
-        if (__write_footprints) write_footprint((void*) addr, count);
+
+        if (__write_footprints) {
+                write_footprint(ptr, count);
+        }
+
 #ifdef DEBUG_REMAP
         {
                 void *ret = malloc(count);
