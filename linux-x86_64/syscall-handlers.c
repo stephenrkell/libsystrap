@@ -2,9 +2,9 @@
 #include <malloc.h>
 
 #include "trap-syscalls.h"
-#include "do_syscall.h"
-#include "syscall_handlers.h"
-#include "raw_syscalls.h"
+#include "do-syscall.h"
+#include "syscall-handlers.h"
+#include "raw-syscalls.h"
 
 #define PERFORM_SYSCALL             \
           FIX_STACK_ALIGNMENT "   \n\

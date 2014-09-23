@@ -1,8 +1,8 @@
 // #include <unistd.h>
 
-#include "do_syscall.h"
-#include "syscall_handlers.h"
-#include "raw_syscalls.h"
+#include "do-syscall.h"
+#include "syscall-handlers.h"
+#include "raw-syscalls.h"
 
 long int do_syscall (struct syscall *sys)
 {

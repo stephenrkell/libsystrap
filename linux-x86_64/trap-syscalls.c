@@ -32,8 +32,8 @@
 #include <stdint.h>
 
 #include "trap-syscalls.h"
-#include "raw_syscalls.h"
-#include "do_syscall.h"
+#include "raw-syscalls.h"
+#include "do-syscall.h"
 
 /* If we build a standalone executable, we include a test trap. */
 #ifdef EXECUTABLE
@@ -160,19 +160,19 @@ static void *ignore_ud2_addr;
 int main(void)
 {
 #endif
-	/* Is fd 7 open? If so, it's the input fd for our sanity check info 
+	/* Is fd 7 open? If so, it's the input fd for our sanity check info
 	 * from systemtap. */
 	struct stat buf;
 	int stat_ret = raw_fstat(7, &buf);
 	if (stat_ret == 0)
 	{
 		write_string("File descriptor 7 is open; outputting systemtap cross-check info\n");
-		
+
 		/* PROBLEM: ideally we'd read in the stap script's output ourselves, and process
-		 * it at every system call. But by reading in stuff from stap, we're doing more 
+		 * it at every system call. But by reading in stuff from stap, we're doing more
 		 * copying to/from userspace, so creating a feedback loop. This loop seems like
 		 * it would blow up.
-		 * 
+		 *
 		 * Instead we write out what we think we touched, and do a diff outside the process.
 		 * This also adds noise to stap's output, but without the feedback cycle: we ourselves
 		 * won't read the extra output, hence won't write() more stuff in response.
@@ -204,7 +204,7 @@ int main(void)
 			size_requested = sizeof buf - (buf_pos - buf);
 			ret = raw_read(fd, buf_pos, size_requested);
 			char *buf_limit = buf_pos + ret;
-			
+
 			// we have zero or more complete entries in the buffer; iterate over them
 			char *seek_pos;
 			while (1)
@@ -213,13 +213,13 @@ int main(void)
 				// search forward for a newline
 				while (seek_pos != buf_limit && *seek_pos != '\n')
 				{ ++seek_pos; }
-				
+
 				// did we find one?
 				if (seek_pos == buf_limit)
 				{
-					// no! 
-					// but we have a partial entry in the buffer 
-					// between entry_start_pos and seek_pos; 
+					// no!
+					// but we have a partial entry in the buffer
+					// between entry_start_pos and seek_pos;
 					// copy it to the start, re-set and continue
 					unsigned i;
 					for (i = 0; i < seek_pos - entry_start_pos; ++i)
@@ -236,9 +236,9 @@ int main(void)
 				saw_mapping(entry_start_pos, seek_pos);
 				entry_start_pos = seek_pos + 1;
 				// if the newline was the last in the buffer, break and read more
-				if (entry_start_pos == buf_pos + sizeof buf) 
+				if (entry_start_pos == buf_pos + sizeof buf)
 				{ buf_pos = entry_start_pos = &buf[0]; break; }
-				
+
 				// else we might have another entry; go round again
 				continue;
 			}

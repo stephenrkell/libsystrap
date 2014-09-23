@@ -16,7 +16,7 @@
 
 default: test trap-syscalls trap-syscalls.so
 
-SRC := trap-syscalls.c do_syscall.c syscall_handlers.c raw_syscalls.c
+SRC := trap-syscalls.c do-syscall.c syscall-handlers.c raw-syscalls.c
 DEPS := $(patsubst %.c,.%.d,$(SRC))
 
 $(DEPS): .%.d: %.c
@@ -25,7 +25,7 @@ $(DEPS): .%.d: %.c
 -include $(DEPS)
 
 
-WFLAGS := -Wall 								\
+WFLAGS := -Wall 							\
 	 -Wextra 							\
 	 -Wno-unused-label 						\
 	 -Wno-unused-function 						\
@@ -70,7 +70,7 @@ test-programs/%: test-src/%.s test-programs
 clean:
 	rm -f sigill trap-syscalls trap-syscalls.so
 	rm -f test-programs/*
-	rm -f do_syscall.o
+	rm -f do-syscall.o
 	rm -f restorer.o
 
 .PHONY: test

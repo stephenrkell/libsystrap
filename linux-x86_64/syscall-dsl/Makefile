@@ -7,7 +7,7 @@ dsl: main
 caml: main
 	./main > caml.ml
 
-main: main.hs generators.hs parse.hs gen_structs.hs parse_structs.hs
+main: main.hs generators.hs parse.hs gen-structs.hs parse-structs.hs
 	ghc --make $^ -Wall
 
 .PHONY: clean
