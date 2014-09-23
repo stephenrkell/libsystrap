@@ -1,8 +1,11 @@
 all: main
-	./main
+	./main | head
+
+dsl: main
+	./main > dsl.h
 
 main: main.hs generators.hs parse.hs
-	ghc --make $^
+	ghc --make $^ -Wall
 
 .PHONY: clean
 

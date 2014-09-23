@@ -3,11 +3,9 @@
 module Parse(parseFile
             ,Sys(..)
             ,Argument(..)
-            ,Space(..)
             ) where
 
 import Text.ParserCombinators.Parsec
-import Data.List(intercalate)
 import Data.Maybe(catMaybes)
 
 -- We mean to parse a syscall header with the general form
@@ -37,24 +35,24 @@ import Data.Maybe(catMaybes)
 -- the memory belongs to userspace and is potentially modified. We want
 -- to keep track of those.
 --
-data Space = User | Copy deriving (Show)
-
-data Argument = Argument {arg_space :: Space
-                         ,arg_type  :: String
+data Argument = Argument {userspace :: Bool
+                         ,pointer   :: Bool
+                         ,struct    :: Bool
+                         ,arg_type  :: [String]
                          ,arg_name  :: String
                          } deriving (Show)
 
 data Sys = Sys {sys_name  :: String
-               ,arguments :: [Argument]
+               ,arguments :: [(Int, Argument)]
                } deriving (Show)
 
 -- XXX Obviously this accepts invalid C symbols, but fixing it is low priority.
 c_symbol = many1 $ try alphaNum <|> char '_'
 
-c_type = (try $ do struct      <- string "struct"
+c_type = (try $ do string "struct"
                    spaces
                    struct_name <- c_symbol
-                   return $ struct ++ " " ++ struct_name)
+                   return $ "struct " ++ struct_name)
      <|> (try c_symbol)
 
 c_modifier = (try $ string "signed")
@@ -82,7 +80,7 @@ header = do spaces
                    "(void)" -> return $ Sys name []
                    _        -> do args <- between
                                          (char '(') (char ')') parseArgs
-                                  return $ Sys name args
+                                  return $ Sys name (zip [1..] args)
             _ <- string ";"
             return ret
         where parseArgs = sepBy parseArg sepArg
@@ -98,51 +96,43 @@ parseArg = (try pointerWithNoName)
        <|> (try nonPointerWithName)
        <|> (try nonPointerWithNoName)
 
-pointerWithNoName = do x <- many1 $
+pointerWithNoName = do x        <- many1 $
                         do spaces
                            y     <- endBy c_symbol spaces
                            star  <- string "*"
                            return $ y ++ [star]
-                       y    <- return $ concat x
-                       user <- return $ if "__user" `elem` y
-                                                 then User
-                                                 else Copy
-                       argtype <- return $ intercalate " " y
-                       return $ Argument user argtype ""
+                       y        <- return $ concat x
+                       user     <- return $ "__user" `elem` y
+                       struct   <- return $ "struct" `elem` y
+                       argtype  <- return $ y
+                       return $ Argument user True struct argtype ""
 
-pointerWithName = do x    <- many1 . try $
+pointerWithName = do x          <- many1 . try $
                       do y <- many $ try (spaces >> c_symbol)
                          spaces
                          star <- string "*"
                          return $ y ++ [star]
                      spaces
-                     argname <- c_symbol
-                     y    <- return $ concat x
-                     user <- return $ if "__user" `elem` y
-                                               then User
-                                               else Copy
-                     argtype <- return $ intercalate " " y
-                     return $ Argument user argtype argname
+                     argname    <- c_symbol
+                     y          <- return $ concat x
+                     user       <- return $ "__user" `elem` y
+                     struct     <- return $ "struct" `elem` y
+                     argtype    <- return $ y
+                     return $ Argument user True struct argtype argname
 
 nonPointerWithNoName = do spaces
                           modlist <- endBy c_modifier spaces
-                          modifiers <- case modlist of
-                                  [] -> return ""
-                                  _  -> return $ (intercalate " " modlist) ++ " "
                           argtype <- c_type
-                          return $ Argument Copy
-                                (modifiers ++ argtype) ""
+                          return $ Argument False False False
+                                (modlist ++ [argtype]) ""
 
 nonPointerWithName = do spaces
                         modlist <- endBy c_modifier spaces
-                        modifiers <- case modlist of
-                                [] -> return ""
-                                _  -> return $ (intercalate " " modlist) ++ " "
                         argtype <- c_type
                         spaces
                         argname <- c_symbol
-                        return $ Argument Copy
-                              (modifiers ++ argtype) argname
+                        return $ Argument False False False
+                              (modlist ++ [argtype]) argname
 
 parseFile :: [Char] -> Either ParseError [Sys]
 parseFile = parse file "(unknown)"

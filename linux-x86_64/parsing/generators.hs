@@ -1,80 +1,138 @@
 module Generators where
 
-import Data.List(intercalate)
+import Data.List(intercalate, insert, nub)
 
 import Parse
 
+c_keywords :: [String]
+c_keywords = ["signed", "unsigned", "const", "volatile", "auto", "register", "static", "extern"]
 indent :: String
 indent = "        "
 
-genArgStruct :: Sys -> [Char]
-genArgStruct sys = "struct sys_"
-                ++ (sys_name sys)
-                ++ "_args {\n"
-                ++ (intercalate "\n" $ map genPaddedArg (arguments sys))
-                ++ "\n};"
-        where genPaddedArg a = indent ++ "PADDED("
-                      ++ arg_type a
-                      ++ " "
-                      ++ arg_name a
-                      ++ ")"
+fusionStruct :: [[Char]] -> [[Char]]
+fusionStruct (x:y:xs) | x == "struct" = (x ++ " " ++ y) : fusionStruct xs
+fusionStruct (x:xs)                   = x        : fusionStruct xs
+fusionStruct x = x
 
-genBigStruct :: [Sys] -> [Char]
-genBigStruct ss =
-        "struct syscall {\n"
-             ++ indent ++ "PADDED(int syscall_number)\n"
-             ++ indent ++ "union {\n"
-                     ++ (intercalate "\n" $ map declArg ss)
-             ++ "\n" ++ indent ++ "} syscall_args;\n};"
-        where declArg (Sys n _) = indent ++ indent
-                               ++ "struct sys_" ++ n ++ "_args "
-                               ++ "sys_" ++ n ++ "args;"
+getSimpleType :: [[Char]] -> [[Char]]
+getSimpleType args = filter (\x -> notElem x $ "__user" : "*" : c_keywords)
+                        $ fusionStruct args
 
-genStructFile :: [Sys] -> [Char]
-genStructFile ss = (intercalate "\n" $ map genArgStruct ss) ++ "\n\n" ++ genBigStruct ss
+genSyscallCopier :: Sys -> [[Char]]
+genSyscallCopier sys = ["case SYS_" ++ (sys_name sys) ++ ":"]
+                        ++ struct_shape
+                        ++ copyArgs (arguments sys)
+                        ++ ["break;"]
+        where struct_shape = case (length $ arguments sys) of
+                0 -> []
+                _ -> ("/*") : map (\x -> " * " ++ genArg (snd x) ++ ";")
+                                         (arguments sys)
+                          ++ [" */"]
+              genArg a     = indent ++ (intercalate " " $ arg_type a) ++ " " ++ arg_name a
 
--- XXX At this time, this does nothing and is a bit stupid.
-genHandler :: Sys -> [Char]
-genHandler s = case sys_name s of
-        -- Leave the possibility of special generation according to the name.
-        _ -> intercalate "\n" [header, struct_shape, "\n{", body, "}"]
-        where len = length (arguments s)
-              header       = "static long int do_"
-                          ++ sys_name s
-                          ++ " (struct generic_syscall *gsp)"
-              struct_shape = "/*\n * struct sys_"
-                          ++ sys_name s
-                          ++ "_args {\n * "
-                          ++ intercalate ";\n * " (map genArg (arguments s))
-                          ++ ";\n * };\n */"
-              genArg a     = indent ++ arg_type a ++ " " ++ arg_name a
-              body         = indent ++ intercalate ("\n" ++ indent) (
-                                   ["long int ret;"]
-                                ++ save_args (arguments s) 0
-                                ++ ["ret = do_syscall"
-                                 ++ (show len)
-                                 ++ "(gsp);"]
-                                ++ restore_args (arguments s) 0
-                                ++ ["return ret;"])
-              save_args [] _       = []
-              save_args (a:as) num = case (arg_space a) of
-                User -> ("REPLACE_ARGN("
-                                ++ show num
-                                ++ ", 0 /* XXX length */);")
-                        : save_args as (num + 1)
-                _    -> save_args as (num + 1)
-              restore_args [] _ = []
-              restore_args (a:as) num = case (arg_space a) of
-                User -> ("RESTORE_ARGN("
-                        ++ show num
-                        ++ ", 0 /* XXX length */);")
-                        :restore_args as (num + 1)
-                _   -> restore_args as (num + 1)
+copyArgs :: [(Int, Argument)] -> [[Char]]
+copyArgs args = filter (/= []) $ map copyArg args
 
+copyArg :: (Int, Argument) -> [Char]
+copyArg arg = case (pointer (snd arg), struct (snd arg)) of
+        (True, True)  -> intercalate "\n" $ filter (/= "") [make_copy arg,
+                          copy_struct_if_needed (snd arg)]
+        (True, False) -> if is_char_pointer
+                                then copy_string (snd arg)
+                                else make_copy arg
+        (_,_)         -> []
+        where make_copy a = "copy_buf(syscall_arg[" ++ (show $ fst a) ++ "]"
+                           ++ ", sizeof("
+                           ++ (intercalate " "
+                                $ getSimpleType $ arg_type (snd a)) ++ "));"
+                                ++ " // " ++ (arg_name $ snd a)
+              is_char_pointer = "char" `elem` (arg_type (snd arg))
+              copy_string a = "unsafe_copy_zts(" ++ arg_name a ++ ");"
+              copy_struct_if_needed a =
+                let (_:xs) = dropWhile (/=' ') $ head $ getSimpleType $ arg_type a
+                    struct_name = xs
+                in if struct_name `elem` recursive_copy_structs
+                   then "rec_copy_struct(" ++ arg_name a ++ ");"
+                   else if struct_name `elem` no_recursive_copy_structs
+                        then ""
+                        else "undefined semantics for struct " ++ arg_name a
+
+genSwitch :: [Sys] -> [Char]
+genSwitch ss = (intercalate "\n" $
+                        "switch(syscall_arg[0]) {" :
+                        (map (\s ->
+                              intercalate "\n" $ genSyscallCopier s) ss))
+                        ++ "\n}"
 
 genTab :: [Sys] -> [Char]
 genTab ss = "long int (*syscalls[SYSCALL_MAX])(struct generic_syscall *) = {\n"
                 ++ (intercalate "\n" $ map decl ss) ++ "\n};"
                 where decl s = indent ++ "DECL_SYSCALL(" ++ sys_name s ++ ")"
 
-genHandlerFile ss = (intercalate "\n" $ map genHandler ss) ++ "\n\n" ++ genTab ss
+genTypeList :: [Sys] -> [Char]
+genTypeList ss = intercalate "\n" $ nub $ capture_args ss []
+        where capture_args [] l         = l
+              capture_args (x:xs) l     = capture_args xs
+                                         (insert_all_args (map snd $ arguments x) l)
+              insert_all_args [] l      = l
+              insert_all_args (x:xs) l  = insert_all_args xs
+                                        $ insert (intercalate " "
+                                        $ getSimpleType ( arg_type x)) l
+
+-- Lines that are commented out indicate structs whose internals are
+-- unknown at the moment.
+
+recursive_copy_structs :: [String]
+recursive_copy_structs = ["__sysctl_args"
+--                      , "__old_kernel_stat"
+                        , "epoll_event" -- XXX unsure about that one. Being conservative here.
+                        , "iovec"
+--                      , "file_handle"
+--                      , "getcpu_cache"
+--                      , "io_event"
+--                      , "iocb"
+                        , "iovec"
+                        , "kexec_segment"
+                        , "linux_dirent"
+--                      , "linux_dirent64"
+--                      "mmap_arg_struct"
+                        , "mmsghdr"
+--                      , "mq_attr"
+                        , "msgbuf"
+                        , "msghdr"
+--                      , "new_utsname"
+--                      , "old_linux_dirent"
+--                      , "old_utsname"
+--                      , "oldold_utsname"
+--                      , "perf_event_attr"
+--                      , "rlimit64"
+--                      , "robust_list_head"
+--                      , "sched_param"
+--                      , "sel_arg_struct"
+--                      , "sembuf"
+--                      , "shmid_ds"
+                        , "sigevent"
+--                      , "siginfo"
+--                      , "stat64"
+--                      , "ustat"
+                         ]
+
+no_recursive_copy_structs :: [String]
+no_recursive_copy_structs = ["ipc_perm"
+                           , "itimerspec"
+                           , "itimerval"
+                           , "msqid_ds"
+                           , "pollfd"
+                           , "rlimit"
+                           , "rusage"
+                           , "sockaddr"
+                           , "stat"
+                           , "statfs"
+                           , "sysinfo"
+                           , "timespec"
+                           , "timeval"
+                           , "timex"
+                           , "timezone"
+                           , "tms"
+                           , "utimbuf"
+                            ]

@@ -7,9 +7,8 @@ main = do inh <- openFile "syscalls.h" ReadMode
           contents <- hGetContents inh
           let parsed = parseFile contents
               in case parsed of
-                      Right x -> do putStrLn "do_syscalls.h:"
-                                    putStrLn $ genStructFile x
-                                    putStrLn "\nsyscalls_handlers.c:"
-                                    putStrLn $ genHandlerFile x
+                      Right x -> do   putStrLn $ genSwitch x
+                                      putStrLn ""
+                                      putStrLn $ genTypeList x
                       Left _  -> putStrLn $ "Could not parse."
           hClose inh
