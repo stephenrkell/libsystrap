@@ -27,7 +27,7 @@ genCType (PS.Struct n fs) = Struct ("struct_" ++ n) (map genField fs)
         where genField (PS.Field n ts) = (n, Modifiable_yes, gct ts)
               gct ts | last ts == "*" = Pointer "" $ gpct (init ts)
                      | otherwise      = BasicCType (intercalate " " ts)
-              gpct ("struct":x:xs) = "struct_" ++ x
+              gpct ("struct":x:_)     = "struct_" ++ x
               gpct xs = intercalate " " xs
 
 genFootPrintFunc :: PS.Struct -> [String]
