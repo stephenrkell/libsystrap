@@ -11,6 +11,7 @@
 #include "do-syscall.h"
 #include "syscall-handlers.h"
 #include "raw-syscalls.h"
+#include "syscall-structs.h"
 
 #define PERFORM_SYSCALL             \
           FIX_STACK_ALIGNMENT "   \n\
@@ -34,6 +35,20 @@ static void write_footprint(void *base, size_t len)
 	raw_write(7, fmt_hex_num(len), 18);
 	write_string(" base=");
 	raw_write(7, fmt_hex_num((uintptr_t) base), 18);
+}
+
+void pre_handling (struct generic_syscall *gsp)
+{
+        write_string("Performing syscall with opcode: ");
+	raw_write(2, fmt_hex_num(gsp->syscall_number), 18);
+	write_string("\n");
+}
+
+void post_handling (struct generic_syscall *gsp, long int ret)
+{
+        write_string("Syscall returned value: ");
+        raw_write(2, fmt_hex_num(ret), 18);
+        write_string("\n");
 }
 
 /*

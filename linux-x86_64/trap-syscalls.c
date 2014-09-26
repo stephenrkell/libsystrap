@@ -336,7 +336,7 @@ static void  __attribute__((optimize("O0"))) handle_sigill(int n)
 	/* Check whether it creates executable mappings; if so,
 	 * we make them nx, do the rewrite, then make them x. */
 
-        struct generic_syscall gs
+        struct generic_syscall gsp
                 = { .syscall_number = syscall_num,
                     .arg0 = p_frame->uc.uc_mcontext.rdi,
                     .arg1 = p_frame->uc.uc_mcontext.rsi,
@@ -345,7 +345,7 @@ static void  __attribute__((optimize("O0"))) handle_sigill(int n)
                     .arg4 = p_frame->uc.uc_mcontext.r8,
                     .arg5 = p_frame->uc.uc_mcontext.r9};
 
-        long int ret = do_syscall((struct syscall *) &gs);
+        long int ret = do_syscall(&gsp);
 
         /* Set the return value of the emulated syscall */
         p_frame->uc.uc_mcontext.rax = ret;
