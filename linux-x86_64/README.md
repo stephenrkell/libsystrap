@@ -20,3 +20,13 @@ library.
 
 `restorer.s` is a small assembly snippet required for the signal handler
 mechanism in trap-syscall to work properly.
+
+
+`syscall-handlers.{c,h}` has some hand-written interposing examples -
+parts of this should be replaced by C generated from the .ml data
+produced by the code in syscall-dsl.
+
+
+`make` here builds and runs some test using this syscall-handlers on
+the `true` program.
+
