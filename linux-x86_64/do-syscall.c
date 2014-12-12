@@ -10,9 +10,9 @@
 
 long int do_syscall (struct generic_syscall *gsp)
 {
-        pre_handling(gsp);
-        long int ret = syscalls[gsp->syscall_number](gsp);
-        post_handling(gsp, ret);
+	pre_handling(gsp);
+	long int ret = syscalls[gsp->syscall_number](gsp);
+	post_handling(gsp, ret);
 
-        return ret;
+	return ret;
 }

@@ -10,10 +10,10 @@
 	long retcode = 0; \
 	op = SYS_exit; \
 	__asm__ volatile ("movq %0, %%rdi      # \n\
-	                  "FIX_STACK_ALIGNMENT " \n\
-	                   movq %1, %%rax      # \n\
-	                   syscall             # do the syscall \n\
-	                  "UNFIX_STACK_ALIGNMENT " \n" \
+			  "FIX_STACK_ALIGNMENT " \n\
+			   movq %1, %%rax      # \n\
+			   syscall	     # do the syscall \n\
+			  "UNFIX_STACK_ALIGNMENT " \n" \
 	  : /* no output*/ : "rm"(retcode), "rm"(op) : "r12", SYSCALL_CLOBBER_LIST);
 
 void raw_exit(int status)
@@ -31,12 +31,12 @@ int __attribute__((noinline)) raw_open(const char *pathname, int flags)
 	/* We have to do it all in one big asm statement, since the compiler
 	 * can change what's in registers in between asm statements. */
 	__asm__ volatile ("movq %1, %%rdi      # \n\
-	                   movq %2, %%rsi      # \n\
-	                  "FIX_STACK_ALIGNMENT " \n\
-	                   movq %3, %%rax      # \n\
-	                   syscall             # do the syscall \n\
-	                  "UNFIX_STACK_ALIGNMENT " \n\
-	                   movq %%rax, %0\n"
+			   movq %2, %%rsi      # \n\
+			  "FIX_STACK_ALIGNMENT " \n\
+			   movq %3, %%rax      # \n\
+			   syscall	     # do the syscall \n\
+			  "UNFIX_STACK_ALIGNMENT " \n\
+			   movq %%rax, %0\n"
 	  : "=r"(ret) : "rm"(pathname), "rm"(longflags), "rm"(op) : "r12", SYSCALL_CLOBBER_LIST);
 	return ret;
 }
@@ -49,12 +49,12 @@ int __attribute__((noinline)) raw_fstat(int fd, struct stat *buf)
 	/* We have to do it all in one big asm statement, since the compiler
 	 * can change what's in registers in between asm statements. */
 	__asm__ volatile ("movq %1, %%rdi      # \n\
-	                   movq %2, %%rsi      # \n\
-	                  "FIX_STACK_ALIGNMENT " \n\
-	                   movq %3, %%rax      # \n\
-	                   syscall             # do the syscall \n\
-	                  "UNFIX_STACK_ALIGNMENT " \n\
-	                   movq %%rax, %0\n"
+			   movq %2, %%rsi      # \n\
+			  "FIX_STACK_ALIGNMENT " \n\
+			   movq %3, %%rax      # \n\
+			   syscall	     # do the syscall \n\
+			  "UNFIX_STACK_ALIGNMENT " \n\
+			   movq %%rax, %0\n"
 	  : "=r"(ret) : "rm"(fd), "rm"(buf), "rm"(op) : "r12", SYSCALL_CLOBBER_LIST);
 	return ret;
 }
@@ -68,12 +68,12 @@ int __attribute__((noinline)) raw_nanosleep(struct timespec *req,
 	/* We have to do it all in one big asm statement, since the compiler
 	 * can change what's in registers in between asm statements. */
 	__asm__ volatile ("movq %1, %%rdi      # \n\
-	                   movq %2, %%rsi      # \n\
-	                  "FIX_STACK_ALIGNMENT " \n\
-	                   movq %3, %%rax      # \n\
-	                   syscall             # do the syscall \n\
-	                  "UNFIX_STACK_ALIGNMENT " \n\
-	                   movq %%rax, %0\n"
+			   movq %2, %%rsi      # \n\
+			  "FIX_STACK_ALIGNMENT " \n\
+			   movq %3, %%rax      # \n\
+			   syscall	     # do the syscall \n\
+			  "UNFIX_STACK_ALIGNMENT " \n\
+			   movq %%rax, %0\n"
 	  : "=r"(ret) : "rm"(req), "rm"(rem), "rm"(op) : "r12", SYSCALL_CLOBBER_LIST);
 	return ret;
 }
@@ -84,13 +84,13 @@ int __attribute__((noinline)) raw_read(int fd, void *buf, size_t count)
 	long int op = SYS_read;
 	long int longfd = fd;
 	__asm__ volatile ("movq %1, %%rdi      # \n\
-	                   movq %2, %%rsi      # \n\
-	                   movq %3, %%rdx      # \n\
-	                  "FIX_STACK_ALIGNMENT " \n\
-	                   movq %4, %%rax      # \n\
-	                   syscall             # do the syscall \n\
-	                  "UNFIX_STACK_ALIGNMENT " \n\
-	                   movq %%rax, %0\n"
+			   movq %2, %%rsi      # \n\
+			   movq %3, %%rdx      # \n\
+			  "FIX_STACK_ALIGNMENT " \n\
+			   movq %4, %%rax      # \n\
+			   syscall	     # do the syscall \n\
+			  "UNFIX_STACK_ALIGNMENT " \n\
+			   movq %%rax, %0\n"
 	  : "=r"(ret) : "rm"(longfd), "rm"(buf), "rm"(count), "rm"(op) : "r12",  SYSCALL_CLOBBER_LIST);
 
 	return ret;
@@ -102,11 +102,11 @@ int __attribute__((noinline)) raw_close(int fd)
 	long int op = SYS_close;
 	long int longfd = fd;
 	__asm__ volatile ("movq %1, %%rdi      # \n\
-	                  "FIX_STACK_ALIGNMENT " \n\
-	                   movq %2, %%rax      # \n\
-	                   syscall             # do the syscall \n\
-	                  "UNFIX_STACK_ALIGNMENT " \n\
-	                   movq %%rax, %0\n"
+			  "FIX_STACK_ALIGNMENT " \n\
+			   movq %2, %%rax      # \n\
+			   syscall	     # do the syscall \n\
+			  "UNFIX_STACK_ALIGNMENT " \n\
+			   movq %%rax, %0\n"
 	  : "=r"(ret) : "rm"(longfd), "rm"(op) : "%r12", SYSCALL_CLOBBER_LIST);
 	return ret;
 }
@@ -117,33 +117,33 @@ int __attribute__((noinline)) raw_mprotect(const void *addr, size_t len, int pro
 	long int op = SYS_mprotect;
 	long int longprot = prot;
 	__asm__ volatile ("movq %1, %%rdi      # \n\
-	                   movq %2, %%rsi      # \n\
-	                   movq %3, %%rdx      # \n\
-	                  "FIX_STACK_ALIGNMENT " \n\
-	                   movq %4, %%rax      # \n\
-	                   syscall             # do the syscall \n\
-	                  "UNFIX_STACK_ALIGNMENT " \n\
-	                   movq %%rax, %0\n"
+			   movq %2, %%rsi      # \n\
+			   movq %3, %%rdx      # \n\
+			  "FIX_STACK_ALIGNMENT " \n\
+			   movq %4, %%rax      # \n\
+			   syscall	     # do the syscall \n\
+			  "UNFIX_STACK_ALIGNMENT " \n\
+			   movq %%rax, %0\n"
 	  : "=r"(ret) : "rm"(addr), "rm"(len), "rm"(longprot), "rm"(op) : "r12",  SYSCALL_CLOBBER_LIST);
 	return ret;
 }
 
 int __attribute__((noinline)) raw_rt_sigaction(int signum, const struct sigaction *act,
-                     struct sigaction *oldact)
+		     struct sigaction *oldact)
 {
 	long int ret;
 	long int op = SYS_rt_sigaction;
 	long int longsignum = signum;
 	size_t sigsetsize = sizeof (sigset_t);
 	__asm__ volatile ("movq %1, %%rdi      # \n\
-	                   movq %2, %%rsi      # \n\
-	                   movq %3, %%rdx      # \n\
-	                   movq %4, %%r10      # \n\
-	                  "FIX_STACK_ALIGNMENT " \n\
-	                   movq %5, %%rax      # \n\
-	                   syscall             # do the syscall \n\
-	                  "UNFIX_STACK_ALIGNMENT " \n\
-	                   movq %%rax, %0\n"
+			   movq %2, %%rsi      # \n\
+			   movq %3, %%rdx      # \n\
+			   movq %4, %%r10      # \n\
+			  "FIX_STACK_ALIGNMENT " \n\
+			   movq %5, %%rax      # \n\
+			   syscall	     # do the syscall \n\
+			  "UNFIX_STACK_ALIGNMENT " \n\
+			   movq %%rax, %0\n"
 	  : "=r"(ret) : "rm"(longsignum), "rm"(act), "rm"(oldact), "rm"(sigsetsize), "rm"(op) : "r12",  SYSCALL_CLOBBER_LIST);
 
 	return ret;
@@ -164,13 +164,13 @@ ssize_t __attribute__((noinline)) raw_write(int fd, const void *buf, size_t coun
 	long int op = SYS_write;
 	long int longfd = fd;
 	__asm__ volatile ("movq %1, %%rdi      # \n\
-	                   movq %2, %%rsi      # \n\
-	                   movq %3, %%rdx      # \n\
-	                  "FIX_STACK_ALIGNMENT " \n\
-	                   movq %4, %%rax      # \n\
-	                   syscall             # do the syscall \n\
-	                  "UNFIX_STACK_ALIGNMENT " \n\
-	                   movq %%rax, %0\n"
+			   movq %2, %%rsi      # \n\
+			   movq %3, %%rdx      # \n\
+			  "FIX_STACK_ALIGNMENT " \n\
+			   movq %4, %%rax      # \n\
+			   syscall	     # do the syscall \n\
+			  "UNFIX_STACK_ALIGNMENT " \n\
+			   movq %%rax, %0\n"
 	  : "=r"(ret) : "rm"(longfd), "rm"(buf), "rm"(count), "rm"(op) : "r12",  SYSCALL_CLOBBER_LIST);
 
 	return ret;

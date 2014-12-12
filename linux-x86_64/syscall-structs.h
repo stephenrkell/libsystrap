@@ -34,27 +34,27 @@ typedef unsigned short umode_t;
  * headers file, BSD-style.
  */
 struct sys_read_args {
-        PADDED(int fd)
-        PADDED(void *buf)
-        PADDED(size_t count)
+	PADDED(int fd)
+	PADDED(void *buf)
+	PADDED(size_t count)
 };
 struct sys_write_args {
-        PADDED(int fd)
-        PADDED(const void *buf)
-        PADDED(size_t count)
+	PADDED(int fd)
+	PADDED(const void *buf)
+	PADDED(size_t count)
 };
 struct sys_open_args {
-        PADDED(const char __user* filename)
-        PADDED(int flags)
-        PADDED(umode_t mode)
+	PADDED(const char __user* filename)
+	PADDED(int flags)
+	PADDED(umode_t mode)
 };
 struct sys_getpid_args {
 };
 struct sys_exit_args {
-        PADDED(int status)
+	PADDED(int status)
 };
 struct sys_time_args {
-        PADDED(__kernel_time_t __user *tloc)
+	PADDED(__kernel_time_t __user *tloc)
 };
 
 /*
@@ -63,15 +63,16 @@ struct sys_time_args {
  * plus the syscall number.
  */
 struct syscall {
-        PADDED(int syscall_number)
-        union {
-                struct sys_read_args sys_read_args;
-                struct sys_write_args sys_write_args;
-                struct sys_open_args sys_open_args;
-                struct sys_getpid_args sys_getpid_args;
-                struct sys_exit_args sys_exit_args;
-                struct sys_time_args sys_time_args;
-        } syscall_args;
+		int nargs;
+	PADDED(int syscall_number)
+	union {
+		struct sys_read_args sys_read_args;
+		struct sys_write_args sys_write_args;
+		struct sys_open_args sys_open_args;
+		struct sys_getpid_args sys_getpid_args;
+		struct sys_exit_args sys_exit_args;
+		struct sys_time_args sys_time_args;
+	} syscall_args;
 };
 
 

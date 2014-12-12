@@ -9,7 +9,7 @@
 /* Basic idea: we are a preloaded library whose constructor
  * - write-protects all executable pages
  *     -- using /proc/self/maps to enumerate them?
- *        YES, but must read using raw syscalls.
+ *	YES, but must read using raw syscalls.
  *
  * - makes them writable, breakpoint any syscall instrs
  * - ... and then makes them unwritable again
@@ -58,7 +58,7 @@ static unsigned long read_hex_num(const char **p_c, const char *end)
 {
 	unsigned long cur = 0;
 	while ((*p_c != end && (**p_c >= '0' && **p_c <= '9'))
-                        || (**p_c >= 'a' && **p_c <= 'f'))
+			|| (**p_c >= 'a' && **p_c <= 'f'))
 	{
 		cur <<= 4;
 		cur += ((**p_c >= '0' && **p_c <= '9') ? **p_c - '0'
@@ -277,15 +277,15 @@ int main(void)
 	long int op = SYS_mprotect;
 
 
-        //	__asm__ (".align 4096");
+	//	__asm__ (".align 4096");
 exit_and_return:
 	//__asm__ volatile ("movq %0, %%rdi      # \n\
-	//                   movq %1, %%rsi      # \n\
-	//                   movq %2, %%rdx      # \n\
-	//                  "FIX_STACK_ALIGNMENT " \n\
-	//                   movq %3, %%rax      # \n\
-	//                   syscall             # do the syscall \n\
-	//                  "UNFIX_STACK_ALIGNMENT " \n"
+	//		   movq %1, %%rsi      # \n\
+	//		   movq %2, %%rdx      # \n\
+	//		  "FIX_STACK_ALIGNMENT " \n\
+	//		   movq %3, %%rax      # \n\
+	//		   syscall	     # do the syscall \n\
+	//		  "UNFIX_STACK_ALIGNMENT " \n"
 	//  : /* no output*/ : "rm"(our_text_begin_address), "rm"(len), "rm"(longprot), "rm"(op) :  "%rax", "r12", SYSCALL_CLOBBER_LIST);
 
 #ifdef EXECUTABLE
@@ -336,19 +336,19 @@ static void  __attribute__((optimize("O0"))) handle_sigill(int n)
 	/* Check whether it creates executable mappings; if so,
 	 * we make them nx, do the rewrite, then make them x. */
 
-        struct generic_syscall gsp
-                = { .syscall_number = syscall_num,
-                    .arg0 = p_frame->uc.uc_mcontext.rdi,
-                    .arg1 = p_frame->uc.uc_mcontext.rsi,
-                    .arg2 = p_frame->uc.uc_mcontext.rdx,
-                    .arg3 = p_frame->uc.uc_mcontext.r10,
-                    .arg4 = p_frame->uc.uc_mcontext.r8,
-                    .arg5 = p_frame->uc.uc_mcontext.r9};
+	struct generic_syscall gsp
+		= { .syscall_number = syscall_num,
+		    .arg0 = p_frame->uc.uc_mcontext.rdi,
+		    .arg1 = p_frame->uc.uc_mcontext.rsi,
+		    .arg2 = p_frame->uc.uc_mcontext.rdx,
+		    .arg3 = p_frame->uc.uc_mcontext.r10,
+		    .arg4 = p_frame->uc.uc_mcontext.r8,
+		    .arg5 = p_frame->uc.uc_mcontext.r9};
 
-        long int ret = do_syscall(&gsp);
+	long int ret = do_syscall(&gsp);
 
-        /* Set the return value of the emulated syscall */
-        p_frame->uc.uc_mcontext.rax = ret;
+	/* Set the return value of the emulated syscall */
+	p_frame->uc.uc_mcontext.rax = ret;
 
 	/* Resume from *after* the faulting instruction. */
 out:

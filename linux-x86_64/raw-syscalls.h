@@ -17,11 +17,11 @@
 #include <stdint.h>
 
 /* Our callee-save registers are
- *         rbp, rbx, r12, r13, r14, r15
+ *	 rbp, rbx, r12, r13, r14, r15
  * but all others need to be in the clobber list.
- *         rdi, rsi, rax, rcx, rdx, r8, r9, r10, r11
- *         xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8, xmm9, xmm10, xmm11, xmm12, xmm13, xmm14, xmm15
- *         condition codes, memory
+ *	 rdi, rsi, rax, rcx, rdx, r8, r9, r10, r11
+ *	 xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8, xmm9, xmm10, xmm11, xmm12, xmm13, xmm14, xmm15
+ *	 condition codes, memory
  */
 #define SYSCALL_CLOBBER_LIST \
 	"%rdi", "%rsi", "%rax", "%rcx", "%rdx", "%r8", "%r9", "%r10", "%r11", \
@@ -49,15 +49,15 @@ void raw_exit(int status);
 int raw_open(const char *pathname, int flags) __attribute__((noinline));
 int raw_fstat(int fd, struct stat *buf) __attribute__((noinline));
 int raw_nanosleep(struct timespec *req,
-                struct timespec *rem) __attribute__((noinline));
+		struct timespec *rem) __attribute__((noinline));
 int raw_read(int fd, void *buf, size_t count) __attribute__((noinline));
 ssize_t raw_write(int fd, const void *buf,
-                size_t count) __attribute__((noinline));
+		size_t count) __attribute__((noinline));
 int raw_close(int fd) __attribute__((noinline));
 int raw_mprotect(const void *addr, size_t len,
-                int prot) __attribute__((noinline));
+		int prot) __attribute__((noinline));
 int raw_rt_sigaction(int signum, const struct sigaction *act,
-                     struct sigaction *oldact) __attribute__((noinline));
+		     struct sigaction *oldact) __attribute__((noinline));
 void assert_fail(const char *msg);
 const char *fmt_hex_num(unsigned long n);
 
