@@ -1,3 +1,17 @@
+# A few ways of interposing on system calls
+
+ - (in a dynamically linked binary) overriding the C library's wrappers
+ - (in a statically linked binary)  ptrace(TRACE_ME)
+ - (in either case)                 breakpointing on any syscall instruction (HMM, CFI-style problems)
+
+Problem with libc: wrappers do not have publicly available names, nor consistent names.
+Problem with ptrace(TRACE_ME) -- you need a separate thread to trace from.
+Problem with breakpointing: must handle self-modifying code (JIT). 
+We choose the breakpointing approach. The JIT problem is solved by a bootstrapping approach: 
+the JIT must create executable mappings by making system calls, which we can intercept as they happen, 
+and perform our breakpointing on the dynamically generated instructions.
+
+
 # Trap-syscall
 
 This is a pre-loaded library aiming at allowing a user to run a binary

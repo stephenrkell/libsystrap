@@ -18,12 +18,22 @@ default: test trap-syscalls trap-syscalls.so
 
 SRC := trap-syscalls.c do-syscall.c syscall-handlers.c raw-syscalls.c
 DEPS := $(patsubst %.c,.%.d,$(SRC))
+$(warning DEPS are $(DEPS))
+
+LIBC_ARCHIVE ?= -lc
+LD_SO ?= /lib64/ld-linux-x86-64.so.2
+
+# We want to use libopcodes, but don't want to link against it
+# (to avoid libc dependency). Just vpath the source.
+LIBOPCODES_A ?= $(realpath $(wildcard /usr/local/src/binutils*)/builddir-single/opcodes/libopcodes.a)
+ifeq ($(LIBOPCODES_A),)
+$(error Could not find libopcodes.a! Please set LIBOPCODES_A)
+endif
 
 $(DEPS): .%.d: %.c
 	$(CC) -MM $(CFLAGS) "$<" > "$@"
 
 -include $(DEPS)
-
 
 WFLAGS := -Wall 							\
 	 -Wextra 							\
@@ -32,39 +42,41 @@ WFLAGS := -Wall 							\
 	 -Wno-unused-parameter 						\
 	 -Wno-unused-variable						\
 	 -Wno-comment
-OFLAGS := -O0 # XXX At this moment, any optimization breaks the code.
-CFLAGS += $(WFLAGS) $(OFLAGS) -g
+OFLAGS := -O2 
+CFLAGS += -std=c99 $(WFLAGS) $(OFLAGS) -g
 
 all: trap-syscalls.so
 
-test-programs/hello-static: test-src/hello.c
-	$(CC) -static -o "$@" $(CFLAGS) "$<" $(LDFLAGS) $(LDLIBS)
 
-test-programs/hello-dynamic: test-src/hello.c
-	$(CC) -o "$@" $(CFLAGS) "$<" $(LDFLAGS) $(LDLIBS)
-
-# Turn off write permission on all executable pages. (HARD to do atomically)
-# Scan them all and break on all syscall-making instruction bytes. (more atomicity)
-# Install our breakpoint handler
-# NOW we are bound to take a breakpoint before any *more* executable mappings are created.
-# So we are a robust gatekeeper.
-
+# standalone program, for testing
 trap-syscalls: $(SRC) restorer.o
 	$(CC) $(CFLAGS) -DEXECUTABLE -o "$@" $^ $(LDFLAGS) $(LDLIBS)
 
 trap-syscalls.so: $(SRC) restorer.o
-	$(CC) $(CFLAGS) -fPIC -shared -o "$@" $^ $(LDFLAGS) $(LDLIBS)
+	$(CC) $(CFLAGS) -fPIC -ffreestanding -shared -o "$@" $^ $(LDFLAGS) -Bstatic $(LDLIBS) $(LIBC_ARCHIVE)
 
 test-programs:
 	mkdir -p test-programs
 
 test-programs/%: test-src/%.c test-programs
 	$(CC) -Wl,--export-dynamic -o $@ -nostartfiles -nostdlib -Bdynamic $< \
-		/lib64/ld-linux-x86-64.so.2
+		$(LD_SO)
+
+test-programs/true: LDLIBS += $(LD_SO)
+test-programs/true: LDFLAGS += -nostartfiles -nostdlib
 
 test-programs/%: test-src/%.s test-programs
-	$(CC) -Wl,--export-dynamic -o $@ -nostartfiles -nostdlib -Bdynamic $< \
-		/lib64/ld-linux-x86-64.so.2
+	$(CC) $(CFLAGS) -o "$@" "$<" $(LDFLAGS) $(LDLIBS)
+
+test-programs/%: test-src/%.c test-programs
+	$(CC) -ffreestanding $(CFLAGS) -o "$@" "$<" $(LDFLAGS) $(LDLIBS)
+
+# statically linked binaries can't do LD_PRELOAD, so are not a suitable test case
+# test-programs/hello-static: test-src/hello.c
+# 	$(CC) -static -o "$@" $(CFLAGS) "$<" $(LDFLAGS) $(LDLIBS)
+
+test-programs/hello-dynamic: test-src/hello.c
+	$(CC) -o "$@" $(CFLAGS) "$<" $(LDFLAGS) $(LDLIBS)
 
 .PHONY: clean
 clean:
@@ -74,7 +86,7 @@ clean:
 	rm -f restorer.o
 
 .PHONY: test
-test: test-true
+test: test-true | trap-syscalls.so
 
 test-%: trap-syscalls.so test-programs/%
-	LD_PRELOAD=`pwd`/trap-syscalls.so ./test-programs/$*
+	./run-with-trap-syscalls.sh ./test-programs/$*

@@ -11,6 +11,14 @@
 void pre_handling (struct generic_syscall *gsp);
 void post_handling (struct generic_syscall *gsp, long int ret);
 
-extern long int (*syscalls[SYSCALL_MAX])(struct generic_syscall *);
+long int __attribute__((noinline)) do_syscall6 (struct generic_syscall *gsp);
+long int __attribute__((noinline)) do_syscall5 (struct generic_syscall *gsp);
+long int __attribute__((noinline)) do_syscall4 (struct generic_syscall *gsp);
+long int __attribute__((noinline)) do_syscall3 (struct generic_syscall *gsp);
+long int __attribute__((noinline)) do_syscall2 (struct generic_syscall *gsp);
+long int __attribute__((noinline)) do_syscall1 (struct generic_syscall *gsp);
+long int __attribute__((noinline)) do_syscall0 (struct generic_syscall *gsp);
+
+extern long int (*replaced_syscalls[SYSCALL_MAX])(struct generic_syscall *);
 
 #endif // __SYSCALL_HANDLERS_H__

@@ -16,10 +16,11 @@
 			  "UNFIX_STACK_ALIGNMENT " \n" \
 	  : /* no output*/ : "rm"(retcode), "rm"(op) : "r12", SYSCALL_CLOBBER_LIST);
 
-void raw_exit(int status)
+void (__attribute__((noreturn)) raw_exit)(int status)
 {
 	long int op;
 	DO_EXIT_SYSCALL;
+	__builtin_unreachable();
 }
 
 int __attribute__((noinline)) raw_open(const char *pathname, int flags)
@@ -45,6 +46,7 @@ int __attribute__((noinline)) raw_fstat(int fd, struct stat *buf)
 {
 	long int ret;
 	long int op = SYS_fstat;
+	long int long_fd = fd;
 
 	/* We have to do it all in one big asm statement, since the compiler
 	 * can change what's in registers in between asm statements. */
@@ -55,7 +57,7 @@ int __attribute__((noinline)) raw_fstat(int fd, struct stat *buf)
 			   syscall	     # do the syscall \n\
 			  "UNFIX_STACK_ALIGNMENT " \n\
 			   movq %%rax, %0\n"
-	  : "=r"(ret) : "rm"(fd), "rm"(buf), "rm"(op) : "r12", SYSCALL_CLOBBER_LIST);
+	  : "=r"(ret) : "rm"(long_fd), "rm"(buf), "rm"(op) : "r12", SYSCALL_CLOBBER_LIST);
 	return ret;
 }
 
@@ -149,7 +151,9 @@ int __attribute__((noinline)) raw_rt_sigaction(int signum, const struct sigactio
 	return ret;
 }
 
-void assert_fail(const char *msg)
+void (__attribute__((noreturn)) __assert_fail)(
+	const char *msg, const char *file,
+	unsigned int line, const char *function)
 {
 	long strlen = 0;
 	const char *msg_end = msg;

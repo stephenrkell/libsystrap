@@ -63,7 +63,6 @@ struct sys_time_args {
  * plus the syscall number.
  */
 struct syscall {
-		int nargs;
 	PADDED(int syscall_number)
 	union {
 		struct sys_read_args sys_read_args;

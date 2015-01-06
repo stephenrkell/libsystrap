@@ -238,7 +238,7 @@ static long int do_open (struct generic_syscall *gsp)
 	return ret;
 }
 
-long int (*syscalls[SYSCALL_MAX])(struct generic_syscall *) = {
+long int (*replaced_syscalls[SYSCALL_MAX])(struct generic_syscall *) = {
 	DECL_SYSCALL(read)
 	DECL_SYSCALL(write)
 	DECL_SYSCALL(open)

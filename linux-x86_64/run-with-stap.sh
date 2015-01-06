@@ -41,9 +41,17 @@ stap_filter () {
 
 # start the process -- our footprint summary goes to fd 7
 $( dirname "$0" )/run-with-trap-syscalls.sh "$@" 7>"$pipename" &
+child_pid=$!
 
 # start stap -- its awkwardly-formatted info goes on stdout,
 # which is handy for us to filter
 stap -x $! $(dirname "$0")/systemtap/copy-tofrom-user.stp | \
 stap_filter | \
-diff -u - "$pipename"
+diff -u - "$pipename" &
+stap_pid=$!
+
+while [ -d /proc/$child_pid ]; do
+    sleep 1
+done
+
+kill $stap_pid

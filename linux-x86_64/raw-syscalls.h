@@ -41,11 +41,13 @@
 #define stringify(cond) #cond
 
 #define assert(cond) \
-	do { ((cond) ? ((void) 0) : (assert_fail("Assertion failed: \"" stringify((cond)) "\", file " __FILE__ ))); }  while (0)
+	do { ((cond) ? ((void) 0) : (__assert_fail("Assertion failed: \"" stringify((cond)) "\"", __FILE__, __LINE__, __func__ ))); }  while (0)
 
 #define write_string(s) raw_write(2, (s), sizeof (s) - 1)
+#define write_chars(s, t)  raw_write(2, s, t - s)
+#define write_ulong(a)   raw_write(2, fmt_hex_num((a)), 18)
 
-void raw_exit(int status);
+void raw_exit(int status) __attribute__((noreturn));
 int raw_open(const char *pathname, int flags) __attribute__((noinline));
 int raw_fstat(int fd, struct stat *buf) __attribute__((noinline));
 int raw_nanosleep(struct timespec *req,
@@ -58,7 +60,8 @@ int raw_mprotect(const void *addr, size_t len,
 		int prot) __attribute__((noinline));
 int raw_rt_sigaction(int signum, const struct sigaction *act,
 		     struct sigaction *oldact) __attribute__((noinline));
-void assert_fail(const char *msg);
+void __assert_fail(const char *assertion, const char *file,
+                   unsigned int line, const char *function) __attribute__((noreturn));
 const char *fmt_hex_num(unsigned long n);
 
 #endif // __RAW_SYSCALLS_H__
