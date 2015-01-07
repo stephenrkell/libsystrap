@@ -45,7 +45,7 @@ child_pid=$!
 
 # start stap -- its awkwardly-formatted info goes on stdout,
 # which is handy for us to filter
-stap -x $! $(dirname "$0")/systemtap/copy-tofrom-user.stp | \
+stap -x $! $(dirname "$0")/copy-tofrom-user.stp | \
 stap_filter | \
 diff -u - "$pipename" &
 stap_pid=$!

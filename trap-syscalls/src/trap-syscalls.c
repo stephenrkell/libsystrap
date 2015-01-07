@@ -435,8 +435,9 @@ static void handle_sigill(int n)
 
 	long int ret = do_syscall(&gsp);
 
-	/* Set the return value of the emulated syscall. This is undefined behaviour
-	 * in C, so we do it in assembly. */
+	/* Copy the return value of the emulated syscall into the trapping context. 
+	 * This is undefined behaviour in C, or at least, gcc optimises it away for me.
+	 * So do it in volatile assembly. */
 	// p_frame->uc.uc_mcontext.rax = ret;
 	__asm__ volatile ("movq %1, %0" : "=m"(p_frame->uc.uc_mcontext.rax) : "rm"(ret) : /* no clobbers */);
 
