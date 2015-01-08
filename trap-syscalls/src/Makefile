@@ -16,10 +16,10 @@
 
 default: trap-syscalls.so
 
-C_SRC := trap-syscalls.c do-syscall.c syscall-handlers.c raw-syscalls.c 
+C_SRC := $(wildcard *.c)
 DEPS += $(patsubst %.c,.%.d,$(C_SRC))
 
-S_SRC := restorer.s
+S_SRC := $(wildcard *.s)
 
 # $(warning DEPS are $(DEPS))
 
@@ -34,8 +34,12 @@ LIBC_ARCHIVE ?= -lc
 # $(error Could not find libopcodes.a! Please set LIBOPCODES_A)
 # endif
 
+# Write the deps twice, once for each of the binaries we build.
+# This is necessary because -MM by default only outputs a .o rule,
+# whereas we don't build via .o, so want a rule for the whole binary.
 $(DEPS): .%.d: %.c
-	$(CC) -MM $(CFLAGS) "$<" > "$@"
+	$(CC) -MT trap-syscalls.so -MM $(CFLAGS) "$<" > "$@"
+	$(CC) -MT trap-syscalls -DEXECUTABLE -MM $(CFLAGS) "$<" >> "$@"
 
 ifneq ($(MAKECMDGOALS),clean)
 -include $(DEPS)

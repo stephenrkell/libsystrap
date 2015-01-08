@@ -2,16 +2,9 @@
 #define __RAW_SYSCALLS_H__
 
 #include <unistd.h>
-#include <asm/signal.h>
-#include <asm/sigcontext.h>
-#include <asm/siginfo.h>
-#include <asm/ucontext.h>
 #include <asm-generic/stat.h>
-// #include <ucontext.h>
 #include <sys/syscall.h>
-// #include <sys/types.h>
-// #include <sys/stat.h>
-// #include <fcntl.h>
+#include <asm/signal.h>
 #include <asm/fcntl.h>
 #include <sys/mman.h>
 #include <stdint.h>

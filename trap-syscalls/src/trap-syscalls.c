@@ -27,19 +27,10 @@
  * that we need. */
 #include <unistd.h>
 #include <asm/signal.h>
-#include <asm/sigcontext.h>
-#include <asm/siginfo.h>
-#include <asm/ucontext.h>
-// #include <ucontext.h>
-#include <sys/syscall.h>
-// #include <sys/types.h>
-// #include <sys/stat.h>
-// #include <fcntl.h>
 #include <asm/fcntl.h>
 #include <sys/mman.h>
 #include <stdint.h>
 
-#include "trap-syscalls.h"
 #include "raw-syscalls.h"
 #include "do-syscall.h"
 
@@ -95,11 +86,6 @@ static void replace_syscall(unsigned char *pos, unsigned char *end)
 			default: *pos++ = 0x90; /* nop */ break;
 		}
 	}
-}
-
-static unsigned long trapped_instruction_length(unsigned char *ins)
-{
-	return 2; /* FIXME */
 }
 
 static void walk_instructions(unsigned char *pos, unsigned char *end,
@@ -394,17 +380,7 @@ ud2_addr:
 static void handle_sigill(int n)
 {
 	unsigned long *frame_base = __builtin_frame_address(0);
-	// __asm__ volatile ("movq %%rbp, %0\n" : "=r"(entry_bp));
-
-	/* In kernel-speak this is a "struct sigframe" / "struct rt_sigframe" --
-	 * sadly no user-level header defines it. But it seems to be vaguely standard
-	 * per-architecture (here Intel iBCS). */
-	struct
-	{
-		char *pretcode;
-		struct ucontext uc;
-		struct siginfo info;
-	} *p_frame = (void*) (frame_base + 1);
+	struct ibcs_sigframe *p_frame = (struct ibcs_sigframe *) (frame_base + 1);
 
 	/* Decode the syscall using sigcontext. */
 	write_string("Took a trap from instruction at ");
@@ -413,7 +389,8 @@ static void handle_sigill(int n)
 	if (p_frame->uc.uc_mcontext.rip == (uintptr_t) ignore_ud2_addr)
 	{
 		write_string(" which is our test trap address; continuing.\n");
-		goto out;
+		resume_from_sigframe(0, p_frame, 2);
+		return;
 	}
 #endif
 	write_string(" which we think is syscall number ");
@@ -424,30 +401,16 @@ static void handle_sigill(int n)
 	/* FIXME: check whether it creates executable mappings; if so,
 	 * we make them nx, do the rewrite, then make them x. */
 
-	struct generic_syscall gsp
-		= { .syscall_number = syscall_num,
-		    .arg0 = p_frame->uc.uc_mcontext.rdi,
-		    .arg1 = p_frame->uc.uc_mcontext.rsi,
-		    .arg2 = p_frame->uc.uc_mcontext.rdx,
-		    .arg3 = p_frame->uc.uc_mcontext.r10,
-		    .arg4 = p_frame->uc.uc_mcontext.r8,
-		    .arg5 = p_frame->uc.uc_mcontext.r9};
+	struct generic_syscall gsp = {
+		.saved_context = p_frame,
+		.syscall_number = syscall_num,
+		.arg0 = p_frame->uc.uc_mcontext.rdi,
+		.arg1 = p_frame->uc.uc_mcontext.rsi,
+		.arg2 = p_frame->uc.uc_mcontext.rdx,
+		.arg3 = p_frame->uc.uc_mcontext.r10,
+		.arg4 = p_frame->uc.uc_mcontext.r8,
+		.arg5 = p_frame->uc.uc_mcontext.r9,
+	};
 
-	long int ret = do_syscall(&gsp);
-
-	/* Copy the return value of the emulated syscall into the trapping context. 
-	 * This is undefined behaviour in C, or at least, gcc optimises it away for me.
-	 * So do it in volatile assembly. */
-	// p_frame->uc.uc_mcontext.rax = ret;
-	__asm__ volatile ("movq %1, %0" : "=m"(p_frame->uc.uc_mcontext.rax) : "rm"(ret) : /* no clobbers */);
-
-	/* Resume from *after* the faulting instruction. */
-	unsigned long ip;
-out:
-	// adjust the saved program counter to point past the trapping instr
-	__asm__ volatile ("movq %1, %0" : "=rm"(ip) : "m"(p_frame->uc.uc_mcontext.rip) : /* no clobbers */);
-	ip += trapped_instruction_length((unsigned char *) p_frame->uc.uc_mcontext.rip);
-	__asm__ volatile ("movq %1, %0" : "=m"(p_frame->uc.uc_mcontext.rip) : "rm"(ip) : /* no clobbers */);
-	
-	return;
+	do_syscall_and_resume(&gsp); // inline
 }

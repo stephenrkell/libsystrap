@@ -155,7 +155,6 @@ void (__attribute__((noreturn)) __assert_fail)(
 	const char *msg, const char *file,
 	unsigned int line, const char *function)
 {
-	long strlen = 0;
 	const char *msg_end = msg;
 	while (*msg_end++);
 	raw_write(2, msg, msg_end - msg - 1);
