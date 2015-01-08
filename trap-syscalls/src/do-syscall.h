@@ -184,20 +184,16 @@ __attribute__((always_inline,gnu_inline))
 resume_from_sigframe(long int ret, struct ibcs_sigframe *p_frame, unsigned instr_len)
 {
 	/* Copy the return value of the emulated syscall into the trapping context, and
-	 * resume from *after* the faulting instruction. */
-//	p_frame->uc.uc_mcontext.rax = ret;
-//	p_frame->uc.uc_mcontext.rip += instr_len;
-	
-	/* The above is undefined behaviour in C, or at least, gcc optimises it away for me.
-	 * So do it in volatile assembly. */
+	 * resume from *after* the faulting instruction. 
+	 * 
+	 * Writing through p_frame is undefined behaviour in C, or at least, gcc optimises 
+	 * it away for me. So do it in volatile assembly. */
 
 	// set the return value
-	__asm__ volatile ("movq %1, %0" : "=m"(p_frame->uc.uc_mcontext.rax) : "rm"(ret) : /* no clobbers */);
+	__asm__ volatile ("movq %1, %0" : "=m"(p_frame->uc.uc_mcontext.rax) : "r"(ret) : "memory");
+
 	// adjust the saved program counter to point past the trapping instr
-	unsigned long int ip;
-	__asm__ volatile ("movq %1, %0" : "=rm"(ip) : "m"(p_frame->uc.uc_mcontext.rip) : /* no clobbers */);
-	ip += instr_len;
-	__asm__ volatile ("movq %1, %0" : "=m"(p_frame->uc.uc_mcontext.rip) : "rm"(ip) : /* no clobbers */);
+	__asm__ volatile ("movq %1, %0" : "=m"(p_frame->uc.uc_mcontext.rip) : "r"(p_frame->uc.uc_mcontext.rip + instr_len) : "memory");
 }
 
 extern inline void 
@@ -218,7 +214,8 @@ do_syscall_and_resume(struct generic_syscall *gsp)
 	}
 	else
 	{
-		/* sysdep! choose a reg not clobbered by syscalls. */
+		/* HACK: these must not be spilled to the stack at the point where the 
+		 * syscall occurs, or they may be lost.  */
 		register _Bool stack_zapped = zaps_stack(gsp);
 		register uintptr_t *new_top_of_stack = (uintptr_t *) gsp->arg1;
 		register uintptr_t *new_rsp = 0;
@@ -233,12 +230,12 @@ do_syscall_and_resume(struct generic_syscall *gsp)
 			
 			uintptr_t *stack_copy_low;
 			__asm__ volatile ("movq %%rsp, %0" : "=rm"(stack_copy_low) : : );
+			
 			uintptr_t *stack_copy_high
 			 = (uintptr_t *)((char*) gsp->saved_context + sizeof (struct ibcs_sigframe));
+			
 			unsigned copy_nwords = stack_copy_high - stack_copy_low;
 			uintptr_t *new_stack_lowaddr = new_top_of_stack - copy_nwords;
-			//__builtin_memcpy(new_stack - sizeof (struct ibcs_sigframe), gsp->saved_context,
-			//	sizeof (struct ibcs_sigframe));
 			ptrdiff_t fixup_amount = (char*) new_stack_lowaddr - (char*) stack_copy_low;
 			for (unsigned i = 0; i < copy_nwords; ++i)
 			{
@@ -252,18 +249,12 @@ do_syscall_and_resume(struct generic_syscall *gsp)
 				}
 			}
 			new_rsp = new_stack_lowaddr; (uintptr_t) ((char *) stack_copy_low + fixup_amount);
-		//	unsigned numpages = sizeof (struct ibc_sigframe)
-		//	savepage = raw_mmap(NULL, PAGE_SIZE, PROT_READ|PROT_WRITE, MAP_PRIVATE,
-		//		-1, 0);
-		//	assert(savepage != (void*) -1);
-		//			
-		//	// copy gsp and *p_frame
-		//	memcpy(savepage, *p_frame, sizeof (struct ibc_sigframe), 
 		}
 		
 		register unsigned trap_len = instr_len((unsigned char*) gsp->saved_context->uc.uc_mcontext.rip);
 		
 		long int ret = do_real_syscall(gsp);            /* always inlined */
+		/* Did our stack actually get zapped? */
 		if (stack_zapped)
 		{
 			uintptr_t *seen_rsp;
@@ -277,32 +268,35 @@ do_syscall_and_resume(struct generic_syscall *gsp)
 		 * 
 		 * (2 we can't look at the old sigframe, even via its absolute ptr, because 
 		 *    the other thread might have finished with it and cleaned up.
-		 *    Instead, use setcontext on the private *copy* that we took.
+		 *    Instead, use the copy we put in the new stack.
 		 */
 		
 		/* FIXME: how to ensure that the compiler doesn't spill something earlier and 
-		 * re-load it here? Perhaps we need to rewrite this whole function in assembly. 
-		 * We could make resume_from_sigframe a  macro expanding to an asm volatile.... */
+		 * re-load it here? Ideally we need to rewrite this whole function in assembly. 
+		 * We could make resume_from_sigframe a macro expanding to an asm volatile.... */
 		
-		post_handling(gsp, ret); /* okay, because we have a stack (perhaps zeroed/new) 
-		 FIXME: ... but not access to gsp here! We need to take a copy of gsp! */
+		post_handling(gsp, ret); /* okay, because we have a stack (perhaps zeroed/new) */
+		/* FIXME: unsafe to access gsp here! Take a copy of *gsp! */
 		
 		if (!stack_zapped)
 		{
 			resume_from_sigframe(ret, gsp->saved_context, trap_len);
 		}
-		else //if (stack_zapped && 
+		else 
 		{	
 			/* We copied the context into the new stack. So just resume from sigframe
-			 * as before, then fix up the stack pointer and jump to pretcode. */
-			// while (1);
+			 * as before, with two minor alterations. Firstly, the caller expects to
+			 * resume with the new top-of-stack in rsp. Secondly, we fix up the current rsp
+			 * so that the compiler-generated code will find its way to restore_rt 
+			 * (i.e. that the function epilogue will use our new stack, not the old one). */
+			
 			struct ibcs_sigframe *p_frame = (struct ibcs_sigframe *) ((char*) new_top_of_stack - sizeof (struct ibcs_sigframe));
 			/* Make sure that the new stack pointer is the one returned to the caller. */
 			p_frame->uc.uc_mcontext.rsp = new_top_of_stack;
+			/* Do the usual manipulations of saved context, to return and resume from the syscall. */
 			resume_from_sigframe(ret, p_frame, trap_len);
+			/* Hack our rsp so that the epilogue / sigret will execute correctly. */
 			__asm__ volatile ("movq %0, %%rsp" : /* no outputs */ : "r"(new_rsp) : "%rsp");
-			// __asm__ volatile ("jmpq *%0" : /* no outputs */ : "r"(addr) : /* no clobbers */);
-			// __asm__ volatile ("jmpq *%0" : /* no outputs */ : "r"(p_frame->pretcode) : );
 		}
 	}
 }
