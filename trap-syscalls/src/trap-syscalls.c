@@ -132,7 +132,7 @@ static void saw_mapping(const char *line_begin_pos, const char *line_end_pos)
 	char r = *line_pos++;
 	char w = *line_pos++;
 	char x = *line_pos++;
-	char p = *line_pos++;
+	char p __attribute__((unused)) = *line_pos++;
 
 	/* Skip ourselves, but remember our load address. */
 	void *expected_mapping_end = page_boundary_up(&etext);
@@ -141,6 +141,12 @@ static void saw_mapping(const char *line_begin_pos, const char *line_end_pos)
 	{
 		our_text_begin_address = (const void *) begin_addr;
 		our_text_end_address = (const void *) end_addr;
+		
+		/* Compute our load address from the phdr p_vaddr of this segment.
+		 * But how do we get at our phdrs?
+		 * In general I think we need to hack the linker script to define a new symbol.
+		 * But for now, just use the fact that it's very likely to be the lowest text addr. */
+		our_load_address = (uintptr_t) our_text_begin_address;
 
 		write_string("Skipping our own text mapping: ");
 		write_ulong(begin_addr);
@@ -301,7 +307,6 @@ int main(void)
 					// but we have a partial entry in the buffer
 					// between entry_start_pos and seek_pos;
 					// copy it to the start, re-set and continue
-					unsigned i;
 					__builtin_memmove(&buf[0], entry_start_pos, seek_pos - entry_start_pos);
 					buf_pos = &buf[seek_pos - entry_start_pos];
 					entry_start_pos = &buf[0];
@@ -347,10 +352,10 @@ int main(void)
 	 * this function and those afterwards.
 	 *
 	 * For this, we need our load address. How can we get this? We've already seen it! */
-	long int len = &&exit_and_return - our_text_begin_address;
-	long int ret;
-	long int longprot = PROT_NONE;
-	long int op = SYS_mprotect;
+	// long int len = &&exit_and_return - our_text_begin_address;
+	// long int ret;
+	// long int longprot = PROT_NONE;
+	// long int op = SYS_mprotect;
 
 	//	__asm__ (".align 4096");
 exit_and_return:

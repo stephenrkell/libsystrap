@@ -13,9 +13,11 @@
 #include <sys/syscall.h>
 
 #include "raw-syscalls.h"
+#include "syscall-names.h" /* for SYSCALL_MAX */
 #include "instr.h"
 
 extern _Bool __write_footprints;
+extern uintptr_t our_load_address;
 
 /* In kernel-speak this is a "struct sigframe" / "struct rt_sigframe" --
  * sadly no user-level header defines it. But it seems to be vaguely standard
@@ -37,8 +39,6 @@ struct generic_syscall {
 	long int arg4;
 	long int arg5;
 };
-
-#define SYSCALL_MAX 543
 
 typedef void post_handler(struct generic_syscall *s, long int ret);
 typedef void (__attribute__((noreturn)) syscall_replacement)(
@@ -242,13 +242,13 @@ do_syscall_and_resume(struct generic_syscall *gsp)
 				new_stack_lowaddr[i] = stack_copy_low[i];
 				/* Relocate any word we copy if it's a stack address. HMM.
 				 * I suppose we don't use any large integers that aren't addresses? */
-				if (new_stack_lowaddr[i] < stack_copy_high
-							&& new_stack_lowaddr[i] >= stack_copy_low)
+				if (new_stack_lowaddr[i] < (uintptr_t) stack_copy_high
+							&& new_stack_lowaddr[i] >= (uintptr_t) stack_copy_low)
 				{
 					new_stack_lowaddr[i] += fixup_amount;
 				}
 			}
-			new_rsp = new_stack_lowaddr; (uintptr_t) ((char *) stack_copy_low + fixup_amount);
+			new_rsp = new_stack_lowaddr; // (uintptr_t) ((char *) stack_copy_low + fixup_amount);
 		}
 		
 		register unsigned trap_len = instr_len((unsigned char*) gsp->saved_context->uc.uc_mcontext.rip);
@@ -292,7 +292,7 @@ do_syscall_and_resume(struct generic_syscall *gsp)
 			
 			struct ibcs_sigframe *p_frame = (struct ibcs_sigframe *) ((char*) new_top_of_stack - sizeof (struct ibcs_sigframe));
 			/* Make sure that the new stack pointer is the one returned to the caller. */
-			p_frame->uc.uc_mcontext.rsp = new_top_of_stack;
+			p_frame->uc.uc_mcontext.rsp = (uintptr_t) new_top_of_stack;
 			/* Do the usual manipulations of saved context, to return and resume from the syscall. */
 			resume_from_sigframe(ret, p_frame, trap_len);
 			/* Hack our rsp so that the epilogue / sigret will execute correctly. */
