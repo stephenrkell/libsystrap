@@ -6,20 +6,9 @@
 #include "do-syscall.h"
 #include "syscall-names.h"
 #include <uniqtype.h> /* from liballocs; for walking footprints */
-#include <elf.h> /* for r_debug mischief */
 #include <string.h>
 
-#ifndef ElfW
-#define ElfW(t) Elf64_ ## t
-#endif
-
-extern ElfW(Dyn) _DYNAMIC[];
-static ElfW(Word) *hash;
-static ElfW(Sym) *symtab;
-static const char *strtab;
-uintptr_t our_load_address __attribute__((visibility("protected")));
-
-/* explicitly declare the dlsym interface, to avoid libc headers. */
+#include "elf.h"
 
 #define REPLACE_ARGN(n_arg, count)				      \
 	long int arg ## n_arg = gsp->arg ## n_arg ;		     \
@@ -30,85 +19,6 @@ uintptr_t our_load_address __attribute__((visibility("protected")));
 	free_memory(gsp->arg ## n_arg, arg ## n_arg, (count));	  \
 	gsp->arg ## n_arg = arg ## n_arg;
 
-static void init_hash(void)
-{
-	/* Find the hash table. We run too early to call dynamic loader functions
-	 * (which might make syscalls, anyway, which would not be good). */
-	for (ElfW(Dyn) *dyn = _DYNAMIC; dyn->d_tag != DT_NULL; ++dyn)
-	{
-		if (dyn->d_tag == DT_HASH)
-		{
-			hash = (void*) dyn->d_un.d_ptr;
-		}
-		if (dyn->d_tag == DT_SYMTAB)
-		{
-			symtab = (void*) dyn->d_un.d_ptr;
-		}
-		if (dyn->d_tag == DT_STRTAB)
-		{
-			strtab = (void*) dyn->d_un.d_ptr;
-		}
-	}
-	assert(symtab);
-	assert(strtab);
-}
-
-static unsigned long
-elf64_hash(const unsigned char *name)
-{
-	unsigned long h = 0, g;
-	while (*name)
-	{
-		h = (h << 4) + *name++;
-		if (0 != (g = (h & 0xf0000000))) h ^= g >> 24;
-		h &= 0x0fffffff;
-	}
-	return h;
-}
-
-static void *hash_lookup(const char *sym)
-{
-	if (!hash) init_hash();
-	ElfW(Sym) *found_sym = NULL;
-	if (hash)
-	{
-		ElfW(Word) nbucket = hash[0];
-		ElfW(Word) nchain = hash[1];
-		ElfW(Word) (*buckets)[nbucket] = (void*) &hash[2];
-		ElfW(Word) (*chains)[nchain] = (void*) &hash[2 + nbucket];
-
-		unsigned long h = elf64_hash((const unsigned char *) sym);
-		ElfW(Word) first_symind = (*buckets)[h % nbucket];
-		ElfW(Word) symind = first_symind;
-		for (; symind != STN_UNDEF; symind = (*chains)[symind])
-		{
-			ElfW(Sym) *p_sym = &symtab[symind];
-			if (0 == strcmp(&strtab[p_sym->st_name], sym))
-			{
-				/* match */
-				found_sym = p_sym;
-				break;
-			}
-		}
-	}
-	else
-	{
-		for (ElfW(Sym) *p_sym = &symtab[0]; (char*) p_sym <= (char*) strtab; ++p_sym)
-		{
-			if (0 == strcmp(&strtab[p_sym->st_name], sym))
-			{
-				/* match */
-				found_sym = p_sym;
-				break;
-			}
-		}
-	}
-	
-	if (found_sym)
-	{
-		return (char*) our_load_address + found_sym->st_value;
-	} else return NULL;
-}
 
 static struct uniqtype *uniqtype_for_syscall(int syscall_num)
 {
@@ -143,14 +53,24 @@ pre_handling(struct generic_syscall *gsp)
 	/* Now walk the footprint. */
 	struct uniqtype *call = uniqtype_for_syscall(gsp->syscall_number);
 	assert(call);
-	assert(UNIQTYPE_IS_SUBPROGRAM(call));
+	// assert(UNIQTYPE_IS_SUBPROGRAM(call));
 	
 	/* Footprint enumeration is a breadth-first search from a set of roots. 
 	 * Roots are (address, uniqtype) pairs.
 	 * Every pointer argument to the syscall is a root. 
 	 * (Note that the syscall arguments themselves don't live in memory,
 	 * so we can't start directly from a unique root.)
-	 * Following a pointer means adding a new root -- the memory on the end of the pointer. */
+	 * Following a pointer means adding a new root -- the memory on the end of the pointer.
+	 * In general, following a pointer is a "discovery" function.
+	 * We might reveal a larger object than the pointer's static type records,
+	 * including memory that precedes the target address.
+	 * Liballocs is one way to do pointer following.
+	 * We just take some naive assumptions which we can then refine. 
+	 * Firstly, assume each pointer points either to null or to a singleton,
+	 * unless it's a pointer to ARR0 or singleton char -- then assume null termination.
+	 * 
+	 * FIXME: also support DWARF's hack of subrange types with member references.
+	 * This is in DWARF 4, section 2.19, "Static and dynamic values of attributes". */
 	
 }
 
@@ -169,9 +89,7 @@ static void *lock_memory(long int addr, unsigned long count, int copy)
 		return NULL;
 	}
 
-	if (__write_footprints) {
-		write_footprint(ptr, count);
-	}
+	if (__write_footprints) write_footprint(ptr, count);
 
 #ifdef DEBUG_REMAP
 	{
@@ -189,7 +107,6 @@ static void *lock_memory(long int addr, unsigned long count, int copy)
 		raw_write(2, fmt_hex_num((long int) ret), 18);
 		write_string("\n");
 #endif // DUMP_SYSCALLS
-
 
 		return ret;
 	}
@@ -218,7 +135,7 @@ static void free_memory(long int host_addr, long int guest_addr, unsigned long c
 #define RESUME resume_from_sigframe( \
 		ret, \
 		gsp->saved_context, \
-		instr_len((unsigned char *) gsp->saved_context->uc.uc_mcontext.rip) \
+		instr_len((unsigned char *) gsp->saved_context->uc.uc_mcontext.rip, (unsigned char *) -1) \
 	)
 
 static void do_exit (struct generic_syscall *gsp, post_handler *post)

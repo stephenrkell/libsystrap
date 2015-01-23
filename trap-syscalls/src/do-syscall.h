@@ -251,7 +251,10 @@ do_syscall_and_resume(struct generic_syscall *gsp)
 			new_rsp = new_stack_lowaddr; // (uintptr_t) ((char *) stack_copy_low + fixup_amount);
 		}
 		
-		register unsigned trap_len = instr_len((unsigned char*) gsp->saved_context->uc.uc_mcontext.rip);
+		register unsigned trap_len = instr_len(
+			(unsigned char*) gsp->saved_context->uc.uc_mcontext.rip,
+			(unsigned char*) -1 /* we don't know where the end of the mapping is */
+			);
 		
 		long int ret = do_real_syscall(gsp);            /* always inlined */
 		/* Did our stack actually get zapped? */

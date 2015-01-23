@@ -17,7 +17,7 @@
  * PROBLEM: vdso and vsyscall pages probably can't be write-protected
  * -- can we just override them? HMM.
  *
- * */
+ */
 
 #define _GNU_SOURCE
 /* Don't use C library calls from this code! We run before the
@@ -30,26 +30,18 @@
 #include <asm/fcntl.h>
 #include <sys/mman.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "raw-syscalls.h"
 #include "do-syscall.h"
+#include "elf.h"
 
 /* If we build a standalone executable, we include a test trap. */
 #ifdef EXECUTABLE
 static void *ignore_ud2_addr;
 #endif
 
-#ifndef PAGE_SIZE
-#define PAGE_SIZE 4096
-#endif
-
 extern int etext;
-
-static int is_syscall_instr(unsigned const char *p, unsigned const char *end)
-{
-	if ((end >= p + 2) && *p == 0x0f && *(p+1) == 0x05) return 2;
-	return 0;
-}
 
 static unsigned long read_hex_num(const char **p_c, const char *end)
 {
@@ -68,13 +60,14 @@ static unsigned long read_hex_num(const char **p_c, const char *end)
 static const void *our_text_begin_address;
 static const void *our_text_end_address;
 
-static void replace_syscall(unsigned char *pos, unsigned char *end)
+static void replace_syscall(unsigned char *pos, unsigned len)
 {
 	write_string("Replacing syscall at ");
 	write_ulong((unsigned long) pos);
 	write_string(" with trap.\n");
 	
-	assert(end - pos >= 2);
+	assert(len >= 2);
+	unsigned char *end = pos + len;
 	while (pos != end)
 	{
 		switch (end - pos)
@@ -89,39 +82,27 @@ static void replace_syscall(unsigned char *pos, unsigned char *end)
 }
 
 static void walk_instructions(unsigned char *pos, unsigned char *end,
-	void (*cb)(unsigned char *pos, unsigned char *end, void *arg), void *arg)
+	void (*cb)(unsigned char *pos, unsigned len, void *arg), void *arg)
 {
-	/* Use libopcodes. Easier said than done! We need
-	 * 
-	 * - -fPIC build in archive form
-	 *
-	 * - same for libraries it depends on (libbfd, libc, ...?)
-	 * 
-	 * It's never going to be as easy as "-Bstatic -lwhatever".
-	 * A local build of libbfd and libopcodes and uClibc seems best.
-	 */
-	// HACK: for now just do what we did before
-	for (unsigned char *cur = pos; cur != end; ++cur)
+	unsigned char *cur = pos;
+	while (cur < end)
 	{
-		cb(cur, end, arg);
+		/* FIXME: if our mapping includes some non-instructions, 
+		 * and these accidentally decode into multi-byte instructions,
+		 * we might get misaligned here. We *will* catch this when
+		 * we do the paranoid second scan, but it would be better not
+		 * to rely on this. */
+		unsigned len = instr_len(cur, end);
+		cb(cur, len, arg);
+		cur += (len ? len : 1);
 	}
 }
 
-static void instruction_cb(unsigned char *pos, unsigned char *end, void *arg)
+static void instruction_cb(unsigned char *pos, unsigned len, void *arg)
 {
-	int syscall_instr_len = 0;
-	if (0 != (syscall_instr_len = is_syscall_instr(pos, end)))
-	{
-		replace_syscall(pos, pos + syscall_instr_len);
-	}
+	if (is_syscall_instr(pos, pos + len)) replace_syscall(pos, len);
 }
 
-static void *page_boundary_up(void *arg)
-{
-	unsigned long addr = (unsigned long) arg;
-	if (addr % PAGE_SIZE == 0) return arg;
-	else return (void*) (PAGE_SIZE * (1 + (addr / PAGE_SIZE)));
-}
 static void saw_mapping(const char *line_begin_pos, const char *line_end_pos)
 {
 	const char *line_pos = line_begin_pos;
@@ -133,9 +114,21 @@ static void saw_mapping(const char *line_begin_pos, const char *line_end_pos)
 	char w = *line_pos++;
 	char x = *line_pos++;
 	char p __attribute__((unused)) = *line_pos++;
+	char *slash = strchr(line_pos, '/');
+	char *filename_tmp = NULL;
+	if (slash && *(slash - 1) == ' ') filename_tmp = slash;
+	char *filename_end = (filename_tmp ? strchr(filename_tmp, '\n') : NULL);
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
+	char filename[PATH_MAX + 1];
+	size_t filename_sz = filename_end - filename_tmp;
+	size_t copy_sz = (filename_sz < PATH_MAX) ? filename_sz : PATH_MAX;
+	strncpy(filename, filename_tmp, copy_sz);
+	filename[copy_sz] = '\0';
 
 	/* Skip ourselves, but remember our load address. */
-	void *expected_mapping_end = page_boundary_up(&etext);
+	void *expected_mapping_end = (void*) page_boundary_up((uintptr_t) &etext);
 	if ((const unsigned char *) end_addr >= (const unsigned char *) expected_mapping_end
 		 && (const unsigned char *) begin_addr < (const unsigned char *) expected_mapping_end)
 	{
@@ -164,10 +157,15 @@ static void saw_mapping(const char *line_begin_pos, const char *line_end_pos)
 			int ret = raw_mprotect((const void *) begin_addr,
 				(const char *) end_addr - (const char *) begin_addr,
 				PROT_READ | PROT_WRITE | PROT_EXEC);
+			
 			/* If we failed, it might be on the vdso page. */
-			assert(ret == 0 || (signed long long) begin_addr < 0);
-			if ((signed long long) begin_addr < 0)
+			assert(ret == 0 || (intptr_t) begin_addr < 0);
+			if (ret != 0 && (intptr_t) begin_addr < 0)
 			{
+				/* vdso/vsyscall handling: since we can't rewrite the instructions on these 
+				 * pages, instead we should execute-protect them. Then, when we take a trap, 
+				 * we need to emulate the instructions there. FIXME: implement this. */
+				
 				write_string("Couldn't rewrite nor protect vdso mapping at ");
 				write_ulong(begin_addr);
 				write_string("\n");
@@ -176,7 +174,21 @@ static void saw_mapping(const char *line_begin_pos, const char *line_end_pos)
 		}
 
 		// it's executable; scan for syscall instructions
-		unsigned char *begin_instr_pos = (unsigned char *) begin_addr;
+		unsigned char *begin_instr_pos;
+		/* An executable mapping might include some non-instructions 
+		 * that will cause our instruction walker to get misaligned. 
+		 * Instead, we would like to walk the *sections* individually,
+		 * then re-traverse the whole thing. So we mmap the section
+		 * header table. PROBLEM: we can't re-open a file that is
+		 * guaranteed to be the same. */
+		void *base_addr = NULL;
+		const void *next_section_start = vaddr_to_next_instruction_start(
+			(unsigned char *) begin_addr, filename, &base_addr);
+		if (next_section_start)
+		{
+			begin_instr_pos = (unsigned char *) next_section_start;
+		} else begin_instr_pos = (unsigned char *) begin_addr;
+		
 		unsigned char *end_instr_pos = (unsigned char *) end_addr;
 		/* What to do about byte sequences that look like syscalls 
 		 * but are "in the middle" of instructions? 
@@ -189,8 +201,9 @@ static void saw_mapping(const char *line_begin_pos, const char *line_end_pos)
 		 * - ... and warn if we see any
 		 * 
 		 * What about ud2-alikes that don't correspond to replaced instructions?
-		 * We need to remember which sites we replaced.
+		 * No problem: we just need to remember which sites we replaced.
 		 * If we hit a ud2 that's not at such a site, we just do ud2.
+		 * FIXME: implement this.
 		 */
 		write_string("Scanning for syscall instructions within ");
 		write_ulong(begin_addr);
@@ -201,19 +214,17 @@ static void saw_mapping(const char *line_begin_pos, const char *line_end_pos)
 		write_string(")\n");
 		
 		walk_instructions(begin_instr_pos, end_instr_pos, instruction_cb, NULL);
-		/* Now check for in-betweens. */
+		/* Now the paranoid second scan: check for in-betweens. */
 		unsigned char *instr_pos = begin_instr_pos;
 		while (instr_pos != end_instr_pos)
 		{
-			int syscall_instr_len = 0;
-			if (0 != (syscall_instr_len = is_syscall_instr(instr_pos, end_instr_pos)))
+			if (is_syscall_instr(instr_pos, end_instr_pos))
 			{
-				instr_pos += syscall_instr_len;
+				write_string("Warning: after instrumentation, bytes at ");
+				write_ulong((uintptr_t) instr_pos);
+				write_string(" could make a syscall on violation of control flow integrity\n");
 			}
-			else
-			{
-				++instr_pos;
-			}
+			++instr_pos;
 		}
 
 		// restore original perms
@@ -229,7 +240,6 @@ static void saw_mapping(const char *line_begin_pos, const char *line_end_pos)
 	}
 }
 
-void restore_rt(void); /* in restorer.s */
 static void handle_sigill(int num);
 
 _Bool __write_footprints;
@@ -245,6 +255,11 @@ static void *ignore_ud2_addr;
 int main(void)
 {
 #endif
+#if !defined(EXECUTABLE) && !defined(NDEBUG)
+	write_string("In debug mode; pausing for five seconds\n");
+	struct timespec tm = { /* seconds */ 5, /* nanoseconds */ 0 };
+	raw_nanosleep(&tm, NULL);
+#endif
 	/* Is fd 7 open? If so, it's the input fd for our sanity check info
 	 * from systemtap. */
 	struct stat buf;
@@ -255,8 +270,7 @@ int main(void)
 
 		/* PROBLEM: ideally we'd read in the stap script's output ourselves, and process
 		 * it at every system call. But by reading in stuff from stap, we're doing more
-		 * copying to/from userspace, so creating a feedback loop. This loop seems like
-		 * it would blow up.
+		 * copying to/from userspace, so creating a feedback loop which would blow up.
 		 *
 		 * Instead we write out what we think we touched, and do a diff outside the process.
 		 * This also adds noise to stap's output, but without the feedback cycle: we ourselves
@@ -268,11 +282,6 @@ int main(void)
 	{
 		write_string("File descriptor 7 is not open; skipping systemtap cross-check info\n");
 	}
-#if !defined(EXECUTABLE) && !defined(NDEBUG)
-	write_string("In debug mode; pausing for five seconds\n");
-	struct timespec tm = { /* seconds */ 5, /* nanoseconds */ 0 };
-	raw_nanosleep(&tm, NULL);
-#endif
 
 	int fd = raw_open("/proc/self/maps", O_RDONLY);
 	if (fd != -1)
@@ -403,7 +412,7 @@ static void handle_sigill(int n)
 	write_ulong(syscall_num);
 	write_string("\n");
 
-	/* FIXME: check whether it creates executable mappings; if so,
+	/* FIXME: check whether this syscall creates executable mappings; if so,
 	 * we make them nx, do the rewrite, then make them x. */
 
 	struct generic_syscall gsp = {

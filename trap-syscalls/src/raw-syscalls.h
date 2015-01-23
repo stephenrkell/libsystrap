@@ -1,5 +1,5 @@
-#ifndef __RAW_SYSCALLS_H__
-#define __RAW_SYSCALLS_H__
+#ifndef RAW_SYSCALLS_H__
+#define RAW_SYSCALLS_H__
 
 #include <unistd.h>
 #include <asm-generic/stat.h>
@@ -27,7 +27,6 @@
 	 subq %%rax, %%rsp   # fix the stack pointer \n\
 	 movq %%rax, %%r12   # save the amount we fixed it up by in r12 \n\
 	 "
-
 #define UNFIX_STACK_ALIGNMENT \
 	"addq %%r12, %%rsp\n"
 
@@ -40,17 +39,24 @@
 #define write_chars(s, t)  raw_write(2, s, t - s)
 #define write_ulong(a)   raw_write(2, fmt_hex_num((a)), 18)
 
+void restore_rt(void); /* in restorer.s */
+
 void raw_exit(int status) __attribute__((noreturn));
 int raw_open(const char *pathname, int flags) __attribute__((noinline));
 int raw_fstat(int fd, struct stat *buf) __attribute__((noinline));
 int raw_nanosleep(struct timespec *req,
 		struct timespec *rem) __attribute__((noinline));
+int raw_getpid(void) __attribute__((noinline));
+int raw_kill(__kernel_pid_t pid, int sig) __attribute__((noinline));
 int raw_read(int fd, void *buf, size_t count) __attribute__((noinline));
 ssize_t raw_write(int fd, const void *buf,
 		size_t count) __attribute__((noinline));
 int raw_close(int fd) __attribute__((noinline));
 int raw_mprotect(const void *addr, size_t len,
 		int prot) __attribute__((noinline));
+void *raw_mmap(void *addr, size_t length, int prot, int flags,
+                  int fd, off_t offset);
+int raw_munmap(void *addr, size_t length);
 int raw_rt_sigaction(int signum, const struct sigaction *act,
 		     struct sigaction *oldact) __attribute__((noinline));
 void __assert_fail(const char *assertion, const char *file,
