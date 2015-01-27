@@ -23,13 +23,22 @@
 static struct uniqtype *uniqtype_for_syscall(int syscall_num)
 {
 	const char *syscall_name = syscall_names[syscall_num];
+	if (!syscall_name)
+	{
+		write_string("No name for syscall number ");
+		raw_write(2, fmt_hex_num(syscall_num), 18);
+		write_string("\n");
+		return NULL;
+	}
 	const char prefix[] = "__ifacetype_";
 	char name_buf[SYSCALL_NAME_LEN + sizeof prefix + 1];
 	strncpy(name_buf, prefix, sizeof prefix);
 	strncat(name_buf + sizeof prefix - 1, syscall_name, sizeof name_buf - sizeof prefix + 1);
 	name_buf[sizeof name_buf - 1] = '\0';
 	
-	void *found_uniqtype = hash_lookup(name_buf);
+	struct uniqtype **found_ifacetype = hash_lookup(name_buf);
+	assert(found_ifacetype);
+	struct uniqtype *found_uniqtype = *found_ifacetype;
 	assert(found_uniqtype);
 	return found_uniqtype;
 }
@@ -46,31 +55,44 @@ write_footprint(void *base, size_t len)
 void __attribute__((visibility("protected")))
 pre_handling(struct generic_syscall *gsp)
 {
-	write_string("Performing syscall with opcode: ");
+	write_string("Performing syscall number: ");
 	raw_write(2, fmt_hex_num(gsp->syscall_number), 18);
 	write_string("\n");
 	
 	/* Now walk the footprint. */
 	struct uniqtype *call = uniqtype_for_syscall(gsp->syscall_number);
-	assert(call);
-	// assert(UNIQTYPE_IS_SUBPROGRAM(call));
+	if (call)
+	{
+		write_string("Syscall number ");
+		raw_write(2, fmt_hex_num(gsp->syscall_number), 18);
+		write_string(" has uniqtype at address ");
+		raw_write(2, fmt_hex_num((uintptr_t) call), 18);
+		write_string("\n");
+		assert(UNIQTYPE_IS_SUBPROGRAM(call));
+		/* Footprint enumeration is a breadth-first search from a set of roots. 
+		 * Roots are (address, uniqtype) pairs.
+		 * Every pointer argument to the syscall is a root. 
+		 * (Note that the syscall arguments themselves don't live in memory,
+		 * so we can't start directly from a unique root.)
+		 * Following a pointer means adding a new root -- the memory on the end of the pointer.
+		 * In general, following a pointer is a "discovery" function.
+		 * We might reveal a larger object than the pointer's static type records,
+		 * including memory that precedes the target address.
+		 * Liballocs is one way to do pointer following.
+		 * We just take some naive assumptions which we can then refine. 
+		 * Firstly, assume each pointer points either to null or to a singleton,
+		 * unless it's a pointer to ARR0 or singleton char -- then assume null termination.
+		 * 
+		 * FIXME: also support DWARF's hack of subrange types with member references.
+		 * This is in DWARF 4, section 2.19, "Static and dynamic values of attributes". */
+	}
+	else
+	{
+		write_string("Syscall number: ");
+		raw_write(2, fmt_hex_num(gsp->syscall_number), 18);
+		write_string(" has no uniqtype, so unknown footprint.\n");
+	}
 	
-	/* Footprint enumeration is a breadth-first search from a set of roots. 
-	 * Roots are (address, uniqtype) pairs.
-	 * Every pointer argument to the syscall is a root. 
-	 * (Note that the syscall arguments themselves don't live in memory,
-	 * so we can't start directly from a unique root.)
-	 * Following a pointer means adding a new root -- the memory on the end of the pointer.
-	 * In general, following a pointer is a "discovery" function.
-	 * We might reveal a larger object than the pointer's static type records,
-	 * including memory that precedes the target address.
-	 * Liballocs is one way to do pointer following.
-	 * We just take some naive assumptions which we can then refine. 
-	 * Firstly, assume each pointer points either to null or to a singleton,
-	 * unless it's a pointer to ARR0 or singleton char -- then assume null termination.
-	 * 
-	 * FIXME: also support DWARF's hack of subrange types with member references.
-	 * This is in DWARF 4, section 2.19, "Static and dynamic values of attributes". */
 	
 }
 

@@ -215,7 +215,7 @@ static void saw_mapping(const char *line_begin_pos, const char *line_end_pos)
 		
 		walk_instructions(begin_instr_pos, end_instr_pos, instruction_cb, NULL);
 		/* Now the paranoid second scan: check for in-betweens. */
-		unsigned char *instr_pos = begin_instr_pos;
+		unsigned char *instr_pos = (unsigned char *) begin_addr;
 		while (instr_pos != end_instr_pos)
 		{
 			if (is_syscall_instr(instr_pos, end_instr_pos))
@@ -411,6 +411,8 @@ static void handle_sigill(int n)
 	unsigned long syscall_num = (unsigned long) p_frame->uc.uc_mcontext.rax;
 	write_ulong(syscall_num);
 	write_string("\n");
+	assert(syscall_num >= 0);
+	assert(syscall_num < SYSCALL_MAX);
 
 	/* FIXME: check whether this syscall creates executable mappings; if so,
 	 * we make them nx, do the rewrite, then make them x. */

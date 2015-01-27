@@ -88,6 +88,13 @@ static void fini()
 #define OPDIS_MNEMONIC_SZ 12 /* ? */
 #define OPDIS_OP_ASCII_SZ 8 /* ? */
 
+#define MAX_INSN_LENGTH 16
+
+static _Bool is_ud2(const unsigned char *ins)
+{
+	return ins[0] == 0x0f && ins[1] == 0x0b;
+}
+
 static int decode_cb(const opdis_insn_buf_t in, opdis_insn_t * out,
 	const opdis_byte_t * buf, opdis_off_t offset,
 	opdis_vma_t vma, opdis_off_t length, void * arg)
@@ -111,11 +118,13 @@ static __thread opdis_off_t  cur_insn_len;
 static opdis_insn_t *get_opdis_insn(unsigned char *ins, unsigned char *end)
 {
 	// unsigned char opdis_buf[OPDIS_BUF_LEN];
+	uintptr_t len = (uintptr_t) end - (uintptr_t) ins;
 	opdis_buffer_t buf = {
-		.len = end - ins,
+		.len = (len > MAX_INSN_LENGTH) ? MAX_INSN_LENGTH : len,
 		.data = ins,
 		.vma = (bfd_vma) ins
 	};
+	assert(buf.len <= MAX_INSN_LENGTH);
 	if (!o)
 	{
 		o = opdis_init();
@@ -133,11 +142,23 @@ static opdis_insn_t *get_opdis_insn(unsigned char *ins, unsigned char *end)
 			OPDIS_MAX_OPERANDS, OPDIS_OP_ASCII_SZ);
 	}
 	opdis_insn_clear(cur_insn);
+	/* Don't let opdis see ud2 -- seems not to like it? */
+	if (is_ud2(ins))
+	{
+		cur_insn_len = 2;
+		return NULL;
+	}
 	/* Now do the one-instruction decode. */
 	unsigned int ret = opdis_disasm_insn(o, &buf, (opdis_vma_t) ins, cur_insn);
 	if (!ret) return NULL;
 	if (cur_insn->status == opdis_decode_invalid) return NULL;
-	assert(cur_insn_len != 0);
+	if (cur_insn_len == 0)
+	{
+		/* ud2 shows up with a "length" of 0 in the callback. 
+		 * but its size == 2. FIXME: why wasn't "size" good enough
+		 * earlier, but is now? */
+		cur_insn_len = cur_insn->size;
+	}
 	return cur_insn;
 }
 
@@ -145,7 +166,7 @@ unsigned long
 __attribute__((visibility("protected")))
 instr_len(unsigned const char *ins, unsigned const char *end)
 {
-	get_opdis_insn((unsigned char *) ins, end);
+	get_opdis_insn((unsigned char *) ins, (unsigned char *) end);
 	
 	return cur_insn_len;
 }
