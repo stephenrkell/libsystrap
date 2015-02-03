@@ -47,13 +47,15 @@ ZLIB_A ?= -lz
 SYSCALL_INTERFACE_DIR ?= $(dir $(THIS_MAKEFILE))/../../syscall-interfaces/scripts
 SYSCALL_INTERFACE := linux
 
-vpath %.c $(SYSCALL_INTERFACE_DIR) 
+vpath %.c $(SYSCALL_INTERFACE_DIR)
+vpath %.c $(LIBALLOCS)/src
 
 CFLAGS += -g 
 CFLAGS += -Wall -Wno-unused-label -Wno-comment
 CFLAGS += -O2
 CFLAGS += -fPIC
 CFLAGS += -ffreestanding
+CFLAGS += -I$(SYSCALL_INTERFACE_DIR)
 
 CFLAGS += -I $(LIBALLOCS)/include
 # CFLAGS += $(LLVM_INCLUDES)
@@ -64,7 +66,7 @@ CXXFLAGS += -std=c++11 $(LLVM_CXXFLAGS)
 
 SYSCALL_IFACE_SRC := $(SYSCALL_INTERFACE)-syscall-ifacetypes.c
 
-C_SRC := $(wildcard *.c) $(SYSCALL_IFACE_SRC)
+C_SRC := $(wildcard *.c) $(SYSCALL_IFACE_SRC) uniqtype-bfs.c
 S_SRC := $(wildcard *.s)
 CC_SRC := $(wildcard *.cc)
 
@@ -76,9 +78,9 @@ OBJS := $(patsubst %.c,%.o,$(C_SRC)) $(patsubst %.cc,%.o,$(CC_SRC)) $(patsubst %
 DEPS += .trap-syscalls-exec.d
 
 $(CC_DEPS): .%.d: %.cc
-	$(CXX) -MM $(CXXFLAGS) $+ > "$@"
+	$(CXX) -MM $(CXXFLAGS) $+ > "$@" || rm -f "$@"
 $(C_DEPS): .%.d: %.c
-	$(CC) -MM $(CFLAGS) $+ > "$@"
+	$(CC) -MM $(CFLAGS) $+ > "$@" || rm -f "$@"
 
 ifneq ($(MAKECMDGOALS),clean)
 -include $(DEPS)

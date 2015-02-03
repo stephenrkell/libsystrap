@@ -12,11 +12,35 @@
 #define PAGE_SIZE 4096
 #endif
 
+struct link_map
+{
+	ElfW(Addr) l_addr;
+	char *l_name;
+	ElfW(Dyn) *l_ld;
+	struct link_map *l_next;
+	struct link_map *l_prev;
+};
+struct r_debug
+{
+	int r_version;
+
+	struct link_map *r_map;
+	ElfW(Addr) r_brk;
+	enum {
+		RT_CONSISTENT,
+		RT_ADD,
+		RT_DELETE
+	} r_state;
+	ElfW(Addr) r_ldbase;
+};
+
 extern ElfW(Dyn) _DYNAMIC[];
-extern struct r_debug _r_debug; /* defined by ld.so -- HMM, not portable really */
+extern struct r_debug _r_debug; /* defined by ld.so -- HMM, symname not portable really. 
+ * If we scan the .dynamic section for DT_DEBUG, does it always point here? */
 extern uintptr_t our_load_address;
 
-// another non-portable thingy...
+// another non-portable thingy... FIXME: replace dl_iterate_phdr with 
+// walking the link_map, *or* implement our own dl_iterate_phdr for portability
 struct dl_phdr_info 
 {
 	ElfW(Addr) dlpi_addr;
@@ -24,15 +48,18 @@ struct dl_phdr_info
 	const ElfW(Phdr) *dlpi_phdr;
 	ElfW(Half) dlpi_phnum;
 };
-int dl_iterate_phdr(
-                 int (*callback) (struct dl_phdr_info *info,
-                                  size_t size, void *data),
-                 void *data);
+
+typedef int dl_cb_fn(struct dl_phdr_info *info, size_t size, void *data);
+int dl_iterate_phdr(dl_cb_fn *callback, void *data);
 
 void *hash_lookup(const char *sym) __attribute__((visibility("protected")));
 
 const ElfW(Phdr) *vaddr_to_load_phdr(unsigned char *begin_addr, const char *fname, void **out_base_addr)
 		__attribute__((visibility("protected")));
+const ElfW(Ehdr) *vaddr_to_ehdr(unsigned char *begin_addr, const char *fname, void **out_base_addr)
+		__attribute__((visibility("protected")));
+struct link_map *vaddr_to_link_map(unsigned char *begin_addr, void **out_base_addr)
+	__attribute__((visibility("protected")));
 
 const void *vaddr_to_next_instruction_start(unsigned char *begin_addr, const char *fname, void **out_base_addr);
 

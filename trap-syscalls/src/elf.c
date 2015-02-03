@@ -102,7 +102,7 @@ static int dl_fileoff_cb(struct dl_phdr_info *info, size_t size, void *dummy_arg
 {
 	struct dl_fileoff_cb_arg *arg = dummy_arg;
 	
-	/* Is this file the one we're looking for? */
+	/* Is this the file we're looking for? */
 	_Bool is_the_file = 0;
 	for (unsigned i = 0; i < info->dlpi_phnum; ++i)
 	{
@@ -192,6 +192,31 @@ const ElfW(Phdr) *vaddr_to_load_phdr(unsigned char *begin_addr, const char *fnam
 		assert(arg.info_out);
 		*out_base_addr = (void*) arg.info_out->dlpi_addr;
 		return arg.phdr_out;
+	}
+	return NULL;
+}
+
+ElfW(Dyn) *dyn_lookup(ElfW(Dyn) *p_dyn, ElfW(Sword) tag)
+{
+	for (ElfW(Sword) i = 0; p_dyn[i].d_tag != DT_NULL; ++i)
+	{
+		if (p_dyn[i].d_tag == tag) return p_dyn;
+	}
+	return NULL;
+}
+
+struct link_map *vaddr_to_link_map(unsigned char *begin_addr, void **out_base_addr)
+{
+	/* We really want to get the program headers. But we can't. BAH! 
+	 * OH: but we can get the ehdr, innit, using our temporary mapping thing. */
+	const ElfW(Ehdr) *ehdr = vaddr_to_ehdr(begin_addr, NULL, NULL);
+	assert(ehdr);
+	// the ELF header's vaddr is the base address of the object, *if* 
+	// it is mapped. FIXME: handle the case where it isn't!
+	for (struct link_map *l = _r_debug.r_map; l; l = l->l_next)
+	{
+		// ElfW(Dyn) *p_dyn = l->l_ld;
+		if ((void*) l->l_addr == ehdr) return l;
 	}
 	return NULL;
 }

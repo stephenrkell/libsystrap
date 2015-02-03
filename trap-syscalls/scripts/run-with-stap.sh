@@ -29,6 +29,7 @@ stap_filter () {
                 sed -r 's/(n|sz|size|len|length)=((0x)?[0-9a-f\?]*)/n=\2/' | \
                 sed -r 's/(src|source|from)=((0x)?[0-9a-f\?]*)/src=\2/' | \
                 sed -r 's/(dst|dest|to)=((0x)?[0-9a-f\?]*)/dst=\2/' | \
+                sed -r 's/(dst|dest|to|src|source|from)=((0x)?ffff[0-9a-f\?]*)//' | \
                 sed '/^$/ d' | \
                 sort -t= -k1 | tr '\n' ' '
                 echo # for the newline
@@ -47,6 +48,7 @@ child_pid=$!
 # which is handy for us to filter
 stap -x $! $(dirname "$0")/copy-tofrom-user.stp | \
 stap_filter | \
+tee /dev/stderr | \
 diff -u - "$pipename" &
 stap_pid=$!
 

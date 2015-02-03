@@ -11,12 +11,31 @@
 #include <asm/siginfo.h>
 #include <asm/ucontext.h>
 #include <sys/syscall.h>
+/* avoid stdlib and stdio for sigset_t conflict reasons */
+void *calloc(size_t, size_t);
+void free(void*);
+/* avoid stdio because of sigset_t conflict */
+void *fdopen(int fd, const char *mode);
+int fprintf(void *stream, const char *format, ...);
+int fflush(void *stream);
+
+extern int debug_level;
+extern void *stderr;
+extern void **p_err_stream;
+#define debug_printf(lvl, fmt, ...) do { \
+    if ((lvl) <= debug_level) { \
+      fprintf(*p_err_stream, fmt, ## __VA_ARGS__ ); \
+      fflush(*p_err_stream); \
+    } \
+  } while (0)
 
 #include "raw-syscalls.h"
 #include "syscall-names.h" /* for SYSCALL_MAX */
 #include "instr.h"
 
 extern _Bool __write_footprints;
+extern void *footprints_out; /* really a FILE* */
+extern void *stderr;
 extern uintptr_t our_load_address;
 
 /* In kernel-speak this is a "struct sigframe" / "struct rt_sigframe" --
@@ -32,12 +51,7 @@ struct ibcs_sigframe
 struct generic_syscall {
 	struct ibcs_sigframe *saved_context;
 	int syscall_number;
-	long int arg0;
-	long int arg1;
-	long int arg2;
-	long int arg3;
-	long int arg4;
-	long int arg5;
+	long int args[6];
 };
 
 typedef void post_handler(struct generic_syscall *s, long int ret);
@@ -98,7 +112,7 @@ do_syscall1(struct generic_syscall *gsp)
 			   PERFORM_SYSCALL
 	  : [ret]  "=r" (ret)
 	  : [op]   "rm" ((long int) gsp->syscall_number)
-	  , [arg0] "rm" ((long int) gsp->arg0)
+	  , [arg0] "rm" ((long int) gsp->args[0])
 	  : "r12", SYSCALL_CLOBBER_LIST);
 
 	return ret;
@@ -114,8 +128,8 @@ do_syscall2(struct generic_syscall *gsp)
 			   PERFORM_SYSCALL
 	  : [ret]  "=r" (ret)
 	  : [op]   "rm" ((long int) gsp->syscall_number)
-	  , [arg0] "rm" ((long int) gsp->arg0)
-	  , [arg1] "rm" ((long int) gsp->arg1)
+	  , [arg0] "rm" ((long int) gsp->args[0])
+	  , [arg1] "rm" ((long int) gsp->args[1])
 	  : "r12", SYSCALL_CLOBBER_LIST);
 
 	return ret;
@@ -132,9 +146,9 @@ do_syscall3(struct generic_syscall *gsp)
 			   PERFORM_SYSCALL
 	  : [ret]  "=r" (ret)
 	  : [op]   "rm" ((long int) gsp->syscall_number)
-	  , [arg0] "rm" ((long int) gsp->arg0)
-	  , [arg1] "rm" ((long int) gsp->arg1)
-	  , [arg2] "rm" ((long int) gsp->arg2)
+	  , [arg0] "rm" ((long int) gsp->args[0])
+	  , [arg1] "rm" ((long int) gsp->args[1])
+	  , [arg2] "rm" ((long int) gsp->args[2])
 	  : "r12", SYSCALL_CLOBBER_LIST);
 
 	return ret;
@@ -154,12 +168,12 @@ do_syscall6(struct generic_syscall *gsp)
 			   PERFORM_SYSCALL
 	  : [ret]  "=r" (ret)
 	  : [op]   "rm" ((long int) gsp->syscall_number)
-	  , [arg0] "rm" ((long int) gsp->arg0)
-	  , [arg1] "rm" ((long int) gsp->arg1)
-	  , [arg2] "rm" ((long int) gsp->arg2)
-	  , [arg3] "rm" ((long int) gsp->arg3)
-	  , [arg4] "rm" ((long int) gsp->arg4)
-	  , [arg5] "rm" ((long int) gsp->arg5)
+	  , [arg0] "rm" ((long int) gsp->args[0])
+	  , [arg1] "rm" ((long int) gsp->args[1])
+	  , [arg2] "rm" ((long int) gsp->args[2])
+	  , [arg3] "rm" ((long int) gsp->args[3])
+	  , [arg4] "rm" ((long int) gsp->args[4])
+	  , [arg5] "rm" ((long int) gsp->args[5])
 	  : "r12", SYSCALL_CLOBBER_LIST);
 
 	return ret;
@@ -217,7 +231,7 @@ do_syscall_and_resume(struct generic_syscall *gsp)
 		/* HACK: these must not be spilled to the stack at the point where the 
 		 * syscall occurs, or they may be lost.  */
 		register _Bool stack_zapped = zaps_stack(gsp);
-		register uintptr_t *new_top_of_stack = (uintptr_t *) gsp->arg1;
+		register uintptr_t *new_top_of_stack = (uintptr_t *) gsp->args[1];
 		register uintptr_t *new_rsp = 0;
 		
 		if (stack_zapped)
@@ -317,7 +331,7 @@ __attribute__((always_inline,gnu_inline))
 zaps_stack(struct generic_syscall *gsp)
 {
 	return gsp->syscall_number == __NR_clone
-				&& gsp->arg1 /* newstack */ != 0;
+				&& gsp->args[1] /* newstack */ != 0;
 }
 
 #endif

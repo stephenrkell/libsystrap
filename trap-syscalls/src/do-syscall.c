@@ -7,17 +7,18 @@
 #include "syscall-names.h"
 #include <uniqtype.h> /* from liballocs; for walking footprints */
 #include <string.h>
+#include "uniqtype-bfs.h"
 
 #include "elf.h"
 
 #define REPLACE_ARGN(n_arg, count)				      \
-	long int arg ## n_arg = gsp->arg ## n_arg ;		     \
-	gsp->arg ## n_arg =					     \
+	long int arg ## n_arg = gsp->args[ n_arg ];		     \
+	gsp->args[ n_arg ] =					     \
 		(long int) lock_memory(arg ## n_arg , (count), 0);
 
 #define RESTORE_ARGN(n_arg, count)				      \
-	free_memory(gsp->arg ## n_arg, arg ## n_arg, (count));	  \
-	gsp->arg ## n_arg = arg ## n_arg;
+	free_memory(gsp->args[ n_arg ], arg ## n_arg, (count));	  \
+	gsp->args[ n_arg ] = arg ## n_arg;
 
 
 static struct uniqtype *uniqtype_for_syscall(int syscall_num)
@@ -25,9 +26,7 @@ static struct uniqtype *uniqtype_for_syscall(int syscall_num)
 	const char *syscall_name = syscall_names[syscall_num];
 	if (!syscall_name)
 	{
-		write_string("No name for syscall number ");
-		raw_write(2, fmt_hex_num(syscall_num), 18);
-		write_string("\n");
+		debug_printf(1, "No name for syscall number %d\n", syscall_num);
 		return NULL;
 	}
 	const char prefix[] = "__ifacetype_";
@@ -46,63 +45,112 @@ static struct uniqtype *uniqtype_for_syscall(int syscall_num)
 void __attribute__((visibility("protected")))
 write_footprint(void *base, size_t len)
 {
-	write_string("n=");
-	raw_write(7, fmt_hex_num(len), 18);
-	write_string(" base=");
-	raw_write(7, fmt_hex_num((uintptr_t) base), 18);
+	fprintf(footprints_out, "n=0x%lx base=0x%p\n", len, (void*) base);
+}
+
+static void list_add(void *obj, struct uniqtype *t, void *arg)
+{
+	__uniqtype_node_rec **head = (__uniqtype_node_rec **) arg;
+	__uniqtype_node_rec *new_node = calloc(1, sizeof (__uniqtype_node_rec));
+	assert(new_node);
+	new_node->obj = obj;
+	new_node->t = t;
+	new_node->free = free;
+	new_node->next = *head;
+	*head = new_node;
 }
 
 void __attribute__((visibility("protected")))
 pre_handling(struct generic_syscall *gsp)
 {
-	write_string("Performing syscall number: ");
-	raw_write(2, fmt_hex_num(gsp->syscall_number), 18);
-	write_string("\n");
+	/* Now walk the footprint. We print out a line per-syscall before and after
+	 * to bracket the invididual footprint items. */
+	void *calling_addr = (void*) gsp->saved_context->uc.uc_mcontext.rip;
+	struct link_map *calling_object = vaddr_to_link_map(calling_addr, NULL);
 	
-	/* Now walk the footprint. */
+	/* send same output to stderr and, if we're writing them, footprints_out */
+#define FOR_TRACE_STREAMS \
+	for (void *stream = stderr; stream; \
+			stream = (__write_footprints && footprints_out) ? ((stream == footprints_out) ? NULL : footprints_out) \
+					                      : NULL)
+	FOR_TRACE_STREAMS
+	{
+		fprintf(stream, "== %d == > %p (%s+0x%x) %s(...)\n",
+			raw_getpid(), 
+			calling_addr,
+			calling_object->l_name,
+			(char*) calling_addr - (char*) calling_object->l_addr,
+			syscall_names[gsp->syscall_number]
+		);
+	}
+	
 	struct uniqtype *call = uniqtype_for_syscall(gsp->syscall_number);
 	if (call)
 	{
-		write_string("Syscall number ");
-		raw_write(2, fmt_hex_num(gsp->syscall_number), 18);
-		write_string(" has uniqtype at address ");
-		raw_write(2, fmt_hex_num((uintptr_t) call), 18);
-		write_string("\n");
+		debug_printf(1, "Syscall %s/%d has uniqtype at address %p\n",
+				syscall_names[gsp->syscall_number], gsp->syscall_number, call);
 		assert(UNIQTYPE_IS_SUBPROGRAM(call));
 		/* Footprint enumeration is a breadth-first search from a set of roots. 
 		 * Roots are (address, uniqtype) pairs.
 		 * Every pointer argument to the syscall is a root. 
 		 * (Note that the syscall arguments themselves don't live in memory,
 		 * so we can't start directly from a unique root.)
-		 * Following a pointer means adding a new root -- the memory on the end of the pointer.
-		 * In general, following a pointer is a "discovery" function.
-		 * We might reveal a larger object than the pointer's static type records,
-		 * including memory that precedes the target address.
-		 * Liballocs is one way to do pointer following.
-		 * We just take some naive assumptions which we can then refine. 
-		 * Firstly, assume each pointer points either to null or to a singleton,
-		 * unless it's a pointer to ARR0 or singleton char -- then assume null termination.
-		 * 
-		 * FIXME: also support DWARF's hack of subrange types with member references.
-		 * This is in DWARF 4, section 2.19, "Static and dynamic values of attributes". */
+		 */
+		__uniqtype_node_rec *q_head = NULL;
+		__uniqtype_node_rec *q_tail = NULL;
+		for (int i = 1; i < call->nmemb; ++i)
+		{
+			struct uniqtype *arg_t = call->contained[i].ptr;
+			if (UNIQTYPE_IS_POINTER_TYPE(arg_t))
+			{
+				void *ptr_value = (void*) gsp->args[i];
+				struct uniqtype *pointee_type = UNIQTYPE_POINTEE_TYPE(arg_t);
+				__uniqtype_node_rec *new_node = calloc(1, sizeof (new_node));
+				assert(new_node);
+				new_node->obj = ptr_value;
+				new_node->t = pointee_type;
+				new_node->free = free;
+				__uniqtype_node_queue_push_tail(&q_head, &q_tail, new_node);
+			}
+		}
+		/* Now explore the object graph. We will get a callback for each
+		 * unique object (or <object, type> pair, eventually) that we visit. */
+		__uniqtype_node_rec *list_head = NULL;
+		__uniqtype_process_bfs_queue(&q_head, &q_tail, 
+			__uniqtype_default_follow_ptr, NULL,
+			list_add, &list_head);
+		/* Now we have a list of objects constituting what we think the 
+		 * footprint is. Output that to fd 7. */
+		for (__uniqtype_node_rec *n = list_head; n; n = n->next)
+		{
+			write_footprint(n->obj, n->t->pos_maxoff);
+		}
 	}
 	else
 	{
-		write_string("Syscall number: ");
-		raw_write(2, fmt_hex_num(gsp->syscall_number), 18);
-		write_string(" has no uniqtype, so unknown footprint.\n");
+		debug_printf(1, "Syscall %s(%d) has no uniqtype, so unknown footprint\n",
+			syscall_names[gsp->syscall_number], gsp->syscall_number);
 	}
-	
-	
 }
 
 void __attribute__((visibility("protected")))
 post_handling(struct generic_syscall *gsp, long int ret)
 {
-	write_string("Syscall returned value: ");
-	raw_write(2, fmt_hex_num(ret), 18);
-	write_string("\n");
+	void *calling_addr = (void*) gsp->saved_context->uc.uc_mcontext.rip;
+	struct link_map *calling_object = vaddr_to_link_map(calling_addr, NULL);
+	FOR_TRACE_STREAMS
+	{
+		fprintf(stream, "== %d == < %p (%s+0x%x) %s(...) = %p\n",
+			raw_getpid(),
+			calling_addr,
+			calling_object->l_name,
+			(char*) calling_addr - (char*) calling_object->l_addr,
+			syscall_names[gsp->syscall_number],
+			(void*) ret
+		);
+	}
 }
+#undef FOR_TRACE_STREAMS
 
 static void *lock_memory(long int addr, unsigned long count, int copy)
 {
@@ -122,12 +170,8 @@ static void *lock_memory(long int addr, unsigned long count, int copy)
 			memset(ret, 0, count);
 		}
 #ifdef DUMP_SYSCALLS
-		write_string("    Replacing guest address: ");
-		raw_write(2, fmt_hex_num(addr), 18);
-		write_string("\n");
-		write_string("    with host address:       ");
-		raw_write(2, fmt_hex_num((long int) ret), 18);
-		write_string("\n");
+		debug_printf(1, "    Replacing guest address %p with host address %p\n", 
+			(void*) addr, (void*) ret, 18);
 #endif // DUMP_SYSCALLS
 
 		return ret;
@@ -198,9 +242,9 @@ static void do_read (struct generic_syscall *gsp, post_handler *post)
 {
 	long int ret;
 
-	REPLACE_ARGN(1, gsp->arg2);
+	REPLACE_ARGN(1, gsp->args[2]);
 	ret = do_syscall3(gsp);
-	RESTORE_ARGN(1, gsp->arg2);
+	RESTORE_ARGN(1, gsp->args[2]);
 
 	post(gsp, ret);
 	

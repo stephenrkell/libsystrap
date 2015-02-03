@@ -62,9 +62,7 @@ static const void *our_text_end_address;
 
 static void replace_syscall(unsigned char *pos, unsigned len)
 {
-	write_string("Replacing syscall at ");
-	write_ulong((unsigned long) pos);
-	write_string(" with trap.\n");
+	debug_printf(1, "Replacing syscall at %p with trap\n", pos);
 	
 	assert(len >= 2);
 	unsigned char *end = pos + len;
@@ -141,11 +139,8 @@ static void saw_mapping(const char *line_begin_pos, const char *line_end_pos)
 		 * But for now, just use the fact that it's very likely to be the lowest text addr. */
 		our_load_address = (uintptr_t) our_text_begin_address;
 
-		write_string("Skipping our own text mapping: ");
-		write_ulong(begin_addr);
-		write_string("-");
-		write_ulong(end_addr);
-		write_string("\n");
+		debug_printf(1, "Skipping our own text mapping: %p-%p\n", 
+			(void*) begin_addr, (void*) end_addr);
 		
 		return;
 	}
@@ -166,9 +161,8 @@ static void saw_mapping(const char *line_begin_pos, const char *line_end_pos)
 				 * pages, instead we should execute-protect them. Then, when we take a trap, 
 				 * we need to emulate the instructions there. FIXME: implement this. */
 				
-				write_string("Couldn't rewrite nor protect vdso mapping at ");
-				write_ulong(begin_addr);
-				write_string("\n");
+				debug_printf(1, "Couldn't rewrite nor protect vdso mapping at %p\n", 
+						(void*) begin_addr);
 				return;
 			}
 		}
@@ -205,13 +199,12 @@ static void saw_mapping(const char *line_begin_pos, const char *line_end_pos)
 		 * If we hit a ud2 that's not at such a site, we just do ud2.
 		 * FIXME: implement this.
 		 */
-		write_string("Scanning for syscall instructions within ");
-		write_ulong(begin_addr);
-		write_string("-");
-		write_ulong(end_addr);
-		write_string(" (");
-		write_chars(line_begin_pos, line_end_pos);
-		write_string(")\n");
+		char debug_buf[line_end_pos - line_begin_pos + 1];
+		strncpy(debug_buf, line_begin_pos, line_end_pos - line_begin_pos);
+		debug_buf[sizeof debug_buf - 1] = '\0';
+		// assert that line_end_pos 
+		debug_printf(1, "Scanning for syscall instructions within %p-%p (%s)\n",
+			(void*) begin_addr, (void*) end_addr, debug_buf);
 		
 		walk_instructions(begin_instr_pos, end_instr_pos, instruction_cb, NULL);
 		/* Now the paranoid second scan: check for in-betweens. */
@@ -220,9 +213,9 @@ static void saw_mapping(const char *line_begin_pos, const char *line_end_pos)
 		{
 			if (is_syscall_instr(instr_pos, end_instr_pos))
 			{
-				write_string("Warning: after instrumentation, bytes at ");
-				write_ulong((uintptr_t) instr_pos);
-				write_string(" could make a syscall on violation of control flow integrity\n");
+				debug_printf(0, "Warning: after instrumentation, bytes at %p "
+					"could make a syscall on violation of control flow integrity\n", 
+					instr_pos);
 			}
 			++instr_pos;
 		}
@@ -243,6 +236,9 @@ static void saw_mapping(const char *line_begin_pos, const char *line_end_pos)
 static void handle_sigill(int num);
 
 _Bool __write_footprints;
+void *footprints_out __attribute__((visibility("hidden"))) /* really FILE* */;
+int debug_level __attribute__((visibility("hidden")));
+void **p_err_stream __attribute__((visibility("hidden"))) = &stderr;
 
 #ifndef EXECUTABLE
 #define RETURN_VALUE
@@ -254,9 +250,11 @@ static void *ignore_ud2_addr;
 // scratch test code
 int main(void)
 {
+	char *debug_level_str = getenv("TRAP_SYSCALLS_DEBUG");
+	if (debug_level_str) debug_level = atoi(debug_level_str);
 #endif
 #if !defined(EXECUTABLE) && !defined(NDEBUG)
-	write_string("In debug mode; pausing for five seconds\n");
+	debug_printf(0, "In debug mode; pausing for five seconds\n");
 	struct timespec tm = { /* seconds */ 5, /* nanoseconds */ 0 };
 	raw_nanosleep(&tm, NULL);
 #endif
@@ -266,7 +264,7 @@ int main(void)
 	int stat_ret = raw_fstat(7, &buf);
 	if (stat_ret == 0)
 	{
-		write_string("File descriptor 7 is open; outputting systemtap cross-check info\n");
+		debug_printf(0, "File descriptor 7 is open; outputting systemtap cross-check info\n");
 
 		/* PROBLEM: ideally we'd read in the stap script's output ourselves, and process
 		 * it at every system call. But by reading in stuff from stap, we're doing more
@@ -277,10 +275,15 @@ int main(void)
 		 * won't read the extra output, hence won't write() more stuff in response.
 		 */
 		__write_footprints = 1;
+		footprints_out = fdopen(7, "a");
+		if (!footprints_out)
+		{
+			debug_printf(1, "Could not open footprints output stream for writing!\n");
+		}
 	}
 	else
 	{
-		write_string("File descriptor 7 is not open; skipping systemtap cross-check info\n");
+		debug_printf(1, "File descriptor 7 is not open; skipping systemtap cross-check info\n");
 	}
 
 	int fd = raw_open("/proc/self/maps", O_RDONLY);
@@ -325,12 +328,14 @@ int main(void)
 				{
 					assert(*seek_pos == '\n');
 					// we have a complete entry; read it and advance entry_start_pos
-					write_string("DEBUG: entry is: ");
-					write_chars(entry_start_pos, seek_pos);
-					write_string("\n");
-					write_string("DEBUG: buffer is: ");
-					write_chars(buf, buf_pos);
-					write_string("\n");
+					char debug_buf1[seek_pos - entry_start_pos + 1];
+					strncpy(debug_buf1, entry_start_pos, seek_pos - entry_start_pos);
+					debug_buf1[sizeof debug_buf1 - 1] = '\0';
+					debug_printf(1, "DEBUG: entry is: %s\n", debug_buf1);
+					char debug_buf2[buf_pos - buf];
+					strncpy(debug_buf2, buf, buf_pos - buf);
+					debug_buf2[sizeof debug_buf2 - 1] = '\0';
+					debug_printf(1, "DEBUG: buffer is: %s", debug_buf2);
 					saw_mapping(entry_start_pos, seek_pos);
 					entry_start_pos = seek_pos + 1;
 					// if the newline was the last in the buffer, break and read more
@@ -397,22 +402,20 @@ static void handle_sigill(int n)
 	struct ibcs_sigframe *p_frame = (struct ibcs_sigframe *) (frame_base + 1);
 
 	/* Decode the syscall using sigcontext. */
-	write_string("Took a trap from instruction at ");
-	write_ulong((unsigned long) p_frame->uc.uc_mcontext.rip);
+	debug_printf(1, "Took a trap from instruction at %p", p_frame->uc.uc_mcontext.rip);
 #ifdef EXECUTABLE
 	if (p_frame->uc.uc_mcontext.rip == (uintptr_t) ignore_ud2_addr)
 	{
-		write_string(" which is our test trap address; continuing.\n");
+		debug_printf(1, " which is our test trap address; continuing.\n");
 		resume_from_sigframe(0, p_frame, 2);
 		return;
 	}
 #endif
-	write_string(" which we think is syscall number ");
 	unsigned long syscall_num = (unsigned long) p_frame->uc.uc_mcontext.rax;
-	write_ulong(syscall_num);
-	write_string("\n");
 	assert(syscall_num >= 0);
 	assert(syscall_num < SYSCALL_MAX);
+	debug_printf(1, " which we think is syscall %s/%d\n",
+		syscall_names[syscall_num], syscall_num);
 
 	/* FIXME: check whether this syscall creates executable mappings; if so,
 	 * we make them nx, do the rewrite, then make them x. */
@@ -420,12 +423,14 @@ static void handle_sigill(int n)
 	struct generic_syscall gsp = {
 		.saved_context = p_frame,
 		.syscall_number = syscall_num,
-		.arg0 = p_frame->uc.uc_mcontext.rdi,
-		.arg1 = p_frame->uc.uc_mcontext.rsi,
-		.arg2 = p_frame->uc.uc_mcontext.rdx,
-		.arg3 = p_frame->uc.uc_mcontext.r10,
-		.arg4 = p_frame->uc.uc_mcontext.r8,
-		.arg5 = p_frame->uc.uc_mcontext.r9,
+		.args = {
+			p_frame->uc.uc_mcontext.rdi,
+			p_frame->uc.uc_mcontext.rsi,
+			p_frame->uc.uc_mcontext.rdx,
+			p_frame->uc.uc_mcontext.r10,
+			p_frame->uc.uc_mcontext.r8,
+			p_frame->uc.uc_mcontext.r9
+		}
 	};
 
 	do_syscall_and_resume(&gsp); // inline
