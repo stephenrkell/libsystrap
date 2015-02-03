@@ -1,9 +1,10 @@
 #include <stddef.h>
+#include <sys/syscall.h>
 
-#define __SYSCALL(num, decl) \
-[num] = #decl, 
+#define SYSCALL(n) \
+[__NUM_ ## n] = #n,
 
 const char *syscall_names[] = {
-#include <asm-generic/unistd.h>
+#include "linux-syscall-macros.h"
 	NULL
 };
