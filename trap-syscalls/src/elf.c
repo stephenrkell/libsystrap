@@ -4,92 +4,13 @@
 #include <asm/fcntl.h>
 #include <sys/mman.h>
 
+#include <relf.h>
+
 #include "do-syscall.h"
 #include "raw-syscalls.h"
 
-static ElfW(Word) *hash;
-static ElfW(Sym) *symtab;
-static const char *strtab;
 uintptr_t our_load_address __attribute__((visibility("protected")));
-static void init_hash(void)
-{
-	/* Find the hash table. We run too early to call dynamic loader functions
-	 * (which might make syscalls, anyway, which would not be good). */
-	for (ElfW(Dyn) *dyn = _DYNAMIC; dyn->d_tag != DT_NULL; ++dyn)
-	{
-		if (dyn->d_tag == DT_HASH)
-		{
-			hash = (void*) dyn->d_un.d_ptr;
-		}
-		if (dyn->d_tag == DT_SYMTAB)
-		{
-			symtab = (void*) dyn->d_un.d_ptr;
-		}
-		if (dyn->d_tag == DT_STRTAB)
-		{
-			strtab = (void*) dyn->d_un.d_ptr;
-		}
-	}
-	assert(symtab);
-	assert(strtab);
-}
 
-static unsigned long
-elf64_hash(const unsigned char *name)
-{
-	unsigned long h = 0, g;
-	while (*name)
-	{
-		h = (h << 4) + *name++;
-		if (0 != (g = (h & 0xf0000000))) h ^= g >> 24;
-		h &= 0x0fffffff;
-	}
-	return h;
-}
-
-void *hash_lookup(const char *sym)
-{
-	if (!hash) init_hash();
-	ElfW(Sym) *found_sym = NULL;
-	if (hash)
-	{
-		ElfW(Word) nbucket = hash[0];
-		ElfW(Word) nchain = hash[1];
-		ElfW(Word) (*buckets)[nbucket] = (void*) &hash[2];
-		ElfW(Word) (*chains)[nchain] = (void*) &hash[2 + nbucket];
-
-		unsigned long h = elf64_hash((const unsigned char *) sym);
-		ElfW(Word) first_symind = (*buckets)[h % nbucket];
-		ElfW(Word) symind = first_symind;
-		for (; symind != STN_UNDEF; symind = (*chains)[symind])
-		{
-			ElfW(Sym) *p_sym = &symtab[symind];
-			if (0 == strcmp(&strtab[p_sym->st_name], sym))
-			{
-				/* match */
-				found_sym = p_sym;
-				break;
-			}
-		}
-	}
-	else
-	{
-		for (ElfW(Sym) *p_sym = &symtab[0]; (char*) p_sym <= (char*) strtab; ++p_sym)
-		{
-			if (0 == strcmp(&strtab[p_sym->st_name], sym))
-			{
-				/* match */
-				found_sym = p_sym;
-				break;
-			}
-		}
-	}
-	
-	if (found_sym)
-	{
-		return (char*) our_load_address + found_sym->st_value;
-	} else return NULL;
-}
 struct dl_fileoff_cb_arg
 {
 	unsigned char *addr_in_file;
@@ -201,22 +122,6 @@ ElfW(Dyn) *dyn_lookup(ElfW(Dyn) *p_dyn, ElfW(Sword) tag)
 	for (ElfW(Sword) i = 0; p_dyn[i].d_tag != DT_NULL; ++i)
 	{
 		if (p_dyn[i].d_tag == tag) return p_dyn;
-	}
-	return NULL;
-}
-
-struct link_map *vaddr_to_link_map(unsigned char *begin_addr, void **out_base_addr)
-{
-	/* We really want to get the program headers. But we can't. BAH! 
-	 * OH: but we can get the ehdr, innit, using our temporary mapping thing. */
-	const ElfW(Ehdr) *ehdr = vaddr_to_ehdr(begin_addr, NULL, NULL);
-	assert(ehdr);
-	// the ELF header's vaddr is the base address of the object, *if* 
-	// it is mapped. FIXME: handle the case where it isn't!
-	for (struct link_map *l = _r_debug.r_map; l; l = l->l_next)
-	{
-		// ElfW(Dyn) *p_dyn = l->l_ld;
-		if ((void*) l->l_addr == ehdr) return l;
 	}
 	return NULL;
 }

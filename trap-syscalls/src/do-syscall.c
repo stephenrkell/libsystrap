@@ -35,8 +35,13 @@ static struct uniqtype *uniqtype_for_syscall(int syscall_num)
 	strncat(name_buf + sizeof prefix - 1, syscall_name, sizeof name_buf - sizeof prefix + 1);
 	name_buf[sizeof name_buf - 1] = '\0';
 	
-	struct uniqtype **found_ifacetype = hash_lookup(name_buf);
-	assert(found_ifacetype);
+	struct uniqtype **found_ifacetype = sym_to_addr(hash_lookup_local(name_buf));
+	if (!found_ifacetype) found_ifacetype = sym_to_addr(symbol_lookup_linear_local(name_buf));
+	if (!found_ifacetype)
+	{
+		debug_printf(1, "No ifacetype for syscall %s (check kernel DWARF)\n", name_buf);
+		return NULL;
+	}
 	struct uniqtype *found_uniqtype = *found_ifacetype;
 	assert(found_uniqtype);
 	return found_uniqtype;
@@ -66,7 +71,7 @@ pre_handling(struct generic_syscall *gsp)
 	/* Now walk the footprint. We print out a line per-syscall before and after
 	 * to bracket the invididual footprint items. */
 	void *calling_addr = (void*) gsp->saved_context->uc.uc_mcontext.rip;
-	struct link_map *calling_object = vaddr_to_link_map(calling_addr, NULL);
+	struct link_map *calling_object = get_link_map(calling_addr);
 	
 	/* send same output to stderr and, if we're writing them, footprints_out */
 #define FOR_TRACE_STREAMS \
@@ -137,7 +142,7 @@ void __attribute__((visibility("protected")))
 post_handling(struct generic_syscall *gsp, long int ret)
 {
 	void *calling_addr = (void*) gsp->saved_context->uc.uc_mcontext.rip;
-	struct link_map *calling_object = vaddr_to_link_map(calling_addr, NULL);
+	struct link_map *calling_object = get_link_map(calling_addr);
 	FOR_TRACE_STREAMS
 	{
 		fprintf(stream, "== %d == < %p (%s+0x%x) %s(...) = %p\n",
