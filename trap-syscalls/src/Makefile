@@ -30,7 +30,20 @@ default: trap-syscalls.so
 
 THIS_MAKEFILE ?= $(lastword $(MAKEFILE_LIST))
 
-LIBALLOCS ?= ../../../liballocs
+CONTRIB := $(realpath $(dir $(THIS_MAKEFILE))/../contrib)
+CONFIG ?= $(CONTRIB)/config.mk
+
+$(CONTRIB)/config.mk:
+	cd "$(CONTRIB)" && make
+
+include $(CONFIG)
+
+CFLAGS += -DRELF_DEFINE_STRUCTURES
+
+ifeq ($(LIBALLOCS_DIR),)
+$(error Please install the liballocs source tree and set LIBALLOCS_DIR)
+endif
+
 LIBC_A ?= -lc -ldl
 
 # LLVM_CXXFLAGS ?= $(shell llvm-config --cxxflags)
@@ -48,7 +61,7 @@ SYSCALL_INTERFACE_DIR ?= $(dir $(THIS_MAKEFILE))/../../syscall-interfaces/script
 SYSCALL_INTERFACE := linux
 
 vpath %.c $(SYSCALL_INTERFACE_DIR)
-vpath %.c $(LIBALLOCS)/src
+vpath %.c $(LIBALLOCS_DIR)/src
 
 CFLAGS += -g 
 CFLAGS += -Wall -Wno-unused-label -Wno-comment
@@ -57,7 +70,7 @@ CFLAGS += -fPIC
 CFLAGS += -ffreestanding
 CFLAGS += -I$(SYSCALL_INTERFACE_DIR)
 
-CFLAGS += -I $(LIBALLOCS)/include
+CFLAGS += -I $(LIBALLOCS_DIR)/include
 # CFLAGS += $(LLVM_INCLUDES)
 
 CXXFLAGS := $(CXXFLAGS) $(CFLAGS) # eagerly latch CFLAGS now; don't want later additions
