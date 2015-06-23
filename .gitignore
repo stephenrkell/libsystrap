@@ -1,0 +1,7 @@
+*.o
+src/.*.d
+.fuse_hidden*
+*~
+.#*
+*.a
+*.so
