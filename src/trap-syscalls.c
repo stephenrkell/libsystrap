@@ -31,10 +31,15 @@
 #include <sys/mman.h>
 #include <stdint.h>
 #include <string.h>
-
 #include "raw-syscalls.h"
 #include "do-syscall.h"
 #include "elf.h"
+
+/* See above */
+extern char *getenv (const char *__name) __THROW __nonnull ((1)) __wur;
+extern int atoi (const char *__nptr)
+     __THROW __attribute_pure__ __nonnull ((1)) __wur;
+
 
 /* If we build a standalone executable, we include a test trap. */
 #ifdef EXECUTABLE
@@ -178,6 +183,7 @@ static void saw_mapping(const char *line_begin_pos, const char *line_end_pos)
 		void *base_addr = NULL;
 		const void *next_section_start = vaddr_to_next_instruction_start(
 			(unsigned char *) begin_addr, filename, &base_addr);
+
 		if (next_section_start)
 		{
 			begin_instr_pos = (unsigned char *) next_section_start;
@@ -236,8 +242,14 @@ static void saw_mapping(const char *line_begin_pos, const char *line_end_pos)
 static void handle_sigill(int num);
 
 _Bool __write_footprints;
+_Bool __write_traces;
 void *footprints_out __attribute__((visibility("hidden"))) /* really FILE* */;
+void *traces_out __attribute__((visibility("hidden"))) /* really FILE* */;
 int debug_level __attribute__((visibility("hidden")));
+int footprint_fd __attribute__((visibility("hidden")));
+int trace_fd __attribute__((visibility("hidden")));
+int sleep_for_seconds __attribute__((visibility("hidden")));
+extern void *stderr;
 void **p_err_stream __attribute__((visibility("hidden"))) = &stderr;
 
 #ifndef EXECUTABLE
@@ -250,43 +262,84 @@ static void *ignore_ud2_addr;
 // scratch test code
 int main(void)
 {
-	char *debug_level_str = getenv("TRAP_SYSCALLS_DEBUG");
-	if (debug_level_str) debug_level = atoi(debug_level_str);
 #endif
-#if !defined(EXECUTABLE) && !defined(NDEBUG)
-	debug_printf(0, "In debug mode; pausing for five seconds\n");
-	struct timespec tm = { /* seconds */ 5, /* nanoseconds */ 0 };
-	raw_nanosleep(&tm, NULL);
-#endif
-	/* Is fd 7 open? If so, it's the input fd for our sanity check info
-	 * from systemtap. */
-	struct stat buf;
-	int stat_ret = raw_fstat(7, &buf);
-	if (stat_ret == 0)
-	{
-		debug_printf(0, "File descriptor 7 is open; outputting systemtap cross-check info\n");
 
-		/* PROBLEM: ideally we'd read in the stap script's output ourselves, and process
-		 * it at every system call. But by reading in stuff from stap, we're doing more
-		 * copying to/from userspace, so creating a feedback loop which would blow up.
-		 *
-		 * Instead we write out what we think we touched, and do a diff outside the process.
-		 * This also adds noise to stap's output, but without the feedback cycle: we ourselves
-		 * won't read the extra output, hence won't write() more stuff in response.
-		 */
-		__write_footprints = 1;
-		footprints_out = fdopen(7, "a");
-		if (!footprints_out)
-		{
-			debug_printf(1, "Could not open footprints output stream for writing!\n");
+	char *debug_level_str = getenv("TRAP_SYSCALLS_DEBUG");
+	char *footprint_fd_str = getenv("TRAP_SYSCALLS_FOOTPRINT_FD");
+	char *trace_fd_str = getenv("TRAP_SYSCALLS_TRACE_FD");
+	char *sleep_for_seconds_str = getenv("TRAP_SYSCALLS_SLEEP_FOR_SECONDS");
+	struct timespec one_second = { /* seconds */ 1, /* nanoseconds */ 0 };
+	if (debug_level_str) debug_level = atoi(debug_level_str);
+	if (trace_fd_str) trace_fd = atoi(trace_fd_str);
+	if (footprint_fd_str) footprint_fd = atoi(footprint_fd_str);
+	if (sleep_for_seconds_str) sleep_for_seconds = atoi(sleep_for_seconds_str);
+	debug_printf(0, "Debug level is %s=%d.\n", debug_level_str, debug_level);
+	debug_printf(0, "TRAP_SYSCALLS_SLEEP_FOR_SECONDS is %s, pausing for %d seconds", sleep_for_seconds_str, sleep_for_seconds);
+	for (int i = 0; i < sleep_for_seconds; i++) {
+		raw_nanosleep(&one_second, NULL);
+		debug_printf(0, ".");
+	}
+	debug_printf(0, "\n");
+
+	/* Is fd open? If so, it's the input fd for our sanity check info
+	 * from systemtap. */
+	debug_printf(0, "TRAP_SYSCALLS_FOOTPRINT_FD is %s, ", footprint_fd_str);
+	if (footprint_fd > 2)
+	{
+		struct stat buf;
+		int stat_ret = raw_fstat(footprint_fd, &buf);
+		if (stat_ret == 0) {
+			debug_printf(0, "fd %d is open; outputting systemtap cross-check info.\n", footprint_fd);
+			/* PROBLEM: ideally we'd read in the stap script's output ourselves, and process
+			 * it at every system call. But by reading in stuff from stap, we're doing more
+			 * copying to/from userspace, so creating a feedback loop which would blow up.
+			 *
+			 * Instead we write out what we think we touched, and do a diff outside the process.
+			 * This also adds noise to stap's output, but without the feedback cycle: we ourselves
+			 * won't read the extra output, hence won't write() more stuff in response.
+			 */
+			__write_footprints = 1;
+			footprints_out = fdopen(footprint_fd, "a");
+			if (!footprints_out)
+				{
+					debug_printf(0, "Could not open footprints output stream for writing!\n");
+				}
+		} else {
+			debug_printf(0, "fd %d is closed; skipping systemtap cross-check info.\n", footprint_fd);
 		}
+
 	}
 	else
 	{
-		debug_printf(1, "File descriptor 7 is not open; skipping systemtap cross-check info\n");
+		debug_printf(0, "skipping systemtap cross-check info\n");
+	}
+
+	debug_printf(0, "TRAP_SYSCALLS_TRACE_FD is %s, ", trace_fd_str);
+	if (!trace_fd_str || trace_fd == 2) {
+		debug_printf(0, "dup'ing stderr, ");
+		trace_fd = dup(2);
+	}
+	
+	if (trace_fd >= 0) {
+		struct stat buf;
+		int stat_ret = raw_fstat(trace_fd, &buf);
+		if (stat_ret == 0) {
+			debug_printf(0, "fd %d is open; outputting traces there.\n", trace_fd);
+			__write_traces = 1;
+			traces_out = fdopen(trace_fd, "a");
+			if (!traces_out)
+				{
+					debug_printf(0, "Could not open traces output stream for writing!\n");
+				}
+		} else {
+			debug_printf(0, "fd %d is closed; not outputting traces.\n", trace_fd);
+		}
+	} else {
+		debug_printf(0, "not outputting traces.\n");
 	}
 
 	int fd = raw_open("/proc/self/maps", O_RDONLY);
+
 	if (fd != -1)
 	{
 		// we use a simple buffer and a read loop

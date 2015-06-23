@@ -20,7 +20,6 @@ int fprintf(void *stream, const char *format, ...);
 int fflush(void *stream);
 
 extern int debug_level;
-extern void *stderr;
 extern void **p_err_stream;
 #define debug_printf(lvl, fmt, ...) do { \
     if ((lvl) <= debug_level) { \
@@ -34,7 +33,9 @@ extern void **p_err_stream;
 #include "instr.h"
 
 extern _Bool __write_footprints;
+extern _Bool __write_traces;
 extern void *footprints_out; /* really a FILE* */
+extern void *traces_out; /* really a FILE* */
 extern void *stderr;
 extern uintptr_t our_load_address;
 

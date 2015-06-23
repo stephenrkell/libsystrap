@@ -51,6 +51,7 @@ void __attribute__((visibility("protected")))
 write_footprint(void *base, size_t len)
 {
 	fprintf(footprints_out, "n=0x%lx base=0x%p\n", len, (void*) base);
+	fflush(footprints_out);
 }
 
 static void list_add(void *obj, struct uniqtype *t, void *arg)
@@ -65,6 +66,39 @@ static void list_add(void *obj, struct uniqtype *t, void *arg)
 	*head = new_node;
 }
 
+static void print_pre_syscall(void *stream, struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, void *ret) {
+	fprintf(stream, "== %d == > %p (%s+0x%x) %s(...)\n",
+		raw_getpid(), 
+		calling_addr,
+		calling_object->l_name,
+		(char*) calling_addr - (char*) calling_object->l_addr,
+		syscall_names[gsp->syscall_number]
+	);
+	fflush(stream);
+}
+
+static void print_post_syscall(void *stream, struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, void *ret) {
+	fprintf(stream, "== %d == < %p (%s+0x%x) %s(...) = %p\n",
+		raw_getpid(),
+		calling_addr,
+		calling_object->l_name,
+		(char*) calling_addr - (char*) calling_object->l_addr,
+		syscall_names[gsp->syscall_number],
+		ret
+	);
+	fflush(stream);
+}
+
+static inline void print_to_streams(struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, void *ret, void (*printer)(void *_stream, struct generic_syscall *_gsp, void *_calling_addr, struct link_map *_calling_object, void *_ret)) {
+	if (__write_footprints && footprints_out) {
+		printer(footprints_out, gsp, calling_addr, calling_object, ret);
+	}
+
+	if (__write_traces && traces_out) {
+		printer(traces_out, gsp, calling_addr, calling_object, ret);
+	}
+}
+
 void __attribute__((visibility("protected")))
 pre_handling(struct generic_syscall *gsp)
 {
@@ -74,20 +108,7 @@ pre_handling(struct generic_syscall *gsp)
 	struct link_map *calling_object = get_link_map(calling_addr);
 	
 	/* send same output to stderr and, if we're writing them, footprints_out */
-#define FOR_TRACE_STREAMS \
-	for (void *stream = stderr; stream; \
-			stream = (__write_footprints && footprints_out) ? ((stream == footprints_out) ? NULL : footprints_out) \
-					                      : NULL)
-	FOR_TRACE_STREAMS
-	{
-		fprintf(stream, "== %d == > %p (%s+0x%x) %s(...)\n",
-			raw_getpid(), 
-			calling_addr,
-			calling_object->l_name,
-			(char*) calling_addr - (char*) calling_object->l_addr,
-			syscall_names[gsp->syscall_number]
-		);
-	}
+	print_to_streams(gsp, calling_addr, calling_object, NULL, &print_pre_syscall);
 	
 	struct uniqtype *call = uniqtype_for_syscall(gsp->syscall_number);
 	if (call)
@@ -143,19 +164,8 @@ post_handling(struct generic_syscall *gsp, long int ret)
 {
 	void *calling_addr = (void*) gsp->saved_context->uc.uc_mcontext.rip;
 	struct link_map *calling_object = get_link_map(calling_addr);
-	FOR_TRACE_STREAMS
-	{
-		fprintf(stream, "== %d == < %p (%s+0x%x) %s(...) = %p\n",
-			raw_getpid(),
-			calling_addr,
-			calling_object->l_name,
-			(char*) calling_addr - (char*) calling_object->l_addr,
-			syscall_names[gsp->syscall_number],
-			(void*) ret
-		);
-	}
+	print_to_streams(gsp, calling_addr, calling_object, (void *)ret, &print_post_syscall);
 }
-#undef FOR_TRACE_STREAMS
 
 static void *lock_memory(long int addr, unsigned long count, int copy)
 {
