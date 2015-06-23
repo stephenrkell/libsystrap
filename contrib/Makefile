@@ -55,17 +55,16 @@ build-eglibc:
 	    (cd "$$eglibc_dir" && mkdir -p build && cd build && \
 	CFLAGS="-g -O2" ../configure --prefix=/usr); \
 	cd "$$eglibc_dir"/build && $(MAKE) -j3
-	
+
 .PHONY: extract-opdis
 extract-opdis:
-	test -d opdis/.git || (git clone $(OPDIS_REPO) && cd opdis && ./bootstrap)
+	test -e opdis/configure || (git clone $(OPDIS_REPO) && cd opdis && ./bootstrap)
 build-opdis: build-binutils
-	(test -e opdis-build/config.log && ! grep 'exit 1' opdis-build/config.log) || (mkdir -p opdis-build && cd opdis-build && CFLAGS="-fPIC -g" LDFLAGS=-L$(CONTRIB)/binutils-build/libiberty ../opdis/configure)
-	cd opdis-build && $(MAKE) -j3
+	(test -e opdis-build/config.log && ! grep 'exit 1' opdis-build/config.log) || (mkdir -p opdis-build && cd opdis-build && CPPFLAGS="-I$(CONTRIB)/binutils-2.25/include -I$(CONTRIB)/binutils-build/bfd" CFLAGS="-fPIC -g -I$(CONTRIB)/binutils-2.25/include -I$(CONTRIB)/binutils-build/bfd" LDFLAGS="-L$(CONTRIB)/binutils-build/libiberty -L$(CONTRIB)/binutils-build/bfd -L$(CONTRIB)/binutils-build/intl -L$(CONTRIB)/binutils-build/opcodes" ../opdis/configure && $(MAKE) -j3)
 
 .PHONY: extract-zlib
 extract-zlib: $(ZLIB_TAR)
-	tar -k -xzf "$<"
+	test -e zlib-1.2.8/configure || tar -k -xzf "$<"
 $(ZLIB_TAR): 
 	wget http://zlib.net/$(ZLIB_TAR)
 build-zlib:
@@ -74,10 +73,10 @@ build-zlib:
 
 .PHONY: extract-binutils
 extract-binutils: $(BINUTILS_TAR)
-	tar -k -xzf "$(BINUTILS_TAR)"
+	test -e binutils-2.25/configure || tar -k -xzf "$(BINUTILS_TAR)"
 $(BINUTILS_TAR): 
 	wget http://ftp.gnu.org/gnu/binutils/$(BINUTILS_TAR)
-build-binutils: build-binutils-libiberty build-binutils-bfd build-binutils-opcodes
+build-binutils: build-binutils-libiberty build-binutils-bfd build-binutils-opcodes build-binutils-intl
 build-binutils-%: extract-binutils
 	(test -e binutils-build/$*/config.log && ! grep 'exit 1' binutils-build/$*/config.log) || (mkdir -p binutils-build/$*  && cd binutils-build/$* && CFLAGS="-fPIC -g -O2" $$( ls -td ../../binutils-2.* | grep -v $(BINUTILS_TAR) | head -n1)/$*/configure)
 	cd binutils-build/$*  && $(MAKE) -j3 
@@ -106,9 +105,12 @@ RTLD_OBJ_DIR := $$(LIBC_DIR)/elf\n\
 RTLD_SO := $$(RTLD_OBJ_DIR)/ld.so\n\
 RTLD_LIBC_A := $$(RTLD_OBJ_DIR)/rtld-libc.a\n\
 LIBOPDIS_A := $$(CONTRIB)/opdis-build/dist/.libs/libopdis.a \n\
+LIBOPCODES_DIR := $$(CONTRIB)/binutils-2.25 \n\
+BFD_DIR := $$(CONTRIB)/binutils-build/bfd \n\
 LIBOPCODES_A := $$(CONTRIB)/binutils-build/opcodes/libopcodes.a \n\
 LIBBFD_A := $$(CONTRIB)/binutils-build/bfd/libbfd.a \n\
 LIBIBERTY_A := $$(CONTRIB)/binutils-build/libiberty/libiberty.a \n\
-LIBALLOCS_DIR := $(CONTRIB)/liballocs \n\
-DWARFIDL_DIR := $(CONTRIB)/dwarfidl \n\
+LIBALLOCS_DIR := $$(CONTRIB)/liballocs \n\
+DWARFIDL_DIR := $$(CONTRIB)/dwarfidl \n\
+OPDIS_DIR := $$(CONTRIB)/opdis \n\
 ZLIB_A ?= $$(CONTRIB)/zlib-1.2.8/libz.a' | sed '/^\\$$/ d' | sed 's/ *$$//' > "$@"

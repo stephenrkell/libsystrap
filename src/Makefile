@@ -71,6 +71,10 @@ CFLAGS += -ffreestanding
 CFLAGS += -I$(SYSCALL_INTERFACE_DIR)
 
 CFLAGS += -I $(LIBALLOCS_DIR)/include
+CFLAGS += -I $(OPDIS_DIR)
+CFLAGS += -I $(DWARFIDL_DIR)/include
+CFLAGS += -I $(LIBOPCODES_DIR)/include
+CFLAGS += -I $(BFD_DIR)
 # CFLAGS += $(LLVM_INCLUDES)
 
 CXXFLAGS := $(CXXFLAGS) $(CFLAGS) # eagerly latch CFLAGS now; don't want later additions
@@ -86,7 +90,7 @@ CC_SRC := $(wildcard *.cc)
 C_DEPS := $(patsubst %.c,.%.d,$(C_SRC))
 CC_DEPS := $(patsubst %.cc,.%.d,$(CC_SRC))
 DEPS := $(C_DEPS) $(CC_DEPS)
-OBJS := $(patsubst %.c,%.o,$(C_SRC)) $(patsubst %.cc,%.o,$(CC_SRC)) $(patsubst %.s,%.o,$(S_SRC))
+OBJS := $(patsubst %.c,%.o,$(C_SRC)) $(patsubst %.cc,%.o,$(CC_SRC)) $(patsubst %.s,%.o,$(S_SRC)) dlmalloc.a
 
 DEPS += .trap-syscalls-exec.d
 

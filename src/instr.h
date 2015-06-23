@@ -1,6 +1,11 @@
 #ifndef INSTR_H_
 #define INSTR_H_
 
+
+#define PACKAGE "The binutils maintainers suck"
+#define HAVE_STRINGSIZE
+
+
 #ifdef __cplusplus
 extern "C"
 {
