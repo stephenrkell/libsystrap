@@ -29,8 +29,9 @@ default: trap-syscalls.so
 #LDLIBS +=  $(LIBOPCODES_A) $(LIBBFD_A)
 
 THIS_MAKEFILE ?= $(lastword $(MAKEFILE_LIST))
+SRCROOT := $(realpath $(dir $(THIS_MAKEFILE)))/..
 
-CONTRIB := $(realpath $(dir $(THIS_MAKEFILE))/../contrib)
+CONTRIB := $(SRCROOT)/contrib
 CONFIG ?= $(CONTRIB)/config.mk
 
 $(CONTRIB)/config.mk:
@@ -54,6 +55,7 @@ LIBOPDIS_A ?= -lopdis
 LIBOPCODES_A ?= -lopcodes
 LIBBFD_A ?= -lbfd
 LIBIBERTY_A ?= -liberty
+FOOTPRINTS_A ?= $(LIBALLOCS_DIR)/footprints/liballocs_footprints.a
 
 ZLIB_A ?= -lz
 
@@ -75,6 +77,9 @@ CFLAGS += -I $(OPDIS_DIR)
 CFLAGS += -I $(DWARFIDL_DIR)/include
 CFLAGS += -I $(LIBOPCODES_DIR)/include
 CFLAGS += -I $(BFD_DIR)
+CFLAGS += -I $(SRCROOT)/../libantlr3c-3.4
+CFLAGS += -I $(SRCROOT)/../libantlr3c-3.4/include
+CFLAGS += -I $(SRCROOT)/../dwarfidl/parser
 # CFLAGS += $(LLVM_INCLUDES)
 
 CXXFLAGS := $(CXXFLAGS) $(CFLAGS) # eagerly latch CFLAGS now; don't want later additions
@@ -130,7 +135,7 @@ dlmalloc.a: dlmalloc.o
 
 # FIXME: make our dynamic symbols hidden! 
 # We don't want user code calling into our exit(), hence having us make its syscalls.
-trap-syscalls.so: LDLIBS := -Bstatic $(LIBOPDIS_A) $(LIBOPCODES_A) $(LIBBFD_A) $(LIBIBERTY_A) $(ZLIB_A) dlmalloc.a $(LIBC_A)
+trap-syscalls.so: LDLIBS := -Bstatic $(LIBOPDIS_A) $(LIBOPCODES_A) $(LIBBFD_A) $(LIBIBERTY_A) $(ZLIB_A) dlmalloc.a $(LIBC_A) $(FOOTPRINTS_A)  $(SRCROOT)/../dwarfidl/parser/dwarfidlSimpleCLexer.o $(SRCROOT)/../dwarfidl/parser/dwarfidlSimpleCParser.o $(SRCROOT)/../libantlr3c-3.4/.libs/libantlr3c.a
 trap-syscalls.so: LDFLAGS += -nostdlib -Wl,--hash-style=sysv
 trap-syscalls.so: $(OBJS) dynamic-list
 	$(CC) -shared -Bsymbolic -Wl,--dynamic-list,dynamic-list \
@@ -138,7 +143,7 @@ trap-syscalls.so: $(OBJS) dynamic-list
 		-Wl,--version-script,version-script \
 		-o "$@" $(filter-out dynamic-list,$(filter-out raw-syscalls.o,$+)) \
 		$(LDFLAGS) raw-syscalls.o \
-		-Wl,--defsym,__GI___assert_fail=__assert_fail \
+		-Wl,--defsym,__GI___assert_fail=__assert_fail -Wl,--defsym,stat=raw_stat \
 		$(LDLIBS)
 
 .PHONY: clean

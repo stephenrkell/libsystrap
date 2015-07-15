@@ -35,6 +35,9 @@
 #include "do-syscall.h"
 #include "elf.h"
 
+#include <footprints.h>
+
+
 /* See above */
 extern char *getenv (const char *__name) __THROW __nonnull ((1)) __wur;
 extern int atoi (const char *__nptr)
@@ -249,8 +252,12 @@ int debug_level __attribute__((visibility("hidden")));
 int footprint_fd __attribute__((visibility("hidden")));
 int trace_fd __attribute__((visibility("hidden")));
 int sleep_for_seconds __attribute__((visibility("hidden")));
+char *footprints_spec_filename __attribute__((visibility("hidden")));
 extern void *stderr;
 void **p_err_stream __attribute__((visibility("hidden"))) = &stderr;
+
+
+struct footprint_node *footprints __attribute__((visibility("hidden"))) = NULL;
 
 #ifndef EXECUTABLE
 #define RETURN_VALUE
@@ -268,6 +275,7 @@ int main(void)
 	char *footprint_fd_str = getenv("TRAP_SYSCALLS_FOOTPRINT_FD");
 	char *trace_fd_str = getenv("TRAP_SYSCALLS_TRACE_FD");
 	char *sleep_for_seconds_str = getenv("TRAP_SYSCALLS_SLEEP_FOR_SECONDS");
+	footprints_spec_filename = getenv("TRAP_SYSCALLS_FOOTPRINT_SPEC_FILENAME");
 	struct timespec one_second = { /* seconds */ 1, /* nanoseconds */ 0 };
 	if (debug_level_str) debug_level = atoi(debug_level_str);
 	if (trace_fd_str) trace_fd = atoi(trace_fd_str);
@@ -304,6 +312,16 @@ int main(void)
 				{
 					debug_printf(0, "Could not open footprints output stream for writing!\n");
 				}
+
+			if (footprints_spec_filename) {
+
+				 footprints = parse_footprints_from_file(footprints_spec_filename);
+				 
+			} else {
+				 debug_printf(0, "no footprints spec filename provided\n", footprints_spec_filename);
+			}
+
+			
 		} else {
 			debug_printf(0, "fd %d is closed; skipping systemtap cross-check info.\n", footprint_fd);
 		}

@@ -122,6 +122,14 @@ pre_handling(struct generic_syscall *gsp)
 		 * (Note that the syscall arguments themselves don't live in memory,
 		 * so we can't start directly from a unique root.)
 		 */
+
+		struct union_node *extents = eval_footprint_for(footprints, syscall_names[gsp->syscall_number], call, gsp->args);
+		if (extents) {
+			 debug_printf(1, "%s\n", print_footprint_extents(extents));
+		} else {
+			 debug_printf(1, "(no extents found)\n");
+		}
+	
 		__uniqtype_node_rec *q_head = NULL;
 		__uniqtype_node_rec *q_tail = NULL;
 		for (int i = 1; i < call->nmemb; ++i)

@@ -44,6 +44,7 @@ void restore_rt(void); /* in restorer.s */
 void raw_exit(int status) __attribute__((noreturn));
 int raw_open(const char *pathname, int flags) __attribute__((noinline));
 int raw_fstat(int fd, struct stat *buf) __attribute__((noinline));
+int raw_stat(char *filename, struct stat *buf) __attribute__((noinline));
 int raw_nanosleep(struct timespec *req,
 		struct timespec *rem) __attribute__((noinline));
 int raw_getpid(void) __attribute__((noinline));

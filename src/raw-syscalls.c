@@ -59,6 +59,13 @@ int __attribute__((noinline)) raw_fstat(int fd, struct stat *buf)
 	return ret;
 }
 
+int __attribute__((noinline)) raw_stat(char *filename, struct stat *buf) {
+	 int fd = raw_open(filename, O_RDONLY);
+	 int ret = raw_fstat(fd, buf);
+	 raw_close(fd);
+	 return ret;
+}
+
 int __attribute__((noinline)) raw_nanosleep(struct timespec *req,
 			struct timespec *rem)
 {
