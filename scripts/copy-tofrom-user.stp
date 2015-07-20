@@ -37,51 +37,604 @@
 
 // let's just deal with the first 6 for now
 
-probe kernel.function("copy_user_generic").inline
-{
-	if (pid() == target()) printf("saw inline copy_user_generic with %s\n", $$parms)
-}
-
-// stap claims this one isn't present, at least on my kernel. -srk
-//probe kernel.function("copy_user_generic").call
+//probe kernel.function("copy_user_generic").inline
 //{
-//	if (pid() == target()) printf("saw out-of-line copy_user_generic of %u bytes from %p to %p\n", $len, $from, $to)
+	 //	if (pid() == target()) printf("saw inline copy_user_generic @ %p with %s\n", addr(), $$vars);
 //}
 
-probe kernel.function("copy_to_user").inline
+// stap claims this one isn't present, at least on my kernel. -srk
+  //probe kernel.function("copy_user_generic").call
+  //{
+	   //	if (pid() == target()) printf("saw out-of-line copy_user_generic of %u bytes from %p to %p\n", $len, $from, $to)
+//}
+
+/*probe kernel.function("copy_to_user").inline
 {
-	if (pid() == target()) printf("saw inline copy_to_user with %s\n", $$parms)
-}
+	if (pid() == target()) printf("saw inline copy_to_user @ %p with %s\n", addr(), $$vars);
+	}*/
 
 // stap claims this one isn't present, at least on my kernel. -srk
 // probe kernel.function("copy_to_user").call
-// {
-// 	if (pid() == target()) print ("saw out-of-line copy_to_user with %s\n", $$parms)
-// }
+//{
+	 //	if (pid() == target()) print ("saw out-of-line copy_to_user @ %p with %s\n", addr(), $$vars);
+	 //}
 
-probe kernel.function("copy_from_user").inline
+/*probe kernel.function("copy_from_user").inline
 {
-	if (pid() == target()) printf("saw inline copy_from_user with %s\n", $$parms)
-}
+	if (pid() == target()) printf("saw inline copy_from_user @ %p with %s\n", addr(), $$vars);
+	}*/
 
-probe kernel.function("copy_from_user").call
+/*probe kernel.function("copy_from_user").call
 {
-	if (pid() == target()) printf("saw out-of-line copy_from_user with %s\n", $$parms)
+	if (pid() == target()) printf("saw out-of-line copy_from_user @ %p with %s\n", addr(), $$vars);
 }
 
 // stap claims this one isn't present, at least on my kernel. -srk
-// probe kernel.function("copy_in_user").inline
-// {
-// 	if (pid() == target()) printf("saw inline copy_in_user with %s\n", $$parms)
-// }
+//probe kernel.function("copy_in_user").inline
+//{
+	 //if (pid() == target()) printf("saw inline copy_in_user @ %p with %s\n", addr(), $$vars);
+	//}
 
 probe kernel.function("__copy_from_user").inline
 {
-	if (pid() == target()) printf("saw inline __copy_from_user with %s\n", $$parms)
+	if (pid() == target()) printf("saw inline __copy_from_user @ %p with %s\n", addr(), $$vars);
 }
 
 probe kernel.function("__copy_to_user").inline
 {
-	if (pid() == target()) printf("saw inline __copy_to_user with %s\n", $$parms)
+	if (pid() == target()) printf("saw inline __copy_to_user @ %p with %s\n", addr(), $$vars);
+	}*/
+
+// probe kernel.function("__copy_from_user_nocheck").inline
+// {
+// 	if (pid() == target()) printf("saw inline __copy_from_user_nocheck @ %p with %s\n", addr(), $$vars);
+// }
+
+// probe kernel.function("__copy_to_user_nocheck").inline
+// {
+// 	if (pid() == target()) printf("saw inline __copy_to_user_nocheck @ %p with %s\n", addr(), $$vars);
+// }
+
+
+/*probe kernel.statement(0xffffffff814507fd).absolute {
+	 if (pid() == target()) printf("=== At absolute probe point %p. reg9=%p reg4=%p reg5=%p\n", addr(), register("r9"), register("rsi"), register("rdi"));
+	 }*/
+/*
+//probe kernel.function("__copy_from_user").call { if (pid() == target()) {  printf("saw out-of-line __copy_from_user @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+probe kernel.function("__copy_from_user").inline { if (pid() == target()) {  printf("saw inline __copy_from_user @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+
+//probe kernel.function("__copy_from_user_inatomic").call { if (pid() == target()) {  printf("saw out-of-line __copy_from_user_inatomic @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+probe kernel.function("__copy_from_user_inatomic").inline { if (pid() == target()) {  printf("saw inline __copy_from_user_inatomic @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+
+//probe kernel.function("__copy_from_user_nocache").call { if (pid() == target()) {  printf("saw out-of-line __copy_from_user_nocache @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+probe kernel.function("__copy_from_user_nocache").inline { if (pid() == target()) {  printf("saw inline __copy_from_user_nocache @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+
+//probe kernel.function("__copy_in_user").call { if (pid() == target()) {  printf("saw out-of-line __copy_in_user @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+probe kernel.function("__copy_in_user").inline { if (pid() == target()) {  printf("saw inline __copy_in_user @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+
+//probe kernel.function("__copy_to_user").call { if (pid() == target()) {  printf("saw out-of-line __copy_to_user @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+probe kernel.function("__copy_to_user").inline { if (pid() == target()) {  printf("saw inline __copy_to_user @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+
+//probe kernel.function("__copy_to_user_inatomic").call { if (pid() == target()) {  printf("saw out-of-line __copy_to_user_inatomic @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+probe kernel.function("__copy_to_user_inatomic").inline { if (pid() == target()) {  printf("saw inline __copy_to_user_inatomic @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+
+
+probe kernel.function("copy_from_user").call { if (pid() == target()) {  printf("saw out-of-line copy_from_user @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+probe kernel.function("copy_from_user").inline { if (pid() == target()) {  printf("saw inline copy_from_user @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+
+probe kernel.function("copy_in_user").call { if (pid() == target()) {  printf("saw out-of-line copy_in_user @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+//probe kernel.function("copy_in_user").inline { if (pid() == target()) {  printf("saw inline copy_in_user @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+
+//probe kernel.function("copy_to_user").call { if (pid() == target()) {  printf("saw out-of-line copy_to_user @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+probe kernel.function("copy_to_user").inline { if (pid() == target()) {  printf("saw inline copy_to_user @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+
+//probe kernel.function("copy_user_generic").call { if (pid() == target()) {  printf("saw out-of-line copy_user_generic @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+probe kernel.function("copy_user_generic").inline { if (pid() == target()) {  printf("saw inline copy_user_generic @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+
+probe kernel.function("copy_user_handle_tail").call { if (pid() == target()) {  printf("saw out-of-line copy_user_handle_tail @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+
+
+probe kernel.function("copy_from_user_nmi").call { if (pid() == target()) {  printf("saw out-of-line copy_from_user_nmi @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+//probe kernel.function("copy_from_user_nmi").inline { if (pid() == target()) {  printf("saw inline copy_from_user_nmi @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+
+probe kernel.function("strncpy_from_user").call { if (pid() == target()) {  printf("saw out-of-line strncpy_from_user @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+//probe kernel.function("strncpy_from_user").inline { if (pid() == target()) {  printf("saw inline strncpy_from_user @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+
+probe kernel.function("strlen_user").call { if (pid() == target()) {  printf("saw out-of-line strlen_user @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+//probe kernel.function("strlen_user").inline { if (pid() == target()) {  printf("saw inline strlen_user @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+
+probe kernel.function("strnlen_user").call { if (pid() == target()) {  printf("saw out-of-line strnlen_user @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+//probe kernel.function("strnlen_user").inline { if (pid() == target()) {  printf("saw inline strnlen_user @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+
+probe kernel.function("clear_user").call { if (pid() == target()) {  printf("saw out-of-line clear_user @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+//probe kernel.function("clear_user").inline { if (pid() == target()) {  printf("saw inline clear_user @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+
+probe kernel.function("__clear_user").call { if (pid() == target()) {  printf("saw out-of-line __clear_user @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+//probe kernel.function("__clear_user").inline { if (pid() == target()) {  printf("saw inline __clear_user @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+*/
+/*
+probe kernel.function("n_tty_read").call { if (pid() == target()) {  printf("saw out-of-line do_tty_read @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+probe kernel.function("n_tty_write").call { if (pid() == target()) {  printf("saw out-of-line do_tty_write @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+
+probe kernel.function("copy_from_read_buf").call { if (pid() == target()) {  printf("saw out-of-line copy_from_read_buf @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+*/
+global syscall_nums;
+
+probe begin {
+syscall_nums[0] = "read";
+syscall_nums[1] = "write";
+syscall_nums[2] = "open";
+syscall_nums[3] = "close";
+syscall_nums[4] = "stat";
+syscall_nums[5] = "fstat";
+syscall_nums[6] = "lstat";
+syscall_nums[7] = "poll";
+syscall_nums[8] = "lseek";
+syscall_nums[9] = "mmap";
+syscall_nums[10] = "mprotect";
+syscall_nums[11] = "munmap";
+syscall_nums[12] = "brk";
+syscall_nums[13] = "rt_sigaction";
+syscall_nums[14] = "rt_sigprocmask";
+syscall_nums[15] = "rt_sigreturn";
+syscall_nums[16] = "ioctl";
+syscall_nums[17] = "pread64";
+syscall_nums[18] = "pwrite64";
+syscall_nums[19] = "readv";
+syscall_nums[20] = "writev";
+syscall_nums[21] = "access";
+syscall_nums[22] = "pipe";
+syscall_nums[23] = "select";
+syscall_nums[24] = "sched_yield";
+syscall_nums[25] = "mremap";
+syscall_nums[26] = "msync";
+syscall_nums[27] = "mincore";
+syscall_nums[28] = "madvise";
+syscall_nums[29] = "shmget";
+syscall_nums[30] = "shmat";
+syscall_nums[31] = "shmctl";
+syscall_nums[32] = "dup";
+syscall_nums[33] = "dup2";
+syscall_nums[34] = "pause";
+syscall_nums[35] = "nanosleep";
+syscall_nums[36] = "getitimer";
+syscall_nums[37] = "alarm";
+syscall_nums[38] = "setitimer";
+syscall_nums[39] = "getpid";
+syscall_nums[40] = "sendfile";
+syscall_nums[41] = "socket";
+syscall_nums[42] = "connect";
+syscall_nums[43] = "accept";
+syscall_nums[44] = "sendto";
+syscall_nums[45] = "recvfrom";
+syscall_nums[46] = "sendmsg";
+syscall_nums[47] = "recvmsg";
+syscall_nums[48] = "shutdown";
+syscall_nums[49] = "bind";
+syscall_nums[50] = "listen";
+syscall_nums[51] = "getsockname";
+syscall_nums[52] = "getpeername";
+syscall_nums[53] = "socketpair";
+syscall_nums[54] = "setsockopt";
+syscall_nums[55] = "getsockopt";
+syscall_nums[56] = "clone";
+syscall_nums[57] = "fork";
+syscall_nums[58] = "vfork";
+syscall_nums[59] = "execve";
+syscall_nums[60] = "exit";
+syscall_nums[61] = "wait4";
+syscall_nums[62] = "kill";
+syscall_nums[63] = "uname";
+syscall_nums[64] = "semget";
+syscall_nums[65] = "semop";
+syscall_nums[66] = "semctl";
+syscall_nums[67] = "shmdt";
+syscall_nums[68] = "msgget";
+syscall_nums[69] = "msgsnd";
+syscall_nums[70] = "msgrcv";
+syscall_nums[71] = "msgctl";
+syscall_nums[72] = "fcntl";
+syscall_nums[73] = "flock";
+syscall_nums[74] = "fsync";
+syscall_nums[75] = "fdatasync";
+syscall_nums[76] = "truncate";
+syscall_nums[77] = "ftruncate";
+syscall_nums[78] = "getdents";
+syscall_nums[79] = "getcwd";
+syscall_nums[80] = "chdir";
+syscall_nums[81] = "fchdir";
+syscall_nums[82] = "rename";
+syscall_nums[83] = "mkdir";
+syscall_nums[84] = "rmdir";
+syscall_nums[85] = "creat";
+syscall_nums[86] = "link";
+syscall_nums[87] = "unlink";
+syscall_nums[88] = "symlink";
+syscall_nums[89] = "readlink";
+syscall_nums[90] = "chmod";
+syscall_nums[91] = "fchmod";
+syscall_nums[92] = "chown";
+syscall_nums[93] = "fchown";
+syscall_nums[94] = "lchown";
+syscall_nums[95] = "umask";
+syscall_nums[96] = "gettimeofday";
+syscall_nums[97] = "getrlimit";
+syscall_nums[98] = "getrusage";
+syscall_nums[99] = "sysinfo";
+syscall_nums[100] = "times";
+syscall_nums[101] = "ptrace";
+syscall_nums[102] = "getuid";
+syscall_nums[103] = "syslog";
+syscall_nums[104] = "getgid";
+syscall_nums[105] = "setuid";
+syscall_nums[106] = "setgid";
+syscall_nums[107] = "geteuid";
+syscall_nums[108] = "getegid";
+syscall_nums[109] = "setpgid";
+syscall_nums[110] = "getppid";
+syscall_nums[111] = "getpgrp";
+syscall_nums[112] = "setsid";
+syscall_nums[113] = "setreuid";
+syscall_nums[114] = "setregid";
+syscall_nums[115] = "getgroups";
+syscall_nums[116] = "setgroups";
+syscall_nums[117] = "setresuid";
+syscall_nums[118] = "getresuid";
+syscall_nums[119] = "setresgid";
+syscall_nums[120] = "getresgid";
+syscall_nums[121] = "getpgid";
+syscall_nums[122] = "setfsuid";
+syscall_nums[123] = "setfsgid";
+syscall_nums[124] = "getsid";
+syscall_nums[125] = "capget";
+syscall_nums[126] = "capset";
+syscall_nums[127] = "rt_sigpending";
+syscall_nums[128] = "rt_sigtimedwait";
+syscall_nums[129] = "rt_sigqueueinfo";
+syscall_nums[130] = "rt_sigsuspend";
+syscall_nums[131] = "sigaltstack";
+syscall_nums[132] = "utime";
+syscall_nums[133] = "mknod";
+syscall_nums[134] = "uselib";
+syscall_nums[135] = "personality";
+syscall_nums[136] = "ustat";
+syscall_nums[137] = "statfs";
+syscall_nums[138] = "fstatfs";
+syscall_nums[139] = "sysfs";
+syscall_nums[140] = "getpriority";
+syscall_nums[141] = "setpriority";
+syscall_nums[142] = "sched_setparam";
+syscall_nums[143] = "sched_getparam";
+syscall_nums[144] = "sched_setscheduler";
+syscall_nums[145] = "sched_getscheduler";
+syscall_nums[146] = "sched_get_priority_max";
+syscall_nums[147] = "sched_get_priority_min";
+syscall_nums[148] = "sched_rr_get_interval";
+syscall_nums[149] = "mlock";
+syscall_nums[150] = "munlock";
+syscall_nums[151] = "mlockall";
+syscall_nums[152] = "munlockall";
+syscall_nums[153] = "vhangup";
+syscall_nums[154] = "modify_ldt";
+syscall_nums[155] = "pivot_root";
+syscall_nums[156] = "_sysctl";
+syscall_nums[157] = "prctl";
+syscall_nums[158] = "arch_prctl";
+syscall_nums[159] = "adjtimex";
+syscall_nums[160] = "setrlimit";
+syscall_nums[161] = "chroot";
+syscall_nums[162] = "sync";
+syscall_nums[163] = "acct";
+syscall_nums[164] = "settimeofday";
+syscall_nums[165] = "mount";
+syscall_nums[166] = "umount2";
+syscall_nums[167] = "swapon";
+syscall_nums[168] = "swapoff";
+syscall_nums[169] = "reboot";
+syscall_nums[170] = "sethostname";
+syscall_nums[171] = "setdomainname";
+syscall_nums[172] = "iopl";
+syscall_nums[173] = "ioperm";
+syscall_nums[174] = "create_module";
+syscall_nums[175] = "init_module";
+syscall_nums[176] = "delete_module";
+syscall_nums[177] = "get_kernel_syms";
+syscall_nums[178] = "query_module";
+syscall_nums[179] = "quotactl";
+syscall_nums[180] = "nfsservctl";
+syscall_nums[181] = "getpmsg";
+syscall_nums[182] = "putpmsg";
+syscall_nums[183] = "afs_syscall";
+syscall_nums[184] = "tuxcall";
+syscall_nums[185] = "security";
+syscall_nums[186] = "gettid";
+syscall_nums[187] = "readahead";
+syscall_nums[188] = "setxattr";
+syscall_nums[189] = "lsetxattr";
+syscall_nums[190] = "fsetxattr";
+syscall_nums[191] = "getxattr";
+syscall_nums[192] = "lgetxattr";
+syscall_nums[193] = "fgetxattr";
+syscall_nums[194] = "listxattr";
+syscall_nums[195] = "llistxattr";
+syscall_nums[196] = "flistxattr";
+syscall_nums[197] = "removexattr";
+syscall_nums[198] = "lremovexattr";
+syscall_nums[199] = "fremovexattr";
+syscall_nums[200] = "tkill";
+syscall_nums[201] = "time";
+syscall_nums[202] = "futex";
+syscall_nums[203] = "sched_setaffinity";
+syscall_nums[204] = "sched_getaffinity";
+syscall_nums[205] = "set_thread_area";
+syscall_nums[206] = "io_setup";
+syscall_nums[207] = "io_destroy";
+syscall_nums[208] = "io_getevents";
+syscall_nums[209] = "io_submit";
+syscall_nums[210] = "io_cancel";
+syscall_nums[211] = "get_thread_area";
+syscall_nums[212] = "lookup_dcookie";
+syscall_nums[213] = "epoll_create";
+syscall_nums[214] = "epoll_ctl_old";
+syscall_nums[215] = "epoll_wait_old";
+syscall_nums[216] = "remap_file_pages";
+syscall_nums[217] = "getdents64";
+syscall_nums[218] = "set_tid_address";
+syscall_nums[219] = "restart_syscall";
+syscall_nums[220] = "semtimedop";
+syscall_nums[221] = "fadvise64";
+syscall_nums[222] = "timer_create";
+syscall_nums[223] = "timer_settime";
+syscall_nums[224] = "timer_gettime";
+syscall_nums[225] = "timer_getoverrun";
+syscall_nums[226] = "timer_delete";
+syscall_nums[227] = "clock_settime";
+syscall_nums[228] = "clock_gettime";
+syscall_nums[229] = "clock_getres";
+syscall_nums[230] = "clock_nanosleep";
+syscall_nums[231] = "exit_group";
+syscall_nums[232] = "epoll_wait";
+syscall_nums[233] = "epoll_ctl";
+syscall_nums[234] = "tgkill";
+syscall_nums[235] = "utimes";
+syscall_nums[236] = "vserver";
+syscall_nums[237] = "mbind";
+syscall_nums[238] = "set_mempolicy";
+syscall_nums[239] = "get_mempolicy";
+syscall_nums[240] = "mq_open";
+syscall_nums[241] = "mq_unlink";
+syscall_nums[242] = "mq_timedsend";
+syscall_nums[243] = "mq_timedreceive";
+syscall_nums[244] = "mq_notify";
+syscall_nums[245] = "mq_getsetattr";
+syscall_nums[246] = "kexec_load";
+syscall_nums[247] = "waitid";
+syscall_nums[248] = "add_key";
+syscall_nums[249] = "request_key";
+syscall_nums[250] = "keyctl";
+syscall_nums[251] = "ioprio_set";
+syscall_nums[252] = "ioprio_get";
+syscall_nums[253] = "inotify_init";
+syscall_nums[254] = "inotify_add_watch";
+syscall_nums[255] = "inotify_rm_watch";
+syscall_nums[256] = "migrate_pages";
+syscall_nums[257] = "openat";
+syscall_nums[258] = "mkdirat";
+syscall_nums[259] = "mknodat";
+syscall_nums[260] = "fchownat";
+syscall_nums[261] = "futimesat";
+syscall_nums[262] = "newfstatat";
+syscall_nums[263] = "unlinkat";
+syscall_nums[264] = "renameat";
+syscall_nums[265] = "linkat";
+syscall_nums[266] = "symlinkat";
+syscall_nums[267] = "readlinkat";
+syscall_nums[268] = "fchmodat";
+syscall_nums[269] = "faccessat";
+syscall_nums[270] = "pselect6";
+syscall_nums[271] = "ppoll";
+syscall_nums[272] = "unshare";
+syscall_nums[273] = "set_robust_list";
+syscall_nums[274] = "get_robust_list";
+syscall_nums[275] = "splice";
+syscall_nums[276] = "tee";
+syscall_nums[277] = "sync_file_range";
+syscall_nums[278] = "vmsplice";
+syscall_nums[279] = "move_pages";
+syscall_nums[280] = "utimensat";
+syscall_nums[281] = "epoll_pwait";
+syscall_nums[282] = "signalfd";
+syscall_nums[283] = "timerfd_create";
+syscall_nums[284] = "eventfd";
+syscall_nums[285] = "fallocate";
+syscall_nums[286] = "timerfd_settime";
+syscall_nums[287] = "timerfd_gettime";
+syscall_nums[288] = "accept4";
+syscall_nums[289] = "signalfd4";
+syscall_nums[290] = "eventfd2";
+syscall_nums[291] = "epoll_create1";
+syscall_nums[292] = "dup3";
+syscall_nums[293] = "pipe2";
+syscall_nums[294] = "inotify_init1";
+syscall_nums[295] = "preadv";
+syscall_nums[296] = "pwritev";
+syscall_nums[297] = "rt_tgsigqueueinfo";
+syscall_nums[298] = "perf_event_open";
+syscall_nums[299] = "recvmmsg";
+syscall_nums[300] = "fanotify_init";
+syscall_nums[301] = "fanotify_mark";
+syscall_nums[302] = "prlimit64";
+syscall_nums[303] = "name_to_handle_at";
+syscall_nums[304] = "open_by_handle_at";
+syscall_nums[305] = "clock_adjtime";
+syscall_nums[306] = "syncfs";
+syscall_nums[307] = "sendmmsg";
+syscall_nums[308] = "setns";
+syscall_nums[309] = "getcpu";
+syscall_nums[310] = "process_vm_readv";
+syscall_nums[311] = "process_vm_writev";
+syscall_nums[312] = "kcmp";
+syscall_nums[313] = "finit_module";
+syscall_nums[314] = "sched_setattr";
+syscall_nums[315] = "sched_getattr";
+syscall_nums[316] = "renameat2";
+syscall_nums[317] = "seccomp";
+syscall_nums[318] = "getrandom";
+syscall_nums[319] = "memfd_create";
+syscall_nums[320] = "kexec_file_load";
+syscall_nums[321] = "bpf";
+syscall_nums[322] = "execveat";
 }
+probe process.syscall {
+	printf("saw syscall %s @ %p\n", syscall_nums[$syscall], addr());
+	//print_backtrace();
+}
+
+
+probe kprobe.function("__put_user_1") {
+	 if (pid() == target()) {
+		  printf("saw __put_user_1 @ %p to=%p\n",
+				 addr(),
+				 register("rcx")
+			   );
+		  /* print_backtrace(); */
+	 }
+
+}
+
+probe kprobe.function("__put_user_2") {
+	 if (pid() == target()) {
+		  printf("saw __put_user_2 @ %p to=%p\n",
+				 addr(),
+				 register("rcx")
+			   );
+		  /* print_backtrace(); */
+	 }
+
+}
+
+
+probe kprobe.function("__put_user_4") {
+	 if (pid() == target()) {
+		  printf("saw __put_user_4 @ %p to=%p\n",
+				 addr(),
+				 register("rcx")
+			   );
+		  /* print_backtrace(); */
+	 }
+}
+
+
+probe kprobe.function("__put_user_8") {
+	 if (pid() == target()) {
+		  printf("saw __put_user_8 @ %p to=%p\n",
+				 addr(),
+				 register("rcx")
+			   );
+		  /* print_backtrace(); */
+	 }
+}
+
+probe kprobe.function("__get_user_1") {
+	 if (pid() == target()) {
+		  printf("saw __get_user_1 @ %p from=%p\n",
+				 addr(),
+				 register("rax")
+			   );
+		  /* print_backtrace(); */
+	 }
+}
+
+probe kprobe.function("__get_user_2") {
+	 if (pid() == target()) {
+		  printf("saw __get_user_2 @ %p from=%p\n",
+				 addr(),
+				 register("rax")
+			   );
+		  /* print_backtrace(); */
+	 }
+
+}
+
+
+probe kprobe.function("__get_user_4") {
+	 if (pid() == target()) {
+		  printf("saw __get_user_4 @ %p from=%p\n",
+				 addr(),
+				 register("rax")
+			   );
+		  /* print_backtrace(); */
+	 }
+}
+
+
+probe kprobe.function("__get_user_8") {
+	 if (pid() == target()) {
+		  printf("saw __get_user_8 @ %p from=%p\n",
+				 addr(),
+				 register("rax")
+			   );
+		  /* print_backtrace(); */
+	 }
+}
+
+probe kprobe.function("copy_user_enhanced_fast_string") {
+	 if (pid() == target()) {
+		  printf("saw copy_user_enhanced_fast_string @ %p to=%p from=%p n=%p\n",
+				 addr(),
+				 register("rdi"),
+				 register("rsi"),
+				 register("rdx")
+			   );
+		  /* print_backtrace(); */
+	 }
+
+}
+probe kprobe.function("copy_user_generic_string") {
+	 if (pid() == target()) {
+		  printf("saw copy_user_generic_string @ %p to=%p from=%p n=%p\n",
+				 addr(),
+				 register("rdi"),
+				 register("rsi"),
+				 register("rdx")
+			   );
+		  /* print_backtrace(); */
+	 }
+}
+probe kprobe.function("copy_user_generic_unrolled") {
+	 if (pid() == target()) {
+		  printf("saw copy_user_generic_unrolled @ %p to=%p from=%p n=%p\n",
+				 addr(),
+				 register("rdi"),
+				 register("rsi"),
+				 register("rdx")
+			   );
+		  /* print_backtrace(); */
+	 }
+
+}
+
+/*probe kernel.function("__put_user_1").call { if (pid() == target()) {  printf("saw out-of-line __put_user_1 @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+probe kernel.function("__put_user_1").inline { if (pid() == target()) {  printf("saw inline __put_user_1 @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+
+probe kernel.function("__put_user_2").call { if (pid() == target()) {  printf("saw out-of-line __put_user_2 @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+probe kernel.function("__put_user_2").inline { if (pid() == target()) {  printf("saw inline __put_user_2 @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+
+probe kernel.function("__put_user_4").call { if (pid() == target()) {  printf("saw out-of-line __put_user_4 @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+probe kernel.function("__put_user_4").inline { if (pid() == target()) {  printf("saw inline __put_user_4 @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+
+probe kernel.function("__put_user_8").call { if (pid() == target()) {  printf("saw out-of-line __put_user_8 @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+probe kernel.function("__put_user_8").inline { if (pid() == target()) {  printf("saw inline __put_user_8 @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+
+probe kernel.function("__get_user_1").call { if (pid() == target()) {  printf("saw out-of-line __get_user_1 @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+probe kernel.function("__get_user_1").inline { if (pid() == target()) {  printf("saw inline __get_user_1 @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+
+probe kernel.function("__get_user_2").call { if (pid() == target()) {  printf("saw out-of-line __get_user_2 @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+probe kernel.function("__get_user_2").inline { if (pid() == target()) {  printf("saw inline __get_user_2 @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+
+probe kernel.function("__get_user_4").call { if (pid() == target()) {  printf("saw out-of-line __get_user_4 @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+probe kernel.function("__get_user_4").inline { if (pid() == target()) {  printf("saw inline __get_user_4 @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+
+probe kernel.function("__get_user_8").call { if (pid() == target()) {  printf("saw out-of-line __get_user_8 @ %p with %s\n", addr(), $$vars); print_backtrace(); } }
+probe kernel.function("__get_user_8").inline { if (pid() == target()) {  printf("saw inline __get_user_8 @ %p with %s\n", addr(), $$vars); print_backtrace(); } }*/
 

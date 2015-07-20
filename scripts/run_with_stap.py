@@ -20,7 +20,15 @@ def start_stap(trap_proc, stdin=DEVNULL, stdout=PIPE, stderr=PIPE):
 
 def start_trap(args, stdin=DEVNULL, stdout=PIPE, stderr=PIPE):
     pipe_r, pipe_w = os.pipe()
-    trap_proc = subprocess.Popen(args, env={'LD_PRELOAD': TRAP_SYSCALLS_SO, 'TRAP_SYSCALLS_SLEEP_FOR_SECONDS': str(15), 'TRAP_SYSCALLS_FOOTPRINT_FD': str(pipe_w)}, stdin=stdin, stdout=stdout, stderr=stderr, pass_fds=[pipe_r, pipe_w], bufsize=0)
+    env = {
+        'LD_PRELOAD': TRAP_SYSCALLS_SO,
+        'TRAP_SYSCALLS_SLEEP_FOR_SECONDS': str(15),
+        'TRAP_SYSCALLS_FOOTPRINT_FD': str(pipe_w),
+        'TRAP_SYSCALLS_FOOTPRINT_SPEC_FILENAME': '/tmp/thing',
+        'TRAP_SYSCALLS_DEBUG': str(0),
+    }
+    print("starting {!r}".format(args))
+    trap_proc = subprocess.Popen(args, env=env, stdin=stdin, stdout=stdout, stderr=stderr, pass_fds=[pipe_r, pipe_w], bufsize=0)
     os.close(pipe_w)
     return (trap_proc, pipe_r)
 

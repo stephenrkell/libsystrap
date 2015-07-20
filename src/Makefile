@@ -67,7 +67,8 @@ vpath %.c $(LIBALLOCS_DIR)/src
 
 CFLAGS += -g 
 CFLAGS += -Wall -Wno-unused-label -Wno-comment
-CFLAGS += -O2
+#CFLAGS += -O2
+CFLAGS += -Og
 CFLAGS += -fPIC
 CFLAGS += -ffreestanding
 CFLAGS += -I$(SYSCALL_INTERFACE_DIR)
@@ -122,7 +123,8 @@ dynamic-list: $(patsubst %.c,%.o,$(SYSCALL_IFACE_SRC))
 	( echo '{'; nm --format=posix "$<" | sed 's/[[:blank:]].*/;/'; echo '};') > "$@" || rm -f "$@"
 
 # disable sbrk() in dlmalloc, to avoid conflicting with the "other" C library
-dlmalloc.o: CFLAGS += -O3 -DHAVE_MORECORE=0
+dlmalloc.o: CFLAGS += -DHAVE_MORECORE=0
+#-O3
 # We put dlmalloc in a library so that --exclude-libs=ALL will hide its symbols
 # in our output .so, so that they don't override anything in the rest of the program.
 dlmalloc.a: dlmalloc.o
@@ -145,6 +147,8 @@ trap-syscalls.so: $(OBJS) dynamic-list
 		$(LDFLAGS) raw-syscalls.o \
 		-Wl,--defsym,__GI___assert_fail=__assert_fail -Wl,--defsym,stat=raw_stat \
 		$(LDLIBS)
+
+#		-Wl,--defsym,page_boundary_up=0 -Wl,--defsym,page_boundary_down=0 \
 
 .PHONY: clean
 clean:
