@@ -1,7 +1,93 @@
+/Makefile
+
+
+contrib/binutils-2.25.tar.gz
+contrib/binutils-2.25/
+contrib/binutils-build/
+contrib/config.mk
+contrib/dwarfidl
+contrib/eglibc-2.19/
+contrib/liballocs
+contrib/opdis-build/
+contrib/opdis/
+contrib/zlib-1.2.8.tar.gz
+contrib/zlib-1.2.8/
+
+.gdb_history
+
+__pycache__/
+*.py[cod]
+
+.deps/
+.libs/
+
+
+# http://www.gnu.org/software/automake
+
+Makefile.in
+
+# http://www.gnu.org/software/autoconf
+
+.dirstamp
+/autom4te.cache
+/aclocal.m4
+/compile
+/configure
+/depcomp
+/install-sh
+/missing
+/stamp-h1
+/m4/
+/config.guess
+/config.sub
+/config.status
+/config.log
+/ltmain.sh
+/libtool
+
+
+# Compiled Object files
+*.slo
+*.lo
 *.o
-src/.*.d
-.fuse_hidden*
-*~
-.#*
-*.a
+*.obj
+
+*.pc
+
+# Dependencies
+.*.d
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
 *.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+
+# Backup files
+*~
+\#*\#
+.\#*
+
+# WTF Dropbox
+
+.fuse_hidden*
+.nfs*
+.dropbox*
