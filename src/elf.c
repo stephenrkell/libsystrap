@@ -11,6 +11,21 @@
 
 uintptr_t our_load_address __attribute__((visibility("protected")));
 
+uintptr_t __attribute__((visibility("protected"))) 
+page_boundary_up(uintptr_t addr)
+{
+	if (addr % PAGE_SIZE == 0) return addr;
+	else return (PAGE_SIZE * (1 + (addr / PAGE_SIZE)));
+}
+
+uintptr_t __attribute__((visibility("protected")))
+page_boundary_down(uintptr_t addr)
+{
+	return (addr / PAGE_SIZE) * PAGE_SIZE;
+}
+
+
+
 struct dl_fileoff_cb_arg
 {
 	unsigned char *addr_in_file;

@@ -68,9 +68,9 @@ vpath %.c $(LIBALLOCS_DIR)/src
 CFLAGS += -g 
 CFLAGS += -Wall -Wno-unused-label -Wno-comment
 #CFLAGS += -O2
-CFLAGS += -Og
+CFLAGS += -O0
 CFLAGS += -fPIC
-CFLAGS += -ffreestanding
+CFLAGS += -ffreestanding -fno-omit-frame-pointer
 CFLAGS += -I$(SYSCALL_INTERFACE_DIR)
 
 CFLAGS += -I $(LIBALLOCS_DIR)/include

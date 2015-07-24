@@ -31,6 +31,7 @@
 #include <sys/mman.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdarg.h>
 #include "raw-syscalls.h"
 #include "do-syscall.h"
 #include "elf.h"
@@ -256,7 +257,7 @@ char *footprints_spec_filename __attribute__((visibility("hidden")));
 extern void *stderr;
 void **p_err_stream __attribute__((visibility("hidden"))) = &stderr;
 
-
+struct env_node *footprints_env __attribute__((visibility("hidden"))) = NULL;
 struct footprint_node *footprints __attribute__((visibility("hidden"))) = NULL;
 
 #ifndef EXECUTABLE
@@ -315,7 +316,7 @@ int main(void)
 
 			if (footprints_spec_filename) {
 
-				 footprints = parse_footprints_from_file(footprints_spec_filename);
+				 footprints = parse_footprints_from_file(footprints_spec_filename, &footprints_env);
 				 
 			} else {
 				 debug_printf(0, "no footprints spec filename provided\n", footprints_spec_filename);
@@ -467,17 +468,31 @@ ud2_addr:
 	return RETURN_VALUE;
 }
 
+// For debug printing inside handle_sigill we have to know
+// that it's our own debug printing in order to filter it
+// out of the footprints, hence this noinline function
+// rather than using the normal macro
+__attribute__ ((noinline)) static void _handle_sigill_debug_printf(int level, const char *fmt, ...) {
+	 va_list vl;
+	 va_start(vl, fmt);
+	 if ((level) <= debug_level) {
+		  vfprintf(*p_err_stream, fmt, vl);
+		  fflush(*p_err_stream);
+	 }
+	 va_end(vl);
+}
+
 static void handle_sigill(int n)
 {
 	unsigned long *frame_base = __builtin_frame_address(0);
 	struct ibcs_sigframe *p_frame = (struct ibcs_sigframe *) (frame_base + 1);
 
 	/* Decode the syscall using sigcontext. */
-	debug_printf(1, "Took a trap from instruction at %p", p_frame->uc.uc_mcontext.rip);
+	_handle_sigill_debug_printf(1, "Took a trap from instruction at %p", p_frame->uc.uc_mcontext.rip);
 #ifdef EXECUTABLE
 	if (p_frame->uc.uc_mcontext.rip == (uintptr_t) ignore_ud2_addr)
 	{
-		debug_printf(1, " which is our test trap address; continuing.\n");
+		_handle_sigill_debug_printf(1, " which is our test trap address; continuing.\n");
 		resume_from_sigframe(0, p_frame, 2);
 		return;
 	}
@@ -485,7 +500,7 @@ static void handle_sigill(int n)
 	unsigned long syscall_num = (unsigned long) p_frame->uc.uc_mcontext.rax;
 	assert(syscall_num >= 0);
 	assert(syscall_num < SYSCALL_MAX);
-	debug_printf(1, " which we think is syscall %s/%d\n",
+	_handle_sigill_debug_printf(1, " which we think is syscall %s/%d\n",
 		syscall_names[syscall_num], syscall_num);
 
 	/* FIXME: check whether this syscall creates executable mappings; if so,

@@ -48,9 +48,9 @@ static struct uniqtype *uniqtype_for_syscall(int syscall_num)
 }
 
 void __attribute__((visibility("protected")))
-write_footprint(void *base, size_t len)
+write_footprint(void *base, size_t len, enum footprint_direction direction, const char *syscall)
 {
-	fprintf(footprints_out, "n=0x%lx base=0x%p\n", len, (void*) base);
+	 fprintf(footprints_out, "footprint: %s base=%p n=%p syscall=%s\n", footprint_direction_str[direction], (void*) base, (void*) len, syscall);
 	fflush(footprints_out);
 }
 
@@ -67,29 +67,41 @@ static void list_add(void *obj, struct uniqtype *t, void *arg)
 }
 
 static void print_pre_syscall(void *stream, struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, void *ret) {
-	fprintf(stream, "== %d == > %p (%s+0x%x) %s(...)\n",
-		raw_getpid(), 
-		calling_addr,
-		calling_object->l_name,
-		(char*) calling_addr - (char*) calling_object->l_addr,
-		syscall_names[gsp->syscall_number]
-	);
-	fflush(stream);
+	 fprintf(stream, "== %d == > %p (%s+0x%x) %s(%p, %p, %p, %p, %p, %p)\n",
+			 raw_getpid(), 
+			 calling_addr,
+			 calling_object->l_name,
+			 (char*) calling_addr - (char*) calling_object->l_addr,
+			 syscall_names[gsp->syscall_number],
+			 gsp->args[0],
+			 gsp->args[1],
+			 gsp->args[2],
+			 gsp->args[3],
+			 gsp->args[4],
+			 gsp->args[5]
+		  );
+	 fflush(stream);
 }
 
 static void print_post_syscall(void *stream, struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, void *ret) {
-	fprintf(stream, "== %d == < %p (%s+0x%x) %s(...) = %p\n",
+	fprintf(stream, "== %d == < %p (%s+0x%x) %s(%p, %p, %p, %p, %p, %p) = %p\n",
 		raw_getpid(),
 		calling_addr,
 		calling_object->l_name,
 		(char*) calling_addr - (char*) calling_object->l_addr,
 		syscall_names[gsp->syscall_number],
+			gsp->args[0],
+			gsp->args[1],
+			gsp->args[2],
+			gsp->args[3],
+			gsp->args[4],
+			gsp->args[5],
 		ret
 	);
 	fflush(stream);
 }
 
-static inline void print_to_streams(struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, void *ret, void (*printer)(void *_stream, struct generic_syscall *_gsp, void *_calling_addr, struct link_map *_calling_object, void *_ret)) {
+static void print_to_streams(struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, void *ret, void (*printer)(void *_stream, struct generic_syscall *_gsp, void *_calling_addr, struct link_map *_calling_object, void *_ret)) {
 	if (__write_footprints && footprints_out) {
 		printer(footprints_out, gsp, calling_addr, calling_object, ret);
 	}
@@ -124,12 +136,13 @@ pre_handling(struct generic_syscall *gsp)
 uniq		 */
 
 
-		struct union_node *extents = eval_footprint_for(footprints, syscall_names[gsp->syscall_number], call, gsp->args);
-		if (extents) {
+		struct footprint_node *fp = get_footprints_for(footprints, syscall_names[gsp->syscall_number]);
+		struct union_node *extents = eval_footprints_for(fp, footprints_env, syscall_names[gsp->syscall_number], call, gsp->args);
+		if (extents && __write_footprints && footprints_out) {
 			 struct union_node *current = extents;
 			 while (current != NULL) {
 				  assert(current->expr->type == EXPR_EXTENT);
-				  write_footprint((void*) current->expr->extent.base, current->expr->extent.length);
+				  write_footprint((void*) current->expr->extent.base, current->expr->extent.length, fp->direction, syscall_names[gsp->syscall_number]);
 				  current = current->next;
 			 }
 		} else {
@@ -189,7 +202,7 @@ static void *lock_memory(long int addr, unsigned long count, int copy)
 		return NULL;
 	}
 
-	if (__write_footprints) write_footprint(ptr, count);
+	//if (__write_footprints) write_footprint(ptr, count);
 
 #ifdef DEBUG_REMAP
 	{

@@ -104,7 +104,7 @@ int __attribute__((noinline)) raw_getpid(void)
 int __attribute__((noinline)) raw_kill(__kernel_pid_t pid, int sig)
 {
 	long int ret;
-	long int op = SYS_open;
+	long int op = SYS_kill;
 
 	/* We have to do it all in one big asm statement, since the compiler
 	 * can change what's in registers in between asm statements. */
@@ -258,7 +258,6 @@ void (__attribute__((noreturn)) __assert_fail)(
 	while (*msg_end++);
 	raw_write(2, msg, msg_end - msg - 1);
 	raw_kill(raw_getpid(), SIGABRT);
-	// handle_
 }
 
 ssize_t __attribute__((noinline)) raw_write(int fd, const void *buf, size_t count)

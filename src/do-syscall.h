@@ -11,12 +11,14 @@
 #include <asm/siginfo.h>
 #include <asm/ucontext.h>
 #include <sys/syscall.h>
+#include <stdarg.h>
 /* avoid stdlib and stdio for sigset_t conflict reasons */
 void *calloc(size_t, size_t);
 void free(void*);
 /* avoid stdio because of sigset_t conflict */
 void *fdopen(int fd, const char *mode);
 int fprintf(void *stream, const char *format, ...);
+int vfprintf(void *stream, const char *format, va_list args);
 int fflush(void *stream);
 
 extern int debug_level;
@@ -41,6 +43,7 @@ extern void *traces_out; /* really a FILE* */
 extern void *stderr;
 extern uintptr_t our_load_address;
 extern struct footprint_node *footprints;
+extern struct env_node *footprints_env;
 
 /* In kernel-speak this is a "struct sigframe" / "struct rt_sigframe" --
  * sadly no user-level header defines it. But it seems to be vaguely standard
@@ -78,7 +81,7 @@ zaps_stack(struct generic_syscall *gs);
 	  movq %%rax, %[ret]      \n"
 
 
-void write_footprint(void *base, size_t len);
+void write_footprint(void *base, size_t len, enum footprint_direction direction, const char *syscall);
 void pre_handling(struct generic_syscall *gsp);
 void post_handling(struct generic_syscall *gsp, long int ret);
 
