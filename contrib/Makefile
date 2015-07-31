@@ -84,7 +84,7 @@ build-binutils-%: extract-binutils
 
 .PHONY: extract-dwarfidl
 extract-dwarfidl:
-	test -d dwarfidl/.git || git clone $(DWARFIDL_REPO)
+	test -e dwarfidl
 build-dwarfidl: dwarfidl/Makefile
 	$(MAKE) -C dwarfidl
 
@@ -93,7 +93,7 @@ extract: extract-eglibc extract-opdis extract-zlib extract-binutils extract-dwar
 
 .PHONY: extract-liballocs
 extract-liballocs:
-	test -d liballocs/.git || git clone $(LIBALLOCS_REPO)
+	test -e liballocs
 build-liballocs: build-dwarfidl liballocs/Makefile
 	$(MAKE) -C liballocs
 
