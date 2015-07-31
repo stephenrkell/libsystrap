@@ -14,8 +14,9 @@ EGLIBC_TAR := eglibc-2.19-svnr25243.tar.bz2
 OPDIS_REPO := https://github.com/mkfs/opdis.git
 ZLIB_TAR := zlib-1.2.8.tar.gz
 BINUTILS_TAR := binutils-2.25.tar.gz
-LIBALLOCS_REPO := https://github.com/stephenrkell/liballocs.git
-DWARFIDL_REPO := https://github.com/stephenrkell/dwarfidl.git
+
+.PHONY:
+independent: $(EGLIBC_TAR) $(ZLIB_TAR) $(BINUTILS_TAR) extract-opdis
 
 .PHONY: build
 build: build-opdis build-binutils build-zlib build-eglibc build-liballocs build-dwarfidl
@@ -53,7 +54,7 @@ build-eglibc:
 	(test -e "$$eglibc_dir"/build/config.log && \
 	        ! grep 'exit 1' "$$eglibc_dir"/build/config.log) || \
 	    (cd "$$eglibc_dir" && mkdir -p build && cd build && \
-	CFLAGS="-g -O2" ../configure --prefix=/usr); \
+	CFLAGS="-g -O1 -fPIC -DPIC" ../configure --prefix=/usr); \
 	cd "$$eglibc_dir"/build && $(MAKE) -j3
 
 .PHONY: extract-opdis
@@ -84,9 +85,8 @@ build-binutils-%: extract-binutils
 .PHONY: extract-dwarfidl
 extract-dwarfidl:
 	test -d dwarfidl/.git || git clone $(DWARFIDL_REPO)
-build-dwarfidl:
-	cd dwarfidl/contrib && ./checkout.sh
-	cd dwarfidl && $(MAKE)
+build-dwarfidl: dwarfidl/Makefile
+	$(MAKE) -C dwarfidl
 
 .PHONY: extract
 extract: extract-eglibc extract-opdis extract-zlib extract-binutils extract-dwarfidl extract-liballocs
@@ -94,8 +94,8 @@ extract: extract-eglibc extract-opdis extract-zlib extract-binutils extract-dwar
 .PHONY: extract-liballocs
 extract-liballocs:
 	test -d liballocs/.git || git clone $(LIBALLOCS_REPO)
-build-liballocs: build-dwarfidl
-	cd liballocs && cp ../dwarfidl/src/makefile ./
+build-liballocs: build-dwarfidl liballocs/Makefile
+	$(MAKE) -C liballocs
 
 config.mk:
 	echo 'CONTRIB := $(realpath $(dir $@)) \n\

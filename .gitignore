@@ -1,17 +1,18 @@
 /Makefile
 
 
-contrib/binutils-2.25.tar.gz
-contrib/binutils-2.25/
-contrib/binutils-build/
-contrib/config.mk
-contrib/dwarfidl
-contrib/eglibc-2.19/
-contrib/liballocs
-contrib/opdis-build/
-contrib/opdis/
-contrib/zlib-1.2.8.tar.gz
-contrib/zlib-1.2.8/
+/contrib/binutils-2.25.tar.gz
+/contrib/binutils-2.25/
+/contrib/binutils-build/
+/contrib/config.mk
+/contrib/dwarfidl
+/contrib/eglibc-2.19/
+/contrib/liballocs
+/contrib/opdis-build/
+/contrib/opdis/
+/contrib/zlib-1.2.8.tar.gz
+/contrib/zlib-1.2.8/
+/contrib/eglibc-2.19-svnr25243.tar.bz2
 
 .gdb_history
 
