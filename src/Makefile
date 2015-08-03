@@ -71,7 +71,7 @@ ANTLR3C_A ?= $(ANTLR3C_DIR)/.libs/libantlr3c.a
 ZLIB_A ?= -lz
 
 #SYSCALL_INTERFACE_DIR ?= $(dir $(THIS_MAKEFILE))/../../syscall-interfaces/scripts
-SYSCALL_INTERFACE := linux
+#SYSCALL_INTERFACE := linux
 
 #vpath %.c $(SYSCALL_INTERFACE_DIR)
 vpath %.c $(LIBALLOCS_DIR)/src
@@ -99,9 +99,10 @@ CXXFLAGS := $(CXXFLAGS) $(CFLAGS) # eagerly latch CFLAGS now; don't want later a
 CFLAGS += -std=c99
 CXXFLAGS += -std=c++11 $(LLVM_CXXFLAGS)
 
-SYSCALL_IFACE_SRC := $(SYSCALL_INTERFACE)-syscall-ifacetypes.c
+#SYSCALL_IFACE_SRC := $(SYSCALL_INTERFACE)-syscall-ifacetypes.c
+#SYSCALL_IFACE_O := $(patsubst %.c,%.o,$(SYSCALL_IFACE_SRC))
 
-C_SRC := $(wildcard *.c) $(SYSCALL_IFACE_SRC) uniqtype-bfs.c
+C_SRC := $(wildcard *.c) uniqtype-bfs.c # $(SYSCALL_IFACE_SRC)
 S_SRC := $(wildcard *.s)
 CC_SRC := $(wildcard *.cc)
 
@@ -131,8 +132,8 @@ trap-syscalls-exec.o: trap-syscalls.c
 trap-syscalls: $(filter-out trap-syscalls.o,$(OBJS)) trap-syscalls-exec.o
 	$(CXX) $(filter-out -fPIC,$(CFLAGS)) -o "$@" $+ $(LDFLAGS) $(LDLIBS)
 
-dynamic-list: $(patsubst %.c,%.o,$(SYSCALL_IFACE_SRC))
-	( echo '{'; nm --format=posix "$<" | sed 's/[[:blank:]].*/;/'; echo '};') > "$@" || rm -f "$@"
+#dynamic-list: $(SYSCALL_IFACE_O)
+#	( echo '{'; nm --format=posix "$<" | sed 's/[[:blank:]].*/;/'; echo '};') > "$@" || rm -f "$@"
 
 # disable sbrk() in dlmalloc, to avoid conflicting with the "other" C library
 dlmalloc.o: CFLAGS += -DHAVE_MORECORE=0
@@ -152,7 +153,8 @@ dlmalloc.a: dlmalloc.o
 trap-syscalls.so: LDLIBS := -Bstatic $(LIBOPDIS_A) $(LIBOPCODES_A) $(LIBBFD_A) $(LIBIBERTY_A) $(ZLIB_A) dlmalloc.a $(LIBC_A) $(FOOTPRINTS_A)  $(DWARFIDL_DIR)/parser/dwarfidlSimpleCLexer.o $(DWARFIDL_DIR)/parser/dwarfidlSimpleCParser.o $(ANTLR3C_A)
 trap-syscalls.so: LDFLAGS += -nostdlib -Wl,--hash-style=sysv
 trap-syscalls.so: $(OBJS) dynamic-list
-	$(CC) -shared -Bsymbolic -Wl,--dynamic-list,dynamic-list \
+	$(CC) -shared -Bsymbolic \
+		-Wl,--dynamic-list,dynamic-list \
 		-Wl,--exclude-libs=ALL -Wl,-h,trap-syscalls.so \
 		-Wl,--version-script,version-script \
 		-o "$@" $(filter-out dynamic-list,$(filter-out raw-syscalls.o,$+)) \
