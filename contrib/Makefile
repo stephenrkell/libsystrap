@@ -24,11 +24,13 @@ ZLIB_DIR := zlib-1.2.8
 ZLIB_TAR := zlib-1.2.8.tar.gz
 BINUTILS_DIR := binutils-2.25
 BINUTILS_TAR := binutils-2.25.tar.gz
+DOWNLOAD_BASE := https://ojno.github.io/trap-syscalls-deps
+DOWNLOAD := wget
 
 # ----------------------------------------------
 
 $(EGLIBC_TAR):
-	wget http://downloads.yoctoproject.org/releases/eglibc/$(EGLIBC_TAR)
+	$(DOWNLOAD) $(DOWNLOAD_BASE)/$(EGLIBC_TAR)
 $(EGLIBC_DIR)/libc/configure: $(EGLIBC_TAR)
 	tar -k -xvjf "$<"
 	touch "$@"
@@ -40,7 +42,7 @@ build-eglibc: $(EGLIBC_DIR)/libc/build/Makefile
 	$(MAKE) -C $(EGLIBC_DIR)/libc/build
 
 $(ZLIB_TAR):
-	wget http://zlib.net/$(ZLIB_TAR)
+	$(DOWNLOAD) $(DOWNLOAD_BASE)/$(ZLIB_TAR)
 $(ZLIB_DIR)/configure: $(ZLIB_TAR)
 	tar -k -xvzf "$<"
 	touch "$@"
@@ -62,7 +64,7 @@ build-opdis: opdis-build/Makefile
 	$(MAKE) -C opdis-build
 
 $(BINUTILS_TAR): 
-	wget http://ftp.gnu.org/gnu/binutils/$(BINUTILS_TAR)
+	$(DOWNLOAD) $(DOWNLOAD_BASE)/$(BINUTILS_TAR)
 $(BINUTILS_DIR)/configure: $(BINUTILS_TAR)
 	tar -k -xvzf "$(BINUTILS_TAR)"
 	touch "$@"
