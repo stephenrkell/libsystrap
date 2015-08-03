@@ -97,8 +97,12 @@ build-liballocs: build-dwarfidl liballocs/Makefile
 	$(MAKE) -C liballocs
 
 .PHONY: build-libfootprints
-build-libfootprints: build-liballocs build-dwarfidl libfootprints/Makefile
+build-libfootprints: build-liballocs build-dwarfidl build-antlr libfootprints/Makefile
 	$(MAKE) -C libfootprints
+
+.PHONY: build-antlr
+build-antlr:
+	$(MAKE) -C libantlr3c-3.4
 
 config.mk:
 	echo 'CONTRIB := $(realpath $(dir $@)) \n\
@@ -115,6 +119,7 @@ LIBBFD_A := $$(CONTRIB)/binutils-build/bfd/libbfd.a \n\
 LIBIBERTY_A := $$(CONTRIB)/binutils-build/libiberty/libiberty.a \n\
 LIBALLOCS_DIR := $$(CONTRIB)/liballocs \n\
 LIBFOOTPRINTS_DIR := $$(CONTRIB)/libfootprints \n\
+ANTLR3C_DIR := $$(CONTRIB)/libantlr3c-3.4 \n\
 DWARFIDL_DIR := $$(CONTRIB)/dwarfidl \n\
 OPDIS_DIR := $$(CONTRIB)/opdis \n\
 ZLIB_A ?= $$(CONTRIB)/zlib-1.2.8/libz.a' | sed '/^\\$$/ d' | sed 's/ *$$//' > "$@"

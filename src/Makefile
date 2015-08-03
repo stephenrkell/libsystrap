@@ -49,6 +49,10 @@ ifeq ($(LIBFOOTPRINTS_DIR),)
 $(error Please install the libfootprints source tree and set LIBFOOTPRINTS_DIR)
 endif
 
+ifeq ($(ANTLR3C_DIR),)
+$(error Please install the libantlr3c source tree and set ANTLR3C_DIR)
+endif
+
 
 LIBC_A ?= -lc -ldl
 
@@ -62,13 +66,14 @@ LIBBFD_A ?= -lbfd
 LIBIBERTY_A ?= -liberty
 LIBALLOCS_A ?= $(LIBALLOCS_DIR)/.libs/liballocs.a
 FOOTPRINTS_A ?= $(LIBFOOTPRINTS_DIR)/src/.libs/libfootprints.a
+ANTLR3C_A ?= $(ANTLR3C_DIR)/.libs/libantlr3c.a
 
 ZLIB_A ?= -lz
 
-SYSCALL_INTERFACE_DIR ?= $(dir $(THIS_MAKEFILE))/../../syscall-interfaces/scripts
+#SYSCALL_INTERFACE_DIR ?= $(dir $(THIS_MAKEFILE))/../../syscall-interfaces/scripts
 SYSCALL_INTERFACE := linux
 
-vpath %.c $(SYSCALL_INTERFACE_DIR)
+#vpath %.c $(SYSCALL_INTERFACE_DIR)
 vpath %.c $(LIBALLOCS_DIR)/src
 
 CFLAGS += -g 
@@ -77,7 +82,7 @@ CFLAGS += -Wall -Wno-unused-label -Wno-comment
 CFLAGS += -O0
 CFLAGS += -fPIC
 CFLAGS += -ffreestanding -fno-omit-frame-pointer
-CFLAGS += -I$(SYSCALL_INTERFACE_DIR)
+#CFLAGS += -I$(SYSCALL_INTERFACE_DIR)
 
 CFLAGS += -I $(LIBALLOCS_DIR)/include
 CFLAGS += -I $(LIBFOOTPRINTS_DIR)/include
@@ -85,9 +90,9 @@ CFLAGS += -I $(OPDIS_DIR)
 CFLAGS += -I $(DWARFIDL_DIR)/include
 CFLAGS += -I $(LIBOPCODES_DIR)/include
 CFLAGS += -I $(BFD_DIR)
-CFLAGS += -I $(SRCROOT)/../libantlr3c-3.4
-CFLAGS += -I $(SRCROOT)/../libantlr3c-3.4/include
-CFLAGS += -I $(SRCROOT)/../dwarfidl/parser
+CFLAGS += -I $(ANTLR3C_DIR)
+CFLAGS += -I $(ANTLR3C_DIR)/include
+CFLAGS += -I $(DWARFIDL_DIR)/parser
 # CFLAGS += $(LLVM_INCLUDES)
 
 CXXFLAGS := $(CXXFLAGS) $(CFLAGS) # eagerly latch CFLAGS now; don't want later additions
@@ -144,7 +149,7 @@ dlmalloc.a: dlmalloc.o
 
 # FIXME: make our dynamic symbols hidden! 
 # We don't want user code calling into our exit(), hence having us make its syscalls.
-trap-syscalls.so: LDLIBS := -Bstatic $(LIBOPDIS_A) $(LIBOPCODES_A) $(LIBBFD_A) $(LIBIBERTY_A) $(ZLIB_A) dlmalloc.a $(LIBC_A) $(FOOTPRINTS_A)  $(SRCROOT)/../dwarfidl/parser/dwarfidlSimpleCLexer.o $(SRCROOT)/../dwarfidl/parser/dwarfidlSimpleCParser.o $(SRCROOT)/../libantlr3c-3.4/.libs/libantlr3c.a
+trap-syscalls.so: LDLIBS := -Bstatic $(LIBOPDIS_A) $(LIBOPCODES_A) $(LIBBFD_A) $(LIBIBERTY_A) $(ZLIB_A) dlmalloc.a $(LIBC_A) $(FOOTPRINTS_A)  $(DWARFIDL_DIR)/parser/dwarfidlSimpleCLexer.o $(DWARFIDL_DIR)/parser/dwarfidlSimpleCParser.o $(ANTLR3C_A)
 trap-syscalls.so: LDFLAGS += -nostdlib -Wl,--hash-style=sysv
 trap-syscalls.so: $(OBJS) dynamic-list
 	$(CC) -shared -Bsymbolic -Wl,--dynamic-list,dynamic-list \
