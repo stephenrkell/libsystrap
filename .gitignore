@@ -1,18 +1,31 @@
 /Makefile
 
+/contrib/bin/
+/contrib/include/
+/contrib/lib/
+/contrib/share/
+/contrib/x86_64-unknown-linux-gnu/
+
+/contrib/config.mk
+
+/contrib/zlib-1.2.8.tar.gz
+/contrib/zlib-1.2.8/
 
 /contrib/binutils-2.25.tar.gz
 /contrib/binutils-2.25/
 /contrib/binutils-build/
-/contrib/config.mk
+
 /contrib/dwarfidl
-/contrib/eglibc-2.19/
 /contrib/liballocs
-/contrib/opdis-build/
-/contrib/opdis/
-/contrib/zlib-1.2.8.tar.gz
-/contrib/zlib-1.2.8/
+/contrib/libantlr3c-3.4
+/contrib/libfootprints
+
 /contrib/eglibc-2.19-svnr25243.tar.bz2
+/contrib/eglibc-2.19/
+
+/contrib/opdis/
+/contrib/opdis-build/
+
 
 .gdb_history
 
