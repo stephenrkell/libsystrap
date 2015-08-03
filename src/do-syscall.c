@@ -137,7 +137,12 @@ uniq		 */
 
 
 		struct footprint_node *fp = get_footprints_for(footprints, syscall_names[gsp->syscall_number]);
-		struct union_node *extents = eval_footprints_for(fp, footprints_env, syscall_names[gsp->syscall_number], call, gsp->args);
+		struct evaluator_state *eval = evaluator_state_new_with(construct_union(fp->exprs),
+		                                                        footprints_env,
+		                                                        NULL, NULL, NULL, false);
+		eval = eval_footprint_with(eval, fp, footprints_env, call, gsp->args);
+		assert(eval->finished);
+		struct union_node *extents = eval->result;
 		if (extents && __write_footprints && footprints_out) {
 			 struct union_node *current = extents;
 			 while (current != NULL) {

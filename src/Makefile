@@ -45,6 +45,11 @@ ifeq ($(LIBALLOCS_DIR),)
 $(error Please install the liballocs source tree and set LIBALLOCS_DIR)
 endif
 
+ifeq ($(LIBFOOTPRINTS_DIR),)
+$(error Please install the libfootprints source tree and set LIBFOOTPRINTS_DIR)
+endif
+
+
 LIBC_A ?= -lc -ldl
 
 # LLVM_CXXFLAGS ?= $(shell llvm-config --cxxflags)
@@ -55,7 +60,8 @@ LIBOPDIS_A ?= -lopdis
 LIBOPCODES_A ?= -lopcodes
 LIBBFD_A ?= -lbfd
 LIBIBERTY_A ?= -liberty
-FOOTPRINTS_A ?= $(LIBALLOCS_DIR)/footprints/liballocs_footprints.a
+LIBALLOCS_A ?= $(LIBALLOCS_DIR)/.libs/liballocs.a
+FOOTPRINTS_A ?= $(LIBFOOTPRINTS_DIR)/src/.libs/libfootprints.a
 
 ZLIB_A ?= -lz
 
@@ -74,6 +80,7 @@ CFLAGS += -ffreestanding -fno-omit-frame-pointer
 CFLAGS += -I$(SYSCALL_INTERFACE_DIR)
 
 CFLAGS += -I $(LIBALLOCS_DIR)/include
+CFLAGS += -I $(LIBFOOTPRINTS_DIR)/include
 CFLAGS += -I $(OPDIS_DIR)
 CFLAGS += -I $(DWARFIDL_DIR)/include
 CFLAGS += -I $(LIBOPCODES_DIR)/include

@@ -1,7 +1,14 @@
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 CONTRIB := $(realpath $(dir $(THIS_MAKEFILE)))
 
-default: extract build config.mk
+default: all
+all: build config.mk
+.PHONY: default all build independent
+build: build-opdis build-binutils build-zlib build-eglibc build-liballocs build-dwarfidl build-libfootprints
+independent: $(EGLIBC_TAR) $(ZLIB_TAR) $(BINUTILS_TAR) extract-opdis
+
+# don't remove intermediates
+.SECONDARY:
 
 # Things we need to build
 # opdis
@@ -10,92 +17,88 @@ default: extract build config.mk
 # eglibc
 # liballocs (headers only), dwarfidl (tools only) => libsrk31c++, libc++fileno, libdwarfpp   but not PIC builds of these
 
+EGLIBC_DIR := eglibc-2.19
 EGLIBC_TAR := eglibc-2.19-svnr25243.tar.bz2
-OPDIS_REPO := https://github.com/mkfs/opdis.git
+OPDIS_REPO := https://github.com/ojno/opdis.git
+ZLIB_DIR := zlib-1.2.8
 ZLIB_TAR := zlib-1.2.8.tar.gz
+BINUTILS_DIR := binutils-2.25
 BINUTILS_TAR := binutils-2.25.tar.gz
-
-.PHONY:
-independent: $(EGLIBC_TAR) $(ZLIB_TAR) $(BINUTILS_TAR) extract-opdis
-
-.PHONY: build
-build: build-opdis build-binutils build-zlib build-eglibc build-liballocs build-dwarfidl
-
-.PHONY: build-opdis
-build-opdis: extract-opdis build-binutils
-
-.PHONY: build-binutils
-build-binutils: extract-binutils build-zlib
-
-.PHONY: build-zlib
-build-zlib: extract-zlib
-
-.PHONY: build-eglibc
-build-eglibc: extract-eglibc
-
-.PHONY: build-liballocs
-build-liballocs: extract-liballocs build-dwarfidl
-
-.PHONY: build-dwarfidl
-build-dwarfidl: extract-dwarfidl
 
 # ----------------------------------------------
 
-.PHONY: extract
-extract: extract-eglibc extract-opdis extract-zlib extract-binutils extract-dwarfidl extract-liballocs
-
-.PHONY: extract-eglibc
-extract-eglibc: $(EGLIBC_TAR)
-	test -d $$( ls -td eglibc-* | head -n1 ) || tar -k -xjf "$<"
 $(EGLIBC_TAR):
 	wget http://downloads.yoctoproject.org/releases/eglibc/$(EGLIBC_TAR)
-build-eglibc:
-	eglibc_dir="$$( ls -td eglibc-* | head -n1 )"/libc || exit 1; \
-	(test -e "$$eglibc_dir"/build/config.log && \
-	        ! grep 'exit 1' "$$eglibc_dir"/build/config.log) || \
-	    (cd "$$eglibc_dir" && mkdir -p build && cd build && \
-	CFLAGS="-g -O1 -fPIC -DPIC" ../configure --prefix=/usr); \
-	cd "$$eglibc_dir"/build && $(MAKE) -j3
+$(EGLIBC_DIR)/libc/configure: $(EGLIBC_TAR)
+	tar -k -xvjf "$<"
+	touch "$@"
+$(EGLIBC_DIR)/libc/build/Makefile: $(EGLIBC_DIR)/libc/configure | install-binutils
+	mkdir -p $(EGLIBC_DIR)/libc/build
+	cd $(EGLIBC_DIR)/libc/build && CFLAGS="-g -O1 -fPIC -DPIC" ../configure --prefix=/usr --with-binutils=$(CONTRIB)/bin # --with-sysroot=$(CONTRIB)
+.PHONY: build-eglibc
+build-eglibc: $(EGLIBC_DIR)/libc/build/Makefile
+	$(MAKE) -C $(EGLIBC_DIR)/libc/build
 
-.PHONY: extract-opdis
-extract-opdis:
-	test -e opdis/configure || (git clone $(OPDIS_REPO) && cd opdis && ./bootstrap)
-build-opdis: build-binutils
-	(test -e opdis-build/config.log && ! grep 'exit 1' opdis-build/config.log) || (mkdir -p opdis-build && cd opdis-build && CPPFLAGS="-I$(CONTRIB)/binutils-2.25/include -I$(CONTRIB)/binutils-build/bfd" CFLAGS="-fPIC -g -I$(CONTRIB)/binutils-2.25/include -I$(CONTRIB)/binutils-build/bfd" LDFLAGS="-L$(CONTRIB)/binutils-build/libiberty -L$(CONTRIB)/binutils-build/bfd -L$(CONTRIB)/binutils-build/intl -L$(CONTRIB)/binutils-build/opcodes" ../opdis/configure && $(MAKE) -j3)
-
-.PHONY: extract-zlib
-extract-zlib: $(ZLIB_TAR)
-	test -e zlib-1.2.8/configure || tar -k -xzf "$<"
-$(ZLIB_TAR): 
+$(ZLIB_TAR):
 	wget http://zlib.net/$(ZLIB_TAR)
-build-zlib:
-	cd $$( ls -td zlib-* | grep -v "$(ZLIB_TAR)" | head -n1 ) && (test -e configure.log && ! grep 'exit 1' configure.log) || CFLAGS="-fPIC" ./configure
-	cd $$( ls -td zlib-* | grep -v "$(ZLIB_TAR)" | head -n1 ) && $(MAKE) -j3
+$(ZLIB_DIR)/configure: $(ZLIB_TAR)
+	tar -k -xvzf "$<"
+	touch "$@"
+$(ZLIB_DIR)/Makefile: $(ZLIB_DIR)/configure
+	cd $(ZLIB_DIR) && CFLAGS="-fPIC -DPIC" ./configure
+.PHONY: build-zlib
+build-zlib: $(ZLIB_DIR)/Makefile
+	$(MAKE) -C $(ZLIB_DIR)
 
-.PHONY: extract-binutils
-extract-binutils: $(BINUTILS_TAR)
-	test -e binutils-2.25/configure || tar -k -xzf "$(BINUTILS_TAR)"
+opdis/bootstrap:
+	git clone $(OPDIS_REPO)
+opdis/configure: opdis/bootstrap
+	cd opdis && ./bootstrap
+opdis-build/Makefile: opdis/configure | build-binutils
+	mkdir -p opdis-build
+	cd opdis-build && CPPFLAGS="-I$(CONTRIB)/binutils-2.25/include -I$(CONTRIB)/binutils-build/bfd" CFLAGS="-fPIC -g -I$(CONTRIB)/binutils-2.25/include -I$(CONTRIB)/binutils-build/bfd" LDFLAGS="-L$(CONTRIB)/binutils-build/libiberty -L$(CONTRIB)/binutils-build/bfd -L$(CONTRIB)/binutils-build/intl -L$(CONTRIB)/binutils-build/opcodes" ../opdis/configure
+.PHONY: build-opdis
+build-opdis: opdis-build/Makefile
+	$(MAKE) -C opdis-build
+
 $(BINUTILS_TAR): 
 	wget http://ftp.gnu.org/gnu/binutils/$(BINUTILS_TAR)
-build-binutils: build-binutils-libiberty build-binutils-bfd build-binutils-opcodes build-binutils-intl
-build-binutils-%: extract-binutils
-	(test -e binutils-build/$*/config.log && ! grep 'exit 1' binutils-build/$*/config.log) || (mkdir -p binutils-build/$*  && cd binutils-build/$* && CFLAGS="-fPIC -g -O2" $$( ls -td ../../binutils-2.* | grep -v $(BINUTILS_TAR) | head -n1)/$*/configure)
-	cd binutils-build/$*  && $(MAKE) -j3 
+$(BINUTILS_DIR)/configure: $(BINUTILS_TAR)
+	tar -k -xvzf "$(BINUTILS_TAR)"
+	touch "$@"
 
-.PHONY: extract-dwarfidl
-extract-dwarfidl:
-	test -e dwarfidl
+#binutils-build/Makefile: $(BINUTILS_DIR)/configure
+#	mkdir -p binutils-build
+#	cd binutils-build && CFLAGS="-g -O2 -fPIC -DPIC" ../$(BINUTILS_DIR)/configure --prefix=$(CONTRIB) --enable-ld --disable-gold --disable-multilib --disable-bootstrap --without-x --without-system-zlib
+
+.PHONY: FORCE
+FORCE: ;
+
+
+# NOT -DPIC because that breaks libintl
+binutils-build/Makefile: $(BINUTILS_DIR)/configure
+	mkdir -p binutils-build
+	cd binutils-build && CFLAGS="-g -O2 -fPIC" ../$(BINUTILS_DIR)/$*/configure --prefix=$(CONTRIB) --with-included-gettext --disable-bootstrap --enable-ld --disable-gold --without-x --with-sysroot=$(CONTRIB)
+
+.PHONY: build-binutils
+build-binutils: binutils-build/Makefile
+	$(MAKE) -C binutils-build
+
+.PHONY: install-binutils
+install-binutils: build-binutils
+	$(MAKE) -C binutils-build install
+
+.PHONY: build-dwarfidl
 build-dwarfidl: dwarfidl/Makefile
 	$(MAKE) -C dwarfidl
 
-.PHONY: extract
-extract: extract-eglibc extract-opdis extract-zlib extract-binutils extract-dwarfidl extract-liballocs
-
-.PHONY: extract-liballocs
-extract-liballocs:
-	test -e liballocs
+.PHONY: build-liballocs
 build-liballocs: build-dwarfidl liballocs/Makefile
 	$(MAKE) -C liballocs
+
+.PHONY: build-libfootprints
+build-libfootprints: build-liballocs build-dwarfidl libfootprints/Makefile
+	$(MAKE) -C libfootprints
 
 config.mk:
 	echo 'CONTRIB := $(realpath $(dir $@)) \n\
@@ -111,6 +114,7 @@ LIBOPCODES_A := $$(CONTRIB)/binutils-build/opcodes/libopcodes.a \n\
 LIBBFD_A := $$(CONTRIB)/binutils-build/bfd/libbfd.a \n\
 LIBIBERTY_A := $$(CONTRIB)/binutils-build/libiberty/libiberty.a \n\
 LIBALLOCS_DIR := $$(CONTRIB)/liballocs \n\
+LIBFOOTPRINTS_DIR := $$(CONTRIB)/libfootprints \n\
 DWARFIDL_DIR := $$(CONTRIB)/dwarfidl \n\
 OPDIS_DIR := $$(CONTRIB)/opdis \n\
 ZLIB_A ?= $$(CONTRIB)/zlib-1.2.8/libz.a' | sed '/^\\$$/ d' | sed 's/ *$$//' > "$@"
