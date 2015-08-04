@@ -34,12 +34,13 @@ $(EGLIBC_TAR):
 $(EGLIBC_DIR)/libc/configure: $(EGLIBC_TAR)
 	tar -k -xvjf "$<"
 	touch "$@"
+# eglibc is VERY picky about its compiler flags
 $(EGLIBC_DIR)/libc/build/Makefile: $(EGLIBC_DIR)/libc/configure | install-binutils
 	mkdir -p $(EGLIBC_DIR)/libc/build
-	cd $(EGLIBC_DIR)/libc/build && CFLAGS="-g -O1 -fPIC -DPIC" ../configure --prefix=/usr --with-binutils=$(CONTRIB)/bin # --with-sysroot=$(CONTRIB)
+	cd $(EGLIBC_DIR)/libc/build && CFLAGS="-g -O1 -fPIC -DPIC" CPPFLAGS="" ../configure --prefix=/usr --with-binutils=$(CONTRIB)/bin # --with-sysroot=$(CONTRIB)
 .PHONY: build-eglibc
 build-eglibc: $(EGLIBC_DIR)/libc/build/Makefile
-	$(MAKE) -C $(EGLIBC_DIR)/libc/build
+	CFLAGS="-g -O1 -fPIC -DPIC" CPPFLAGS="" $(MAKE) -C $(EGLIBC_DIR)/libc/build
 
 $(ZLIB_TAR):
 	$(DOWNLOAD) $(DOWNLOAD_BASE)/$(ZLIB_TAR)
@@ -78,17 +79,20 @@ FORCE: ;
 
 
 # NOT -DPIC because that breaks libintl
+# and don't bother to build the docs
+# yes, MAKEINFO=true actually accomplishes that ¬_¬
 binutils-build/Makefile: $(BINUTILS_DIR)/configure
 	mkdir -p binutils-build
 	cd binutils-build && CFLAGS="-g -O2 -fPIC" ../$(BINUTILS_DIR)/$*/configure --prefix=$(CONTRIB) --with-included-gettext --disable-bootstrap --enable-ld --disable-gold --without-x --with-sysroot=$(CONTRIB)
 
+# gah binutils
 .PHONY: build-binutils
 build-binutils: binutils-build/Makefile
-	$(MAKE) -C binutils-build
+	$(MAKE) -C binutils-build MAKEINFO=/bin/true
 
 .PHONY: install-binutils
 install-binutils: build-binutils
-	$(MAKE) -C binutils-build install
+	$(MAKE) -C binutils-build install MAKEINFO=/bin/true
 
 .PHONY: build-dwarfidl
 build-dwarfidl: dwarfidl/Makefile

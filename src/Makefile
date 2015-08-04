@@ -154,6 +154,7 @@ trap-syscalls.so: LDLIBS := -Bstatic $(LIBOPDIS_A) $(LIBOPCODES_A) $(LIBBFD_A) $
 trap-syscalls.so: LDFLAGS += -nostdlib -Wl,--hash-style=sysv
 trap-syscalls.so: $(OBJS) dynamic-list
 	$(CC) -shared -Bsymbolic \
+		-fuse-ld=gold \
 		-Wl,--dynamic-list,dynamic-list \
 		-Wl,--exclude-libs=ALL -Wl,-h,trap-syscalls.so \
 		-Wl,--version-script,version-script \
