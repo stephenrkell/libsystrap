@@ -5,7 +5,7 @@ default: all
 all: build config.mk
 .PHONY: default all build independent
 build: build-opdis build-binutils build-zlib build-eglibc build-liballocs build-dwarfidl build-libfootprints
-independent: $(EGLIBC_TAR) $(ZLIB_TAR) $(BINUTILS_TAR) extract-opdis
+independent: $(EGLIBC_TAR) $(ZLIB_TAR) $(BINUTILS_TAR) opdis/configure
 
 # don't remove intermediates
 .SECONDARY:
