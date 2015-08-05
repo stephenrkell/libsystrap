@@ -28,11 +28,11 @@ default: trap-syscalls.so
 #
 #LDLIBS +=  $(LIBOPCODES_A) $(LIBBFD_A)
 
-THIS_MAKEFILE ?= $(lastword $(MAKEFILE_LIST))
+THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 SRCROOT := $(realpath $(dir $(THIS_MAKEFILE)))/..
 
 CONTRIB := $(SRCROOT)/contrib
-CONFIG ?= $(CONTRIB)/config.mk
+CONFIG := $(CONTRIB)/config.mk
 
 $(CONTRIB)/config.mk:
 	cd "$(CONTRIB)" && make
@@ -54,21 +54,21 @@ $(error Please install the libantlr3c source tree and set ANTLR3C_DIR)
 endif
 
 
-LIBC_A ?= -lc -ldl
+LIBC_A := -lc -ldl
 
 # LLVM_CXXFLAGS ?= $(shell llvm-config --cxxflags)
 # LIBLLVM_ARCHIVE ?= -lllvm_X86 -lllvm
 # LIBSTDCXX_ARCHIVE ?= -lstdc++
 
-LIBOPDIS_A ?= -lopdis
-LIBOPCODES_A ?= -lopcodes
-LIBBFD_A ?= -lbfd
-LIBIBERTY_A ?= -liberty
-LIBALLOCS_A ?= $(LIBALLOCS_DIR)/.libs/liballocs.a
-FOOTPRINTS_A ?= $(LIBFOOTPRINTS_DIR)/src/.libs/libfootprints.a
-ANTLR3C_A ?= $(ANTLR3C_DIR)/.libs/libantlr3c.a
+LIBOPDIS_A := -lopdis
+LIBOPCODES_A := -lopcodes
+LIBBFD_A := -lbfd
+LIBIBERTY_A := -liberty
+LIBALLOCS_A := $(LIBALLOCS_DIR)/.libs/liballocs.a
+FOOTPRINTS_A := $(LIBFOOTPRINTS_DIR)/src/.libs/libfootprints.a
+ANTLR3C_A := $(ANTLR3C_DIR)/.libs/libantlr3c.a
 
-ZLIB_A ?= -lz
+ZLIB_A := -lz
 
 #SYSCALL_INTERFACE_DIR ?= $(dir $(THIS_MAKEFILE))/../../syscall-interfaces/scripts
 #SYSCALL_INTERFACE := linux

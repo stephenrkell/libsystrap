@@ -5,7 +5,6 @@ default: all
 all: build config.mk
 .PHONY: default all build independent
 build: build-opdis build-binutils build-zlib build-eglibc build-liballocs build-dwarfidl build-libfootprints
-independent: $(EGLIBC_TAR) $(ZLIB_TAR) $(BINUTILS_TAR) opdis/configure
 
 # don't remove intermediates
 .SECONDARY:
@@ -109,6 +108,8 @@ build-libfootprints: build-liballocs build-dwarfidl build-antlr libfootprints/Ma
 .PHONY: build-antlr
 build-antlr:
 	$(MAKE) -C libantlr3c-3.4
+
+independent: $(EGLIBC_TAR) $(ZLIB_TAR) $(BINUTILS_TAR) opdis/configure
 
 config.mk:
 	echo 'CONTRIB := $(realpath $(dir $@)) \n\
