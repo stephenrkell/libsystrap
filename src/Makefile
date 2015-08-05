@@ -54,21 +54,20 @@ $(error Please install the libantlr3c source tree and set ANTLR3C_DIR)
 endif
 
 
-LIBC_A := -lc -ldl
+#LIBC_A ?= -lc -ldl
 
 # LLVM_CXXFLAGS ?= $(shell llvm-config --cxxflags)
 # LIBLLVM_ARCHIVE ?= -lllvm_X86 -lllvm
 # LIBSTDCXX_ARCHIVE ?= -lstdc++
 
-LIBOPDIS_A := -lopdis
-LIBOPCODES_A := -lopcodes
-LIBBFD_A := -lbfd
-LIBIBERTY_A := -liberty
-LIBALLOCS_A := $(LIBALLOCS_DIR)/.libs/liballocs.a
+#LIBOPDIS_A := $(CONTRIB)/opdis-build/src/.libs/libopdis.a
+#LIBOPCODES_A := -lopcodes
+#LIBBFD_A := -lbfd
+#LIBIBERTY_A := $(CONTRIB)
+#LIBALLOCS_A := $(LIBALLOCS_DIR)/.libs/liballocs.a
 FOOTPRINTS_A := $(LIBFOOTPRINTS_DIR)/src/.libs/libfootprints.a
 ANTLR3C_A := $(ANTLR3C_DIR)/.libs/libantlr3c.a
-
-ZLIB_A := -lz
+#ZLIB_A := $(CONTRIB)/zlib-1.2.8/libz.a
 
 #SYSCALL_INTERFACE_DIR ?= $(dir $(THIS_MAKEFILE))/../../syscall-interfaces/scripts
 #SYSCALL_INTERFACE := linux
@@ -102,7 +101,9 @@ CXXFLAGS += -std=c++11 $(LLVM_CXXFLAGS)
 #SYSCALL_IFACE_SRC := $(SYSCALL_INTERFACE)-syscall-ifacetypes.c
 #SYSCALL_IFACE_O := $(patsubst %.c,%.o,$(SYSCALL_IFACE_SRC))
 
-C_SRC := $(wildcard *.c) uniqtype-bfs.c # $(SYSCALL_IFACE_SRC)
+linux-syscall-ifacetypes.c:
+
+C_SRC := $(wildcard *.c) uniqtype-bfs.c linux-syscall-ifacetypes.c # $(SYSCALL_IFACE_SRC)
 S_SRC := $(wildcard *.s)
 CC_SRC := $(wildcard *.cc)
 
@@ -148,6 +149,9 @@ dlmalloc.a: dlmalloc.o
 # the libc archive's __assert_fail gets pulled in because it's the only definition
 # of __GI____assert_fail, and we have to use its __assert_fail too.
 
+null := #
+space := $(null) #
+comma := ,
 # FIXME: make our dynamic symbols hidden! 
 # We don't want user code calling into our exit(), hence having us make its syscalls.
 trap-syscalls.so: LDLIBS := -Bstatic $(LIBOPDIS_A) $(LIBOPCODES_A) $(LIBBFD_A) $(LIBIBERTY_A) $(ZLIB_A) dlmalloc.a $(LIBC_A) $(FOOTPRINTS_A)  $(DWARFIDL_DIR)/parser/dwarfidlSimpleCLexer.o $(DWARFIDL_DIR)/parser/dwarfidlSimpleCParser.o $(ANTLR3C_A)
@@ -156,11 +160,12 @@ trap-syscalls.so: $(OBJS) dynamic-list
 	$(CC) -shared -Bsymbolic \
 		-fuse-ld=gold \
 		-Wl,--dynamic-list,dynamic-list \
-		-Wl,--exclude-libs=ALL -Wl,-h,trap-syscalls.so \
+		-Wl,-h,trap-syscalls.so \
 		-Wl,--version-script,version-script \
 		-o "$@" $(filter-out dynamic-list,$(filter-out raw-syscalls.o,$+)) \
 		$(LDFLAGS) raw-syscalls.o \
 		-Wl,--defsym,__GI___assert_fail=__assert_fail -Wl,--defsym,stat=raw_stat \
+		-Wl,--exclude-libs=ALL \
 		$(LDLIBS)
 
 #		-Wl,--defsym,page_boundary_up=0 -Wl,--defsym,page_boundary_down=0 \
