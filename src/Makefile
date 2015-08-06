@@ -65,7 +65,7 @@ endif
 #LIBBFD_A := -lbfd
 #LIBIBERTY_A := $(CONTRIB)
 #LIBALLOCS_A := $(LIBALLOCS_DIR)/.libs/liballocs.a
-FOOTPRINTS_A := $(LIBFOOTPRINTS_DIR)/src/.libs/libfootprints.a
+FOOTPRINTS_A := $(LIBFOOTPRINTS_DIR)/src/.libs/libfootprints.a $(LIBFOOTPRINTS_DIR)/src/.libs/libfootprints_syscalls.a
 ANTLR3C_A := $(ANTLR3C_DIR)/.libs/libantlr3c.a
 #ZLIB_A := $(CONTRIB)/zlib-1.2.8/libz.a
 
@@ -155,7 +155,7 @@ comma := ,
 # FIXME: make our dynamic symbols hidden! 
 # We don't want user code calling into our exit(), hence having us make its syscalls.
 trap-syscalls.so: LDLIBS := -Bstatic $(LIBOPDIS_A) $(LIBOPCODES_A) $(LIBBFD_A) $(LIBIBERTY_A) $(ZLIB_A) dlmalloc.a $(LIBC_A) $(FOOTPRINTS_A)  $(DWARFIDL_DIR)/parser/dwarfidlSimpleCLexer.o $(DWARFIDL_DIR)/parser/dwarfidlSimpleCParser.o $(ANTLR3C_A)
-trap-syscalls.so: LDFLAGS += -nostdlib -Wl,--hash-style=sysv
+trap-syscalls.so: LDFLAGS += -nostdlib -Wl,--hash-style=sysv -Wl,--no-as-needed
 trap-syscalls.so: $(OBJS) dynamic-list
 	$(CC) -shared -Bsymbolic \
 		-fuse-ld=gold \
