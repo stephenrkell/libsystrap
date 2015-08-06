@@ -137,21 +137,25 @@ uniq		 */
 
 
 		struct footprint_node *fp = get_footprints_for(footprints, syscall_names[gsp->syscall_number]);
-		struct evaluator_state *eval = evaluator_state_new_with(construct_union(fp->exprs, FP_DIRECTION_UNKNOWN),
-		                                                        footprints_env,
-		                                                        NULL, NULL, NULL, false);
-		eval = eval_footprint_with(eval, fp, footprints_env, call, gsp->args, true, FP_DIRECTION_READWRITE);
-		assert(eval->finished);
-		struct union_node *extents = eval->result;
-		if (extents && __write_footprints && footprints_out) {
-			 struct union_node *current = extents;
-			 while (current != NULL) {
-				  assert(current->expr->type == EXPR_EXTENT);
-				  write_footprint((void*) current->expr->extent.base, current->expr->extent.length, fp->direction, syscall_names[gsp->syscall_number]);
-				  current = current->next;
-			 }
+		if (fp == NULL) {
+			debug_printf(1, "(no footprint found for %s)\n", syscall_names[gsp->syscall_number]);
 		} else {
-			 debug_printf(1, "(no extents found)\n");
+			struct evaluator_state *eval = evaluator_state_new_with(construct_union(fp->exprs, FP_DIRECTION_UNKNOWN),
+			                                                        footprints_env,
+			                                                        NULL, NULL, NULL, false);
+			eval = eval_footprint_with(eval, fp, footprints_env, call, gsp->args, true, FP_DIRECTION_READWRITE);
+			assert(eval->finished);
+			struct union_node *extents = eval->result;
+			if (extents && __write_footprints && footprints_out) {
+				struct union_node *current = extents;
+				while (current != NULL) {
+					assert(current->expr->type == EXPR_EXTENT);
+					write_footprint((void*) current->expr->extent.base, current->expr->extent.length, fp->direction, syscall_names[gsp->syscall_number]);
+					current = current->next;
+				}
+			} else {
+				debug_printf(1, "(no extents returned for %s)\n", syscall_names[gsp->syscall_number]);
+			}
 		}
 	
 		/* __uniqtype_node_rec *q_head = NULL; */

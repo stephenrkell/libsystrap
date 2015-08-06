@@ -42,7 +42,7 @@ def start_stap(trap_proc, args, tempdir, stdin=DEVNULL, stdout=PIPE, stderr=PIPE
     library_dep_options = ' '.join('-d "{}"'.format(dep) for dep in library_deps)
     cmd = 'stap -DMAXBACKTRACE=100 -d kernel --all-modules -d {target} -d {TRAP_SYSCALLS_SO} {library_dep_options} -g -v -x {pid} {stp}'.format(pid=trap_proc.pid, stp=SYSCALL_STP,library_dep_options=library_dep_options, TRAP_SYSCALLS_SO=TRAP_SYSCALLS_SO, target=args[0])
     print(cmd)
-    return subprocess.Popen(shlex.split(cmd), stdin=stdin, stdout=stdout, stderr=stderr, bufsize=0, env={'SYSTEMTAP_DIR': '/tmp/run_with_stap_systemtap_cache'})
+    return subprocess.Popen(shlex.split(cmd), stdin=stdin, stdout=stdout, stderr=stderr, bufsize=0, env={'SYSTEMTAP_DIR': os.path.join(tempdir, 'systemtap_cache')})
 
 def start_trap(args, tempdir, spec='/home/jf451/spec.idl', stdin=DEVNULL, stdout=PIPE, stderr=PIPE):
     pipe_r, pipe_w = os.pipe()

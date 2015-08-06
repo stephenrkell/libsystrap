@@ -103,7 +103,7 @@ CXXFLAGS += -std=c++11 $(LLVM_CXXFLAGS)
 
 linux-syscall-ifacetypes.c:
 
-C_SRC := $(wildcard *.c) uniqtype-bfs.c linux-syscall-ifacetypes.c # $(SYSCALL_IFACE_SRC)
+C_SRC := $(wildcard *.c) uniqtype-bfs.c # $(SYSCALL_IFACE_SRC)
 S_SRC := $(wildcard *.s)
 CC_SRC := $(wildcard *.cc)
 
