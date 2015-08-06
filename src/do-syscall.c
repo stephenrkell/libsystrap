@@ -111,6 +111,45 @@ static void print_to_streams(struct generic_syscall *gsp, void *calling_addr, st
 	}
 }
 
+struct evaluator_state *supply_syscall_footprint(struct evaluator_state *eval,
+                                                 struct footprint_node *fp,
+                                                 struct env_node *footprints_env,
+                                                 struct uniqtype *call,
+                                                 long int args[static 6]) {
+	eval = eval_footprint_with(eval, fp, footprints_env, call, args, true, FP_DIRECTION_READWRITE);
+	while (!eval->finished) {
+		assert(eval->need_memory_extents != NULL);
+		struct extent_node *current = eval->need_memory_extents;
+		while (current != NULL) {
+			// just allow libfootprints to deref pointers
+			eval->have_memory_extents = data_extent_node_new_with(current->extent.base, current->extent.length,
+			                                                       (void*)current->extent.base,
+			                                                       eval->have_memory_extents);
+			current = current->next;
+		}
+		eval->need_memory_extents = NULL;
+		eval = eval_footprint_with(eval, fp, footprints_env, call, args, true, FP_DIRECTION_READWRITE);
+	}
+	return eval;
+}
+
+void write_footprint_union(struct union_node *node, const char *syscall_name) {
+	struct union_node *current = node;
+	while (current != NULL) {
+		switch (current->expr->type) {
+		case EXPR_EXTENT:
+			write_footprint((void*) current->expr->extent.base, current->expr->extent.length, node->expr->direction, syscall_name);
+			break;
+		case EXPR_UNION:
+			write_footprint_union(current->expr->unioned, syscall_name);
+			break;
+		default:
+			assert(false);
+		}
+		current = current->next;
+	}
+}
+
 void __attribute__((visibility("protected")))
 pre_handling(struct generic_syscall *gsp)
 {
@@ -143,16 +182,10 @@ uniq		 */
 			struct evaluator_state *eval = evaluator_state_new_with(construct_union(fp->exprs, FP_DIRECTION_UNKNOWN),
 			                                                        footprints_env,
 			                                                        NULL, NULL, NULL, false);
-			eval = eval_footprint_with(eval, fp, footprints_env, call, gsp->args, true, FP_DIRECTION_READWRITE);
+			eval = supply_syscall_footprint(eval, fp, footprints_env, call, gsp->args);
 			assert(eval->finished);
-			struct union_node *extents = eval->result;
-			if (extents && __write_footprints && footprints_out) {
-				struct union_node *current = extents;
-				while (current != NULL) {
-					assert(current->expr->type == EXPR_EXTENT);
-					write_footprint((void*) current->expr->extent.base, current->expr->extent.length, fp->direction, syscall_names[gsp->syscall_number]);
-					current = current->next;
-				}
+			if (eval->result && __write_footprints && footprints_out) {
+				write_footprint_union(eval->result, syscall_names[gsp->syscall_number]);
 			} else {
 				debug_printf(1, "(no extents returned for %s)\n", syscall_names[gsp->syscall_number]);
 			}
