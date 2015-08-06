@@ -12,6 +12,7 @@ import tempfile
 import shutil
 import select
 import errno
+import signal
 
 from subprocess import STDOUT, PIPE, DEVNULL
 
@@ -48,7 +49,8 @@ def start_trap(args, tempdir, spec='/home/jf451/spec.idl', stdin=DEVNULL, stdout
     pipe_r, pipe_w = os.pipe()
     env = {
         'LD_PRELOAD': TRAP_SYSCALLS_SO,
-        'TRAP_SYSCALLS_SLEEP_FOR_SECONDS': str(5),
+        'TRAP_SYSCALLS_STOP_SELF': str(1),
+        'TRAP_SYSCALLS_SLEEP_FOR_SECONDS': str(1),
         'TRAP_SYSCALLS_FOOTPRINT_FD': str(pipe_w),
         'TRAP_SYSCALLS_FOOTPRINT_SPEC_FILENAME': spec,
         'TRAP_SYSCALLS_DEBUG': str(1),
@@ -83,6 +85,9 @@ def main(args, spec='/home/jf451/spec.idl'):
     }
     files = {name: open(name, 'wb') for name in all_pipes.keys()}
     try:
+        stap_err_waiting = True
+        stap_err_buf = ''
+        print('Waiting for systemtap to be ready...')
         while True:
             trap_proc.poll()
             if trap_proc.returncode is not None and stap_proc.returncode is None:
@@ -103,6 +108,15 @@ def main(args, spec='/home/jf451/spec.idl'):
                     wrote = files[name].write(buf)
                     files[name].flush()
                     print('wrote {} bytes to {}'.format(wrote, name))
+                    if stap_err_waiting and f == stap_proc.stderr:
+                        stap_err_buf = stap_err_buf + buf.decode('iso-8859-1')
+                        stap_err_lines = stap_err_buf.split('\n')
+                        if any('Pass 5: starting run.' in l for l in stap_err_lines):
+                            print('...systemtap is ready, resuming tapped process (pid {})'.format(trap_proc.pid))
+                            os.kill(trap_proc.pid, signal.SIGCONT)
+                            stap_err_waiting = False
+                        # if we haven't triggered on a full line by now, forget it
+                        stap_err_buf = ''.join(stap_err_buf.split('\n')[-1:])
                 sys.stdout.flush()
     finally:
         for f in list(files.values()) + list(all_pipes.values()):

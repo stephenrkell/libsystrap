@@ -253,6 +253,8 @@ int debug_level __attribute__((visibility("hidden")));
 int footprint_fd __attribute__((visibility("hidden")));
 int trace_fd __attribute__((visibility("hidden")));
 int sleep_for_seconds __attribute__((visibility("hidden")));
+int stop_self __attribute__((visibility("hidden")));
+int self_pid __attribute__((visibility("hidden")));
 char *footprints_spec_filename __attribute__((visibility("hidden")));
 extern void *stderr;
 void **p_err_stream __attribute__((visibility("hidden"))) = &stderr;
@@ -276,6 +278,8 @@ int main(void)
 	char *footprint_fd_str = getenv("TRAP_SYSCALLS_FOOTPRINT_FD");
 	char *trace_fd_str = getenv("TRAP_SYSCALLS_TRACE_FD");
 	char *sleep_for_seconds_str = getenv("TRAP_SYSCALLS_SLEEP_FOR_SECONDS");
+	char *stop_self_str = getenv("TRAP_SYSCALLS_STOP_SELF");
+	stop_self = (stop_self_str != NULL);
 	footprints_spec_filename = getenv("TRAP_SYSCALLS_FOOTPRINT_SPEC_FILENAME");
 	struct timespec one_second = { /* seconds */ 1, /* nanoseconds */ 0 };
 	if (debug_level_str) debug_level = atoi(debug_level_str);
@@ -283,6 +287,11 @@ int main(void)
 	if (footprint_fd_str) footprint_fd = atoi(footprint_fd_str);
 	if (sleep_for_seconds_str) sleep_for_seconds = atoi(sleep_for_seconds_str);
 	debug_printf(0, "Debug level is %s=%d.\n", debug_level_str, debug_level);
+	if (stop_self) {
+		self_pid = raw_getpid();
+		debug_printf(0, "TRAP_SYSCALLS_STOP_SELF is set, sending SIGSTOP to self (pid %d)\n", self_pid);
+		raw_kill(self_pid, SIGSTOP);
+	}
 	debug_printf(0, "TRAP_SYSCALLS_SLEEP_FOR_SECONDS is %s, pausing for %d seconds", sleep_for_seconds_str, sleep_for_seconds);
 	for (int i = 0; i < sleep_for_seconds; i++) {
 		raw_nanosleep(&one_second, NULL);
