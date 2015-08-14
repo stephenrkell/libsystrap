@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+from __future__ import print_function
+
 import functools
 import os
 import os.path
@@ -21,7 +23,7 @@ SYSCALL_LINE_RE = re.compile(r'^=== syscall (?P<func>[A-Za-z0-9_]+) @ 0x(?P<addr
 EXTENT_LINE_RE = re.compile(r'^=== extent (?P<func>[A-Za-z0-9_]+) @ 0x(?P<addr>[0-9A-Fa-f]+) to=0x(?P<to>[0-9A-Za-z]+) from=0x(?P<from>[0-9A-Za-z]+) n=0x(?P<n>[0-9A-Za-z]+)$')
 EXTENT_ASM_LINE_RE = re.compile(r'^=== extent __(?P<direction>get|put)_user_(?P<n>[0-9]) @ 0x(?P<addr>[0-9A-Fa-f]+) (from|to)=0x(?P<target>[0-9A-Fa-f]+)$')
 
-TRAP_FOOTPRINT_LINE_RE = re.compile(r'^footprint: (?P<direction>read|write|readwrite) base=0x(?P<base>[0-9A-Fa-f]+) n=0x(?P<n>[0-9A-Fa-f]+) syscall=(?P<syscall>[A-Za-z0-9_]+)$')
+TRAP_FOOTPRINT_LINE_RE = re.compile(r'^footprint: (?P<direction>read|write|readwrite|unknown) base=0x(?P<base>[0-9A-Fa-f]+) n=0x(?P<n>[0-9A-Fa-f]+) syscall=(?P<syscall>[A-Za-z0-9_]+)$')
 
 def indent_str(s, tab='    '):
     return tab + s.replace('\n', '\n' + tab)
@@ -92,7 +94,7 @@ class FootprintEntry(Hashable):
         self.backtrace = backtrace
 
     def __str__(self):
-        return "footprint: {:9s} base=0x{:16x} n=0x{:16x} syscall={:s}".format(self.direction, self.base, self.n, self.syscall)
+        return "footprint: {:9s} base=0x{:16x} n=0x{:16x} syscall={!s:s}".format(self.direction, self.base, self.n, self.syscall)
 
 def parse_backtrace_entry(line):
     m = BACKTRACE_LINE_RE.match(line)
@@ -108,7 +110,9 @@ def parse_backtrace_entry(line):
     
         
 def parse_backtrace(lines):
-    return [parse_backtrace_entry(line) for line in lines]
+    # sometimes we catch kernel scheduler things etc which
+    # give us '<no user backtrace at ...>' as a backtrace
+    return [parse_backtrace_entry(line) for line in lines if not line.startswith('<no ')]
                 
 def parse_syscall(line, backtrace):
     m = SYSCALL_LINE_RE.match(line)
@@ -128,6 +132,7 @@ def find_syscall(backtrace):
     return None
     
 def parse_extent(line, backtrace):
+    dummy = 0xFFFFFFFFFFFFFFFF
     m = EXTENT_LINE_RE.match(line)
     if m:
         args = {
@@ -142,21 +147,44 @@ def parse_extent(line, backtrace):
         return FootprintExtent(**args)
     else:
         m = EXTENT_ASM_LINE_RE.match(line)
-        assert m, line
-        direction = m.group('direction')
-        n = int(m.group('n'), base=16)
-        target = int(m.group('target'), base=16)
-        dummy = 0xFFFFFFFFFFFFFFFF
-        args = {
-            'func': '__{}_user_{}'.format(direction, n),
-            'addr': int(m.group('addr'), base=16),
-            'from_addr': target if direction == 'get' else dummy,
-            'to_addr': target if direction == 'put' else dummy,
-            'n': n,
-            'backtrace': backtrace,
-            'syscall': find_syscall(backtrace),
-        }
-        return FootprintExtent(**args)
+        if m:
+            direction = m.group('direction')
+            n = int(m.group('n'), base=16)
+            target = int(m.group('target'), base=16)
+            args = {
+                'func': '__{}_user_{}'.format(direction, n),
+                'addr': int(m.group('addr'), base=16),
+                'from_addr': target if direction == 'get' else dummy,
+                'to_addr': target if direction == 'put' else dummy,
+                'n': n,
+                'backtrace': backtrace,
+                'syscall': find_syscall(backtrace),
+            }
+            return FootprintExtent(**args)
+        else:
+            prefix = '=== MOV '
+            assert line.startswith(prefix)
+            params = dict(pair.split('=') for pair in line[len(prefix):].split(';'))
+            from_type, from_spec = params['from'].split(':')
+            to_type, to_spec = params['to'].split(':')
+            if from_type == 'mem':
+                from_addr = int(from_spec, base=16)
+            else:
+                from_addr = dummy
+            if to_type == 'mem':
+                to_addr = int(to_spec, base=16)
+            else:
+                to_addr = dummy
+            args = {
+                'func': '<inline assembly>',
+                'addr': int(params['addr'], base=16),
+                'from_addr': from_addr,
+                'to_addr': to_addr,
+                'n': int(params['size']),
+                'backtrace': backtrace,
+                'syscall': find_syscall(backtrace),
+            }
+            return FootprintExtent(**args)
         
 def parse_stap(stap):
     lines = stap.split('\n')
@@ -175,9 +203,9 @@ def parse_stap(stap):
             #print('\n'.join(lines[i+1:j]))
             backtrace = parse_backtrace(lines[i+1:j])
             if backtrace is not None:
-#                if lines[i].startswith('=== syscall '):
-#                    syscalls.add(parse_syscall(lines[i], backtrace))
-                if lines[i].startswith('=== extent '):
+                if lines[i].startswith('=== syscall '):
+                    syscalls.add(parse_syscall(lines[i], backtrace))
+                elif lines[i].startswith('=== extent ') or lines[i].startswith('=== MOV '):
                     extent = parse_extent(lines[i], backtrace)
                     extents.add(extent)
                     syscalls.add(SyscallInstance(extent.syscall))
@@ -204,7 +232,7 @@ def parse_stap(stap):
 
     
 
-    #return [s for s in syscalls if interesting(s.backtrace) and len(s.extents) > 0]
+    return [s for s in syscalls if interesting(s.backtrace) or any(interesting(e.backtrace) for e in s.extents)]
     return syscalls
 
 def interesting(trace):
@@ -272,12 +300,17 @@ def compare_footprints(actual, allowed):
         print(fp)
     print("=======================")
     for fp in actual:
+        if fp.base > 0x8000000000000000:
+            # kernel space, ignore
+            continue
         counterpart = find_matching_base(allowed, fp)
         overran_counterpart = find_overrunning_base(allowed, fp)
         wrong_direction_counterpart = find_wrong_direction_base(allowed, fp)
         overran_wrong_direction_counterpart = find_overrunning_wrong_direction_base(allowed, fp)
         if counterpart is not None:
             print("OK: {} within {}".format(fp, counterpart))
+#            for b in fp.backtrace:
+#                print(b)
             fine += 1
         elif overran_counterpart is not None:
             print("*** OVERRAN FOOTPRINT: {} overran {}".format(fp, overran_counterpart))
@@ -332,7 +365,8 @@ def main(args):
             actual_footprints.add(FootprintEntry(direction, addr, extent.n, syscall.syscall, extent.backtrace))
             
     compare_footprints(actual_footprints, allowed_footprints)
-                
+
+    print('Syscalls made: {!r}'.format(sorted(set(s.syscall for s in syscalls if len(s.extents) < 1))))
     
 
 if __name__ == '__main__':

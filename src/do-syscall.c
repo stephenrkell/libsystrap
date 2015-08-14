@@ -50,7 +50,7 @@ static struct uniqtype *uniqtype_for_syscall(int syscall_num)
 void __attribute__((visibility("protected")))
 write_footprint(void *base, size_t len, enum footprint_direction direction, const char *syscall)
 {
-	 fprintf(footprints_out, "footprint: %s base=%p n=%p syscall=%s\n", footprint_direction_str[direction], (void*) base, (void*) len, syscall);
+	 fprintf(footprints_out, "footprint: %s base=0x%016lx n=0x%016lx syscall=%s\n", footprint_direction_str[direction], (void*) base, (void*) len, syscall);
 	fflush(footprints_out);
 }
 
@@ -133,15 +133,15 @@ struct evaluator_state *supply_syscall_footprint(struct evaluator_state *eval,
 	return eval;
 }
 
-void write_footprint_union(struct union_node *node, const char *syscall_name) {
+void write_footprint_union(struct union_node *node, enum footprint_direction direction, const char *syscall_name) {
 	struct union_node *current = node;
 	while (current != NULL) {
 		switch (current->expr->type) {
 		case EXPR_EXTENT:
-			write_footprint((void*) current->expr->extent.base, current->expr->extent.length, node->expr->direction, syscall_name);
+			write_footprint((void*) current->expr->extent.base, current->expr->extent.length, current->expr->direction, syscall_name);
 			break;
 		case EXPR_UNION:
-			write_footprint_union(current->expr->unioned, syscall_name);
+			write_footprint_union(current->expr->unioned, current->expr->direction, syscall_name);
 			break;
 		default:
 			assert(false);
@@ -179,13 +179,13 @@ uniq		 */
 		if (fp == NULL) {
 			debug_printf(1, "(no footprint found for %s)\n", syscall_names[gsp->syscall_number]);
 		} else {
-			struct evaluator_state *eval = evaluator_state_new_with(construct_union(fp->exprs, FP_DIRECTION_UNKNOWN),
+			struct evaluator_state *eval = evaluator_state_new_with(construct_union(fp->exprs, FP_DIRECTION_READWRITE),
 			                                                        footprints_env,
-			                                                        NULL, NULL, NULL, false);
+			                                                        NULL, NULL, NULL, false, debug_level > 0);
 			eval = supply_syscall_footprint(eval, fp, footprints_env, call, gsp->args);
 			assert(eval->finished);
 			if (eval->result && __write_footprints && footprints_out) {
-				write_footprint_union(eval->result, syscall_names[gsp->syscall_number]);
+				write_footprint_union(eval->result, eval->result->expr->direction, syscall_names[gsp->syscall_number]);
 			} else {
 				debug_printf(1, "(no extents returned for %s)\n", syscall_names[gsp->syscall_number]);
 			}
@@ -343,6 +343,7 @@ static void do_open (struct generic_syscall *gsp, post_handler *post)
 	RESUME;
 }
 
+/*
 #define DECL_SYSCALL(x) [SYS_ ## x ] = do_ ## x ,
 syscall_replacement *replaced_syscalls[SYSCALL_MAX] = {
 	DECL_SYSCALL(read)
@@ -353,3 +354,5 @@ syscall_replacement *replaced_syscalls[SYSCALL_MAX] = {
 	DECL_SYSCALL(time)
 };
 #undef DECL_SYSCALL
+*/
+syscall_replacement *replaced_syscalls[SYSCALL_MAX] = { NULL };

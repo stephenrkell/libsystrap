@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+from __future__ import print_function
+
 import functools
 import os
 import os.path
@@ -21,6 +23,7 @@ def main(args, spec='/home/jf451/spec.idl', verbose=False):
         compare_args = ['-v', actual_footprints, allowed_footprints]
     else:
         compare_args = [actual_footprints, allowed_footprints]
+    print('*** Analysing...')
     compare_runs.main(compare_args)
     print('tempdir was:', tempdir)
 

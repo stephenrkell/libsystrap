@@ -1,0 +1,318 @@
+subprogram sys_read(fd, buf, count) [
+	 footprint = {
+		  w: buf[0..count];
+	 }
+];
+
+subprogram sys_write(fd : unsigned long int, buf : const char pointer, count : unsigned long int) -> long int [
+	 footprint = {
+		  r: buf[0..count];
+	 }
+];
+
+////////////////////////////////////////////////////////////
+
+subprogram sys_open(filename, flags, mode) -> long int [
+	 footprint = {
+		  r: c_str(filename);
+	 }
+];
+
+subprogram sys_openat(dirfd, pathname, flags, mode) [
+	 footprint = {
+		  r: c_str(pathname);
+	 }
+];
+
+footprint_function c_str(str) {
+	 fun inner_c_str (i) {
+		  str[{i}] # // adjacent-union
+		  if str[{i}] == 0
+			   // the kernel copies strings in word-sized chunks
+			   then (if ((i + 1) % 8) != 0 then str[{ i+1..8*((i/8)+1) }] else void)
+			   else inner_c_str(i + 1)
+	 } (0)
+};
+
+footprint_function c_strn(str, max) {
+	 fun inner_c_strn (i) {
+		  str[{i}] # // adjacent-union
+		  if str[{i}] == 0 or i > max // one more for \0 etc
+			   then (if (i + 1) % 8 != 0 then str[{i+1..i+1+((i+1)%8)}] else void) // the kernel copies strings in word-sized chunks
+			   else inner_c_strn(i + 1)
+	 } (0)
+};
+
+////////////////////////////////////////////////////////////
+
+
+subprogram sys_newfstat(fd, buf) [
+	 footprint = {
+		  w: buf[0];
+	 }
+];
+
+subprogram sys_fstat(fd, buf) [
+	 footprint = {
+		  w: buf[0];
+	 }
+];
+
+
+subprogram sys_newstat(path, buf) [
+	 footprint = {
+		  r: c_str(path);
+		  w: buf[0];
+	 }
+];
+
+subprogram sys_stat(path, buf) [
+	 footprint = {
+		  r: c_str(path);
+		  w: buf[0];
+	 }
+];
+
+subprogram sys_newlstat(path, buf) [
+	 footprint = {
+		  r: c_str(path);
+		  w: buf[0];
+	 }
+];
+
+subprogram sys_lstat(path, buf) [
+	 footprint = {
+		  r: c_str(path);
+		  w: buf[0];
+	 }
+];
+
+
+subprogram sys_symlink(oldpath, newpath) [
+	 footprint = {
+		  r: c_str(oldpath);
+		  r: c_str(newpath);
+	 }
+];
+
+subprogram sys_readlink(path, buf, bufsiz) [
+	 footprint = {
+		  r: c_str(path);
+		  w: buf[0..bufsiz];
+	 }
+];
+
+
+subprogram sys_readv(fd, vec, vlen) [
+	 footprint = {
+		  w: iov.iov_base[{0..iov.iov_len}] for iov in vec[0..vlen];
+	 }
+];
+
+subprogram sys_writev(fd, vec, vlen) [
+	 footprint = {
+		  r: iov.iov_base[{0..iov.iov_len}] for iov in vec[0..vlen];
+	 }
+];
+
+subprogram sys_sendmsg(sockfd, msg, flags) [
+	 footprint = {
+		  rw: msg[0];
+		  r: if msg[0].msg_name != 0 then msg[0].msg_name[{0..msg[0].msg_namelen}] else void;
+		  r: if msg[0].msg_control != 0 then msg[0].msg_control[{0..msg[0].msg_controllen}] else void;
+		  r: msg[0].msg_iov[0..msg[0].msg_iovlen];
+		  r: if msg[0].msg_iov != 0 then
+		        (iov.iov_base[{0..iov.iov_len}] for iov in msg[0].msg_iov[0..msg[0].msg_iovlen])
+		     else void;
+	 }
+];
+
+subprogram sys_recvmsg(sockfd, msg, flags) [
+	 footprint = {
+		  rw: msg[0];
+		  w: if msg[0].msg_name != 0 then msg[0].msg_name[{0..msg[0].msg_namelen}] else void;
+		  w: if msg[0].msg_control != 0 then msg[0].msg_control[{0..msg[0].msg_controllen}] else void;
+		  r: msg[0].msg_iov[0..msg[0].msg_iovlen];
+		  w: if msg[0].msg_iov != 0 then
+		        (iov.iov_base[{0..iov.iov_len}] for iov in msg[0].msg_iov[0..msg[0].msg_iovlen])
+		     else void;
+	 }
+];
+
+subprogram sys_send(sockfd, buf, len, flags) [
+	 footprint = {
+		  r: buf[0..len];
+	 }
+];
+
+subprogram sys_sendto(sockfd, buf, len, flags, dest_addr, addrlen) [
+	 footprint = {
+		  r: buf[0..len];
+	 }
+];
+
+subprogram sys_getitimer(which, curr_value) [
+	 footprint = {
+		  w: curr_value[0];
+	 }
+];
+
+subprogram sys_setitimer(which, new_value, old_value) [
+	 footprint = {
+		  r: new_value[0];
+		  rw: if old_value != 0 then old_value[0] else void;
+	 }
+];
+
+subprogram sys_capget(hdrp, datap) [
+	 footprint = {
+		  rw: hdrp[0];
+		  w: if datap != 0 then datap[0..2] else void;
+	 }
+];
+
+subprogram sys_capset(hdrp, datap) [
+	 footprint = {
+		  rw: hdrp[0];
+		  r: if datap != 0 then datap[0..2] else void;
+	 }
+];
+
+
+subprogram sys_newuname(name) [
+	 footprint = {
+		  w: name[0];
+	 }
+];
+
+subprogram sys_getdents(fd, dirent, count) [
+	 footprint = {
+		  w: dirent[0..count];
+	 }
+];
+
+subprogram sys_getdents64(fd, dirent, count) [
+	 footprint = {
+		  w: dirent[0..count];
+	 }
+];
+
+subprogram sys_gettimeofday(tv, tz) [
+	 footprint = {
+		  w: tv[0];
+	 }
+];
+
+subprogram sys_clock_gettime(which_clock, tp) [
+	 footprint = {
+		  w: tp[0];
+	 }
+];
+
+subprogram sys_nanosleep(ts) [
+	 footprint = {
+		  r: ts[0];
+	 }
+];
+
+
+/* These syscalls do not seem to have any pointer parameters and should therefore have no footprint */
+
+subprogram sys_alarm;
+subprogram sys_arch_prctl;
+subprogram sys_brk;
+subprogram sys_close;
+subprogram sys_dup;
+subprogram sys_epoll_create;
+subprogram sys_eventfd;
+subprogram sys_exit;
+subprogram sys_exit_group;
+subprogram sys_fadvise;
+subprogram sys_fallocate;
+subprogram sys_fanotify_init;
+subprogram sys_fchdir;
+subprogram sys_fchmod;
+subprogram sys_fchown;
+subprogram sys_fcntl;
+subprogram sys_fdatasync;
+subprogram sys_flock;
+subprogram sys_fsync;
+subprogram sys_ftruncate;
+subprogram sys_getegid;
+subprogram sys_geteuid;
+subprogram sys_getgid;
+subprogram sys_getpgid;
+subprogram sys_getpgrp;
+subprogram sys_getpid;
+subprogram sys_getppid;
+subprogram sys_getpriority;
+subprogram sys_getsid;
+subprogram sys_gettid;
+subprogram sys_getuid;
+subprogram sys_inotify_init;
+subprogram sys_inotify_rm_watch;
+subprogram sys_ioctl;
+subprogram sys_io_destroy;
+subprogram sys_ioperm;
+subprogram sys_ioprio_get;
+subprogram sys_ioprio_set;
+subprogram sys_kcmp;
+subprogram sys_keyctl;
+subprogram sys_kill;
+subprogram sys_listen;
+subprogram sys_lseek;
+subprogram sys_madvise;
+subprogram sys_mlock;
+subprogram sys_mlockall;
+subprogram sys_mmap;
+subprogram sys_mprotect;
+subprogram sys_mremap;
+subprogram sys_msgget;
+subprogram sys_msync;
+subprogram sys_munlock;
+subprogram sys_munlockall;
+subprogram sys_munmap;
+subprogram sys_pause;
+subprogram sys_personality;
+subprogram sys_prctl;
+subprogram sys_ptrace;
+subprogram sys_readahead;
+subprogram sys_remap_file_pages;
+subprogram sys_restart_syscall;
+subprogram sys_sched_get_priority_max;
+subprogram sys_sched_get_priority_min;
+subprogram sys_sched_getscheduler;
+subprogram sys_sched_yield;
+subprogram sys_semctl;
+subprogram sys_semget;
+subprogram sys_setfsgid;
+subprogram sys_setfsuid;
+subprogram sys_setgid;
+subprogram sys_setns;
+subprogram sys_setpgid;
+subprogram sys_setpriority;
+subprogram sys_setregid;
+subprogram sys_setresgid;
+subprogram sys_setresuid;
+subprogram sys_setreuid;
+subprogram sys_setsid;
+subprogram sys_setuid;
+subprogram sys_shmget;
+subprogram sys_shutdown;
+subprogram sys_socket;
+subprogram sys_sync;
+subprogram sys_sync_file_range;
+subprogram sys_syncfs;
+subprogram sys_sysfs;
+subprogram sys_tee;
+subprogram sys_tgkill;
+subprogram sys_timer_delete;
+subprogram sys_timerfd_create;
+subprogram sys_timer_getoverrun;
+subprogram sys_tkill;
+subprogram sys_umask;
+subprogram sys_unshare;
+subprogram sys_vhangup;
+
+subprogram sys_rt_sigaction;
+subprogram sys_rt_sigreturn;

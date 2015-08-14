@@ -1,0 +1,37 @@
+probe kprobe.function("copy_user_enhanced_fast_string") {
+	 if (pid() == target()) {
+		  printf("=== extent copy_user_enhanced_fast_string @ %p to=%p from=%p n=%p\n",
+				 addr(),
+				 register("rdi"),
+				 register("rsi"),
+				 register("rdx")
+			   );
+		  print_backtrace(); print_ubacktrace();
+	 }
+
+}
+probe kprobe.function("copy_user_generic_string") {
+	 if (pid() == target()) {
+		  printf("=== extent copy_user_generic_string @ %p to=%p from=%p n=%p\n",
+				 addr(),
+				 register("rdi"),
+				 register("rsi"),
+				 register("rdx")
+			   );
+		  
+		  print_backtrace(); print_ubacktrace();
+	 }
+}
+probe kprobe.function("copy_user_generic_unrolled") {
+	 if (pid() == target()) {
+		  printf("=== extent copy_user_generic_unrolled @ %p to=%p from=%p n=%p\n",
+				 addr(),
+				 register("rdi"),
+				 register("rsi"),
+				 register("rdx")
+			   );
+		  
+		  print_backtrace(); print_ubacktrace();
+	 }
+
+}

@@ -3,7 +3,10 @@ TOPDIR := $(dir $(THIS_MAKEFILE))
 TESTDIR := $(TOPDIR)/test
 
 .PHONY: default
-default: run-tests
+default: all
+
+.PHONY: all
+all: src
 
 .PHONY: run-tests 
 run-tests: test

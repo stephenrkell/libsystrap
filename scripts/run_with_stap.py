@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+from __future__ import print_function
+
 import functools
 import os
 import os.path
@@ -18,8 +20,8 @@ from subprocess import STDOUT, PIPE, DEVNULL
 
 SCRIPT_DIR = os.path.dirname(__file__)
 TRAP_SYSCALLS_SO = os.path.join(SCRIPT_DIR, '../src/trap-syscalls.so')
-SYSCALL_STP = os.path.join(SCRIPT_DIR, 'copy-tofrom-user.stp')
-BUFSIZE = 1024
+SYSCALL_STP = os.path.join(SCRIPT_DIR, 'my_stp.stp')
+BUFSIZE = 16 * 1024 * 1024
 
 LDD_RE = re.compile(r'^\s+(?P<unresolved>[^=> ]+?)( => (?P<resolved>[^=> ]+?))? \(0x[0-9a-fA-F]+\)$')
 
@@ -41,7 +43,7 @@ def start_stap(trap_proc, args, tempdir, stdin=DEVNULL, stdout=PIPE, stderr=PIPE
             else:
                 assert False
     library_dep_options = ' '.join('-d "{}"'.format(dep) for dep in library_deps)
-    cmd = 'stap -DMAXBACKTRACE=100 -d kernel --all-modules -d {target} -d {TRAP_SYSCALLS_SO} {library_dep_options} -g -v -x {pid} {stp}'.format(pid=trap_proc.pid, stp=SYSCALL_STP,library_dep_options=library_dep_options, TRAP_SYSCALLS_SO=TRAP_SYSCALLS_SO, target=args[0])
+    cmd = 'stap -s 1000 -g -DMAXBACKTRACE=100 -DMAXSTRINGLEN=2048 -DTRYLOCKDELAY=1000 -DKRETACTIVE=1000 -DMAXTRYLOCK=10000 -DMAXACTION=10000 -DMAXERRORS=0 -DMAXSKIPPED=1000 -DDEBUG_UPROBES=1 -DINTERRUPTIBLE=0 -DMINSTACKSPACE=1024 -DSTP_NO_OVERLOAD -DSTAP_SUPPRESS_TIME_LIMITS_ENABLE -DMAXNESTING=5 -d kernel --all-modules -d {target} -d {TRAP_SYSCALLS_SO} {library_dep_options} -v -x {pid} {stp}'.format(pid=trap_proc.pid, stp=SYSCALL_STP,library_dep_options=library_dep_options, TRAP_SYSCALLS_SO=TRAP_SYSCALLS_SO, target=args[0])
     print(cmd)
     return subprocess.Popen(shlex.split(cmd), stdin=stdin, stdout=stdout, stderr=stderr, bufsize=0, env={'SYSTEMTAP_DIR': os.path.join(tempdir, 'systemtap_cache')})
 
@@ -53,7 +55,7 @@ def start_trap(args, tempdir, spec='/home/jf451/spec.idl', stdin=DEVNULL, stdout
         'TRAP_SYSCALLS_SLEEP_FOR_SECONDS': str(1),
         'TRAP_SYSCALLS_FOOTPRINT_FD': str(pipe_w),
         'TRAP_SYSCALLS_FOOTPRINT_SPEC_FILENAME': spec,
-        'TRAP_SYSCALLS_DEBUG': str(1),
+        'TRAP_SYSCALLS_DEBUG': str(0),
     }
     env_str = ' '.join('{}="{}"'.format(k, v) for k, v in env.items())
     print("starting {!s} {!s}".format(env_str, ' '.join(args)))
@@ -74,6 +76,8 @@ class PipeWrapper:
     
 def main(args, spec='/home/jf451/spec.idl'):
     tempdir = '/tmp' #tempfile.mkdtemp(prefix='run_with_stap_')
+    assert len(args) > 0, 'Please provide a target.'
+    assert args[0].startswith('/'), 'Please use absolute path to target.'
     trap_proc, footprint_fd = start_trap(args, spec=spec, tempdir=tempdir)
     stap_proc = start_stap(trap_proc, args, tempdir=tempdir)
     all_pipes = {
