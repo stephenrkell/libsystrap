@@ -56,6 +56,7 @@ def start_trap(args, tempdir, spec='/home/jf451/spec.idl', stdin=DEVNULL, stdout
         'TRAP_SYSCALLS_FOOTPRINT_FD': str(pipe_w),
         'TRAP_SYSCALLS_FOOTPRINT_SPEC_FILENAME': spec,
         'TRAP_SYSCALLS_DEBUG': str(0),
+        'DISPLAY': ':0',
     }
     env_str = ' '.join('{}="{}"'.format(k, v) for k, v in env.items())
     print("starting {!s} {!s}".format(env_str, ' '.join(args)))

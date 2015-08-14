@@ -87,6 +87,18 @@ subprogram sys_lstat(path, buf) [
 	 }
 ];
 
+subprogram sys_access(path, mode) [
+	 footprint = {
+		  r: c_str(path);
+	 }
+];
+
+subprogram sys_accessat(dirfd, path, mode, flags) [
+	 footprint = {
+		  r: c_str(path);
+	 }
+];
+
 
 subprogram sys_symlink(oldpath, newpath) [
 	 footprint = {
@@ -102,16 +114,21 @@ subprogram sys_readlink(path, buf, bufsiz) [
 	 }
 ];
 
+subprogram sys_poll(ufds, nfds, timeout) [
+	 footprint = {
+		  rw: ufds[0..nfds];
+	 }
+];
 
 subprogram sys_readv(fd, vec, vlen) [
 	 footprint = {
-		  w: iov.iov_base[{0..iov.iov_len}] for iov in vec[0..vlen];
+		  rw: iov.iov_base[{0..iov.iov_len}] for iov in vec[0..vlen];
 	 }
 ];
 
 subprogram sys_writev(fd, vec, vlen) [
 	 footprint = {
-		  r: iov.iov_base[{0..iov.iov_len}] for iov in vec[0..vlen];
+		  rw: iov.iov_base[{0..iov.iov_len}] for iov in vec[0..vlen];
 	 }
 ];
 
@@ -139,6 +156,12 @@ subprogram sys_recvmsg(sockfd, msg, flags) [
 	 }
 ];
 
+subprogram sys_connect(sockfd, addr, addrlen) [
+	 footprint = {
+		  r: addr[{0..addrlen}];
+	 }
+];
+
 subprogram sys_send(sockfd, buf, len, flags) [
 	 footprint = {
 		  r: buf[0..len];
@@ -148,6 +171,20 @@ subprogram sys_send(sockfd, buf, len, flags) [
 subprogram sys_sendto(sockfd, buf, len, flags, dest_addr, addrlen) [
 	 footprint = {
 		  r: buf[0..len];
+		  r: dest_addr[{0..addrlen}];
+	 }
+];
+
+subprogram sys_recv(sockfd, buf, len, flags) [
+	 footprint = {
+		  w: buf[0..len];
+	 }
+];
+
+subprogram sys_recvfrom(sockfd, buf, len, flags, src_addr, addrlen) [
+	 footprint = {
+		  w: buf[0..len];
+		  w: src_addr[{0..addrlen}];
 	 }
 ];
 
