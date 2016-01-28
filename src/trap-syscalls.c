@@ -262,6 +262,8 @@ static void saw_mapping(const char *line_begin_pos, const char *line_end_pos)
 }
 
 static void handle_sigill(int num);
+static void trap_all_mappings(void);
+static void install_sigill_handler(void);
 
 _Bool __write_footprints;
 _Bool __write_traces;
@@ -383,7 +385,13 @@ int main(void)
 	} else {
 		debug_printf(0, "not outputting traces.\n");
 	}
+	
+	trap_all_mappings();
+	install_sigill_handler();
+}
 
+static void trap_all_mappings(void)
+{
 	int fd = raw_open("/proc/self/maps", O_RDONLY);
 
 	if (fd != -1)
@@ -448,7 +456,10 @@ int main(void)
 		} while (ret > 0);
 		raw_close(fd);
 	}
+}
 
+static void install_sigill_handler(void)
+{
 	/* Install our SIGILL (was SIGTRAP, but that interferes with gdb) handler.
 	 * Linux seems to require us to provide a restorer; the code is in restore_rt. */
 	struct sigaction action = {
