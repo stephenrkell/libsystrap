@@ -121,17 +121,35 @@ static void saw_mapping(const char *line_begin_pos, const char *line_end_pos)
 	char w = *line_pos++;
 	char x = *line_pos++;
 	char p __attribute__((unused)) = *line_pos++;
-	char *slash = strchr(line_pos, '/');
-	char *filename_tmp = NULL;
-	if (slash && *(slash - 1) == ' ') filename_tmp = slash;
-	char *filename_end = (filename_tmp ? strchr(filename_tmp, '\n') : NULL);
+	const char *newline = strchr(line_pos, '\n');
+	if (!newline) newline = line_pos;
+	const char *slash = strchr(line_pos, '/');
+	const char *filename_src = NULL;
+	size_t filename_sz;
+	if (slash && slash < newline && *(slash - 1) == ' ')
+	{
+		filename_src = slash;
+		const char *filename_end = strchr(filename_src, '\n');
+		if (!filename_end)
+		{
+			// hmm -- slash but no newline
+			filename_end = line_end_pos;
+		}
+		filename_sz = filename_end - filename_src;
+	}
+	else
+	{
+		// no filename present
+		filename_sz = 0;
+		filename_src = line_pos;
+	}
+	
 #ifndef PATH_MAX
 #define PATH_MAX 4096
 #endif
 	char filename[PATH_MAX + 1];
-	size_t filename_sz = filename_end - filename_tmp;
 	size_t copy_sz = (filename_sz < PATH_MAX) ? filename_sz : PATH_MAX;
-	strncpy(filename, filename_tmp, copy_sz);
+	strncpy(filename, filename_src, copy_sz);
 	filename[copy_sz] = '\0';
 
 	/* Skip ourselves, but remember our load address. */
@@ -186,7 +204,7 @@ static void saw_mapping(const char *line_begin_pos, const char *line_end_pos)
 		 * guaranteed to be the same. */
 		void *base_addr = NULL;
 		const void *next_section_start = vaddr_to_next_instruction_start(
-			(unsigned char *) begin_addr, filename, &base_addr);
+			(unsigned char *) begin_addr, filename[0] ? filename : NULL, &base_addr);
 
 		if (next_section_start)
 		{

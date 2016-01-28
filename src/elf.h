@@ -31,7 +31,17 @@ const ElfW(Ehdr) *vaddr_to_ehdr(unsigned char *begin_addr, const char *fname, vo
 
 const void *vaddr_to_next_instruction_start(unsigned char *begin_addr, const char *fname, void **out_base_addr);
 
-				 uintptr_t __attribute__((visibility("protected"))) page_boundary_up(uintptr_t addr);
-				 uintptr_t __attribute__((visibility("protected"))) page_boundary_down(uintptr_t addr);
+extern inline uintptr_t __attribute__((always_inline,gnu_inline))
+page_boundary_up(uintptr_t addr)
+{
+	if (addr % PAGE_SIZE == 0) return addr;
+	else return (PAGE_SIZE * (1 + (addr / PAGE_SIZE)));
+}
+
+extern inline uintptr_t __attribute__((always_inline,gnu_inline))
+page_boundary_down(uintptr_t addr)
+{
+	return (addr / PAGE_SIZE) * PAGE_SIZE;
+}
 
 #endif

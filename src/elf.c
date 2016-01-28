@@ -3,6 +3,7 @@
 #include <string.h>
 #include <asm/fcntl.h>
 #include <sys/mman.h>
+#include <stdlib.h>
 
 #include <relf.h>
 
@@ -10,21 +11,6 @@
 #include "raw-syscalls.h"
 
 uintptr_t our_load_address __attribute__((visibility("protected")));
-
-uintptr_t __attribute__((visibility("protected"))) 
-page_boundary_up(uintptr_t addr)
-{
-	if (addr % PAGE_SIZE == 0) return addr;
-	else return (PAGE_SIZE * (1 + (addr / PAGE_SIZE)));
-}
-
-uintptr_t __attribute__((visibility("protected")))
-page_boundary_down(uintptr_t addr)
-{
-	return (addr / PAGE_SIZE) * PAGE_SIZE;
-}
-
-
 
 struct dl_fileoff_cb_arg
 {
@@ -158,15 +144,16 @@ const void *vaddr_to_next_instruction_start(unsigned char *begin_addr, const cha
 		void *m = NULL;
 		uintptr_t off_start = page_boundary_down(ehdr->e_shoff);
 		uintptr_t off_end = page_boundary_up(ehdr->e_shoff + ehdr->e_shnum * ehdr->e_shentsize);
-		if (!sht)
+		if (!sht && fname)
 		{
 			int fd = raw_open(fname, O_RDONLY);
 			assert(fd >= 0);
-			void *m = raw_mmap(NULL, off_end - off_start, PROT_READ, MAP_PRIVATE, fd, page_boundary_down(ehdr->e_shoff));
-			assert(m != MAP_FAILED);
+			m = raw_mmap(NULL, off_end - off_start, PROT_READ, MAP_PRIVATE, fd, page_boundary_down(ehdr->e_shoff));
+			if (m == MAP_FAILED) abort();
+			close(fd);
 			sht = (ElfW(Shdr) *)((unsigned char *) m + (ehdr->e_shoff - page_boundary_down(ehdr->e_shoff)));
 		}
-		assert(sht);
+		if (!sht) return NULL;
 		/* walk the SHT, looking for lower vaddr higher than begin_addr */
 		uintptr_t current_lowest = (uintptr_t) -1;
 		int current_lowest_i = -1;
