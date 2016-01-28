@@ -10,6 +10,8 @@
 #include <asm/sigcontext.h>
 #include <asm/siginfo.h>
 #include <asm/ucontext.h>
+#include <alloca.h>
+#include <string.h>
 #include <sys/syscall.h>
 #include <stdarg.h>
 /* avoid stdlib and stdio for sigset_t conflict reasons */
@@ -237,9 +239,9 @@ do_syscall_and_resume(struct generic_syscall *gsp)
 	{
 		/* HACK: these must not be spilled to the stack at the point where the 
 		 * syscall occurs, or they may be lost.  */
-		register _Bool stack_zapped = zaps_stack(gsp);
-		register uintptr_t *new_top_of_stack = (uintptr_t *) gsp->args[1];
-		register uintptr_t *new_rsp = 0;
+		register _Bool stack_zapped __asm__ ("rbx") = zaps_stack(gsp);
+		register uintptr_t *new_top_of_stack __asm__ ("rcx") = (uintptr_t *) gsp->args[1];
+		register uintptr_t *new_rsp __asm__ ("rdx") = 0;
 		
 		if (stack_zapped)
 		{
@@ -272,10 +274,13 @@ do_syscall_and_resume(struct generic_syscall *gsp)
 			new_rsp = new_stack_lowaddr; // (uintptr_t) ((char *) stack_copy_low + fixup_amount);
 		}
 		
-		register unsigned trap_len = instr_len(
+		register unsigned trap_len __asm__ ("rsi") = instr_len(
 			(unsigned char*) gsp->saved_context->uc.uc_mcontext.rip,
 			(unsigned char*) -1 /* we don't know where the end of the mapping is */
 			);
+		
+		struct generic_syscall *copied_gsp = alloca(sizeof (struct generic_syscall));
+		memcpy(copied_gsp, gsp, sizeof *gsp);
 		
 		long int ret = do_real_syscall(gsp);            /* always inlined */
 		/* Did our stack actually get zapped? */
@@ -299,15 +304,15 @@ do_syscall_and_resume(struct generic_syscall *gsp)
 		 * re-load it here? Ideally we need to rewrite this whole function in assembly. 
 		 * We could make resume_from_sigframe a macro expanding to an asm volatile.... */
 		
-		post_handling(gsp, ret); /* okay, because we have a stack (perhaps zeroed/new) */
+		post_handling(copied_gsp, ret); /* okay, because we have a stack (perhaps zeroed/new) */
 		/* FIXME: unsafe to access gsp here! Take a copy of *gsp! */
 		
 		if (!stack_zapped)
 		{
-			resume_from_sigframe(ret, gsp->saved_context, trap_len);
+			resume_from_sigframe(ret, copied_gsp->saved_context, trap_len);
 		}
 		else 
-		{	
+		{
 			/* We copied the context into the new stack. So just resume from sigframe
 			 * as before, with two minor alterations. Firstly, the caller expects to
 			 * resume with the new top-of-stack in rsp. Secondly, we fix up the current rsp
