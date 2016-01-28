@@ -14,29 +14,14 @@
 #include <string.h>
 #include <sys/syscall.h>
 #include <stdarg.h>
-/* avoid stdlib and stdio for sigset_t conflict reasons */
-void *calloc(size_t, size_t);
-void free(void*);
-/* avoid stdio because of sigset_t conflict */
-void *fdopen(int fd, const char *mode);
-int fprintf(void *stream, const char *format, ...);
-int vfprintf(void *stream, const char *format, va_list args);
-int fflush(void *stream);
 
 extern int debug_level;
 extern void **p_err_stream;
-#define debug_printf(lvl, fmt, ...) do { \
-    if ((lvl) <= debug_level) { \
-      fprintf(*p_err_stream, fmt, ## __VA_ARGS__ ); \
-      fflush(*p_err_stream); \
-    } \
-  } while (0)
 
+#include "systrap.h"
 #include "raw-syscalls.h"
 #include "syscall-names.h" /* for SYSCALL_MAX */
 #include "instr.h"
-
-#include <footprints.h>
 
 extern _Bool __write_footprints;
 extern _Bool __write_traces;
@@ -64,7 +49,7 @@ struct generic_syscall {
 };
 
 typedef void post_handler(struct generic_syscall *s, long int ret);
-typedef void (__attribute__((noreturn)) syscall_replacement)(
+typedef void /*(__attribute__((noreturn))*/ syscall_replacement/*)*/(
 	struct generic_syscall *s, 
 	post_handler *post
 );
@@ -82,8 +67,6 @@ zaps_stack(struct generic_syscall *gs);
 	 "UNFIX_STACK_ALIGNMENT " \n\
 	  movq %%rax, %[ret]      \n"
 
-
-void write_footprint(void *base, size_t len, enum footprint_direction direction, const char *syscall);
 void pre_handling(struct generic_syscall *gsp);
 void post_handling(struct generic_syscall *gsp, long int ret);
 

@@ -35,7 +35,7 @@ CONTRIB := $(SRCROOT)/contrib
 CONFIG := $(CONTRIB)/config.mk
 
 $(CONTRIB)/config.mk:
-	cd "$(CONTRIB)" && make
+	$(MAKE) -C $(CONTRIB)
 
 include $(CONFIG)
 
@@ -51,6 +51,10 @@ endif
 
 ifeq ($(ANTLR3C_DIR),)
 $(error Please install the libantlr3c source tree and set ANTLR3C_DIR)
+endif
+
+ifeq ($(realpath $(SRCROOT)/libsystrap/libsystrap.a),)
+$(error Please build libsystrap first)
 endif
 
 
@@ -77,22 +81,20 @@ vpath %.c $(LIBALLOCS_DIR)/src
 
 CFLAGS += -g 
 CFLAGS += -Wall -Wno-unused-label -Wno-comment
-#CFLAGS += -O2
-CFLAGS += -O0
+CFLAGS += -O2
+#CFLAGS += -O0
 CFLAGS += -fPIC
 CFLAGS += -ffreestanding -fno-omit-frame-pointer
 #CFLAGS += -I$(SYSCALL_INTERFACE_DIR)
 
 CFLAGS += -I $(LIBALLOCS_DIR)/include
 CFLAGS += -I $(LIBFOOTPRINTS_DIR)/include
-CFLAGS += -I $(OPDIS_DIR)
 CFLAGS += -I $(DWARFIDL_DIR)/include
-CFLAGS += -I $(LIBOPCODES_DIR)/include
-CFLAGS += -I $(BFD_DIR)
 CFLAGS += -I $(ANTLR3C_DIR)
 CFLAGS += -I $(ANTLR3C_DIR)/include
 CFLAGS += -I $(DWARFIDL_DIR)/parser
 # CFLAGS += $(LLVM_INCLUDES)
+CFLAGS += -I $(SRCROOT)/libsystrap
 
 CXXFLAGS := $(CXXFLAGS) $(CFLAGS) # eagerly latch CFLAGS now; don't want later additions
 CFLAGS += -std=c99
@@ -110,7 +112,8 @@ CC_SRC := $(wildcard *.cc)
 C_DEPS := $(patsubst %.c,.%.d,$(C_SRC))
 CC_DEPS := $(patsubst %.cc,.%.d,$(CC_SRC))
 DEPS := $(C_DEPS) $(CC_DEPS)
-OBJS := $(patsubst %.c,%.o,$(C_SRC)) $(patsubst %.cc,%.o,$(CC_SRC)) $(patsubst %.s,%.o,$(S_SRC)) dlmalloc.a
+OBJS := $(patsubst %.c,%.o,$(C_SRC)) $(patsubst %.cc,%.o,$(CC_SRC)) $(patsubst %.s,%.o,$(S_SRC)) \
+	$(SRCROOT)/libsystrap/libsystrap.a dlmalloc.a
 
 DEPS += .trap-syscalls-exec.d
 
@@ -122,9 +125,6 @@ $(C_DEPS): .%.d: %.c
 ifneq ($(MAKECMDGOALS),clean)
 -include $(DEPS)
 endif
-
-# Don't build via .o, because we need different compile-time flags depending on 
-# which target we're building.
 
 trap-syscalls-exec.o: trap-syscalls.c
 	$(CC) $(filter-out -fPIC,$(CFLAGS)) -DEXECUTABLE -o "$@" "$<"
@@ -139,7 +139,7 @@ trap-syscalls: $(filter-out trap-syscalls.o,$(OBJS)) trap-syscalls-exec.o
 # disable sbrk() in dlmalloc, to avoid conflicting with the "other" C library
 dlmalloc.o: CFLAGS += -DHAVE_MORECORE=0
 #-O3
-# We put dlmalloc in a library so that --exclude-libs=ALL will hide its symbols
+# We put dlmalloc in a library so that --exclude-libs=dlmalloc.a will hide its symbols
 # in our output .so, so that they don't override anything in the rest of the program.
 dlmalloc.a: dlmalloc.o
 	$(AR) r "$@" $^
@@ -154,7 +154,10 @@ space := $(null) #
 comma := ,
 # FIXME: make our dynamic symbols hidden! 
 # We don't want user code calling into our exit(), hence having us make its syscalls.
-trap-syscalls.so: LDLIBS := -Bstatic $(LIBOPDIS_A) $(LIBOPCODES_A) $(LIBBFD_A) $(LIBIBERTY_A) $(ZLIB_A) dlmalloc.a $(LIBC_A) $(FOOTPRINTS_A)  $(DWARFIDL_DIR)/parser/dwarfidlSimpleCLexer.o $(DWARFIDL_DIR)/parser/dwarfidlSimpleCParser.o $(ANTLR3C_A)
+trap-syscalls.so: LDLIBS := -Bstatic $(LIBOPDIS_A) $(LIBOPCODES_A) $(LIBBFD_A) $(LIBIBERTY_A) $(ZLIB_A) \
+	dlmalloc.a $(LIBC_A) $(FOOTPRINTS_A) \
+	$(DWARFIDL_DIR)/parser/dwarfidlSimpleCLexer.o $(DWARFIDL_DIR)/parser/dwarfidlSimpleCParser.o \
+	$(ANTLR3C_A) $(SRCROOT)/libsystrap/libsystrap.a dlmalloc.a
 trap-syscalls.so: LDFLAGS += -nostdlib -Wl,--hash-style=sysv -Wl,--no-as-needed
 trap-syscalls.so: $(OBJS) dynamic-list
 	$(CC) -shared -Bsymbolic \
@@ -162,13 +165,11 @@ trap-syscalls.so: $(OBJS) dynamic-list
 		-Wl,--dynamic-list,dynamic-list \
 		-Wl,-h,trap-syscalls.so \
 		-Wl,--version-script,version-script \
-		-o "$@" $(filter-out dynamic-list,$(filter-out raw-syscalls.o,$+)) \
-		$(LDFLAGS) raw-syscalls.o \
+		-o "$@" $(filter-out dynamic-list,$(filter-out %.a.o,$+)) \
+		$(LDFLAGS) -Wl,-z,muldefs \
 		-Wl,--defsym,__GI___assert_fail=__assert_fail -Wl,--defsym,stat=raw_stat \
-		-Wl,--exclude-libs=ALL \
+		-Wl,--exclude-libs=dlmalloc.a \
 		$(LDLIBS)
-
-#		-Wl,--defsym,page_boundary_up=0 -Wl,--defsym,page_boundary_down=0 \
 
 .PHONY: clean
 clean:

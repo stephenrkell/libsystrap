@@ -4,7 +4,8 @@ CONTRIB := $(realpath $(dir $(THIS_MAKEFILE)))
 default: all
 all: build config.mk
 .PHONY: default all build independent
-build: build-opdis build-binutils build-zlib build-eglibc build-liballocs build-dwarfidl build-libfootprints
+build: build-opdis build-binutils build-zlib build-eglibc \
+#build-liballocs build-dwarfidl build-libfootprints
 
 # don't remove intermediates
 .SECONDARY:
@@ -93,21 +94,21 @@ build-binutils: binutils-build/Makefile
 install-binutils: build-binutils
 	$(MAKE) -C binutils-build install MAKEINFO=/bin/true
 
-.PHONY: build-dwarfidl
-build-dwarfidl: dwarfidl/Makefile
-	$(MAKE) -C dwarfidl
-
-.PHONY: build-liballocs
-build-liballocs: build-dwarfidl liballocs/Makefile
-	$(MAKE) -C liballocs
-
-.PHONY: build-libfootprints
-build-libfootprints: build-liballocs build-dwarfidl build-antlr libfootprints/Makefile
-	$(MAKE) -C libfootprints
-
-.PHONY: build-antlr
-build-antlr:
-	$(MAKE) -C libantlr3c-3.4
+#.PHONY: build-dwarfidl
+#build-dwarfidl: dwarfidl/Makefile
+#	$(MAKE) -C dwarfidl
+#
+#.PHONY: build-liballocs
+#build-liballocs: build-dwarfidl liballocs/Makefile
+#	$(MAKE) -C liballocs
+#
+#.PHONY: build-libfootprints
+#build-libfootprints: build-liballocs build-dwarfidl build-antlr libfootprints/Makefile
+#	$(MAKE) -C libfootprints
+#
+#.PHONY: build-antlr
+#build-antlr:
+#	$(MAKE) -C libantlr3c-3.4
 
 independent: $(EGLIBC_TAR) $(ZLIB_TAR) $(BINUTILS_TAR) opdis/configure
 

@@ -3,6 +3,14 @@
 
 #include <unistd.h>
 #include <elf.h>
+
+#ifndef assert
+#define elf_h_defined_assert
+void __assert_fail(const char * assertion, const char * file, unsigned int line, const char * function);
+#define assert(cond) if (!(cond)) __assert_fail(#cond, __FILE__, __LINE__, __func__)
+#endif
+
+/* relf needs assert() to be defined */
 #include <relf.h>
 
 #ifndef PAGE_SIZE
@@ -43,5 +51,9 @@ page_boundary_down(uintptr_t addr)
 {
 	return (addr / PAGE_SIZE) * PAGE_SIZE;
 }
+
+#ifdef elf_h_defined_assert
+#undef assert
+#endif
 
 #endif
