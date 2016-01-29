@@ -70,7 +70,16 @@ endif
 #LIBIBERTY_A := $(CONTRIB)
 #LIBALLOCS_A := $(LIBALLOCS_DIR)/.libs/liballocs.a
 FOOTPRINTS_A := $(LIBFOOTPRINTS_DIR)/src/.libs/libfootprints.a $(LIBFOOTPRINTS_DIR)/src/.libs/libfootprints_syscalls.a
-ANTLR3C_A := $(ANTLR3C_DIR)/.libs/libantlr3c.a
+
+# PROBLEM: this archive always contains non-PIC code
+# (even if we set CFLAGS to always include -fPIC... libtool interferes).
+# ANTLR3C_A := $(ANTLR3C_DIR)/.libs/libantlr3c.a
+# Instead, build our own libantlr3c.a from the PIC objects.
+ANTLR3C_A := libantlr3c_pic.a 
+
+libantlr3c_pic.a: $(wildcard $(ANTLR3C_DIR)/.libs/*.o)
+	$(AR) r "$@" $^
+
 #ZLIB_A := $(CONTRIB)/zlib-1.2.8/libz.a
 
 #SYSCALL_INTERFACE_DIR ?= $(dir $(THIS_MAKEFILE))/../../syscall-interfaces/scripts
@@ -112,8 +121,7 @@ CC_SRC := $(wildcard *.cc)
 C_DEPS := $(patsubst %.c,.%.d,$(C_SRC))
 CC_DEPS := $(patsubst %.cc,.%.d,$(CC_SRC))
 DEPS := $(C_DEPS) $(CC_DEPS)
-OBJS := $(patsubst %.c,%.o,$(C_SRC)) $(patsubst %.cc,%.o,$(CC_SRC)) $(patsubst %.s,%.o,$(S_SRC)) \
-	$(SRCROOT)/libsystrap/libsystrap.a dlmalloc.a
+OBJS := $(patsubst %.c,%.o,$(C_SRC)) $(patsubst %.cc,%.o,$(CC_SRC)) $(patsubst %.s,%.o,$(S_SRC))
 
 DEPS += .trap-syscalls-exec.d
 
@@ -154,18 +162,28 @@ space := $(null) #
 comma := ,
 # FIXME: make our dynamic symbols hidden! 
 # We don't want user code calling into our exit(), hence having us make its syscalls.
-trap-syscalls.so: LDLIBS := -Bstatic $(LIBOPDIS_A) $(LIBOPCODES_A) $(LIBBFD_A) $(LIBIBERTY_A) $(ZLIB_A) \
-	dlmalloc.a $(LIBC_A) $(FOOTPRINTS_A) \
-	$(DWARFIDL_DIR)/parser/dwarfidlSimpleCLexer.o $(DWARFIDL_DIR)/parser/dwarfidlSimpleCParser.o \
-	$(ANTLR3C_A) $(SRCROOT)/libsystrap/libsystrap.a dlmalloc.a
+trap-syscalls.so: LDLIBS := -Bstatic \
+	$(SRCROOT)/libsystrap/libsystrap.a \
+	$(LIBOPDIS_A) \
+	$(LIBOPCODES_A) \
+	$(LIBBFD_A) \
+	$(LIBIBERTY_A) \
+	$(ZLIB_A) \
+	dlmalloc.a \
+	$(LIBC_A) \
+	$(FOOTPRINTS_A) \
+	$(DWARFIDL_DIR)/parser/dwarfidlSimpleCLexer.o \
+	$(DWARFIDL_DIR)/parser/dwarfidlSimpleCParser.o \
+	$(ANTLR3C_A)
+
 trap-syscalls.so: LDFLAGS += -nostdlib -Wl,--hash-style=sysv -Wl,--no-as-needed
-trap-syscalls.so: $(OBJS) dynamic-list
+trap-syscalls.so: $(filter-out dlmalloc.o,$(OBJS)) dynamic-list libantlr3c_pic.a $(SRCROOT)/libsystrap/libsystrap.a dlmalloc.a
 	$(CC) -shared -Bsymbolic \
 		-fuse-ld=gold \
 		-Wl,--dynamic-list,dynamic-list \
 		-Wl,-h,trap-syscalls.so \
 		-Wl,--version-script,version-script \
-		-o "$@" $(filter-out dynamic-list,$(filter-out %.a.o,$+)) \
+		-o "$@" $(filter-out dynamic-list,$(filter-out %.a,$+)) \
 		$(LDFLAGS) -Wl,-z,muldefs \
 		-Wl,--defsym,__GI___assert_fail=__assert_fail -Wl,--defsym,stat=raw_stat \
 		-Wl,--exclude-libs=dlmalloc.a \

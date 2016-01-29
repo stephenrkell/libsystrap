@@ -55,7 +55,7 @@ ifneq ($(MAKECMDGOALS),clean)
 -include $(DEPS)
 endif
 
-libsystrap.a: $(patsubst %.c,%.o,$(C_SRC))
+libsystrap.a: $(OBJS)
 	$(AR) r "$@" $^
 
 .PHONY: clean

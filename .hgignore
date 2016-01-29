@@ -1,0 +1,6 @@
+syntax: glob
+contrib/*
+*.o
+*.a
+*.so
+*/.*.d
