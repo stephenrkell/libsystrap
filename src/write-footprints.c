@@ -5,6 +5,7 @@
 #include "elfutil.h"
 #include "uniqtype-bfs.h"
 #include <footprints.h>
+#include "write-footprints.h"
 
 static struct uniqtype *uniqtype_for_syscall(int syscall_num)
 {
