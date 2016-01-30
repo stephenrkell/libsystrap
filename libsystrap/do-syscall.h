@@ -19,6 +19,7 @@ extern int debug_level;
 extern void **p_err_stream;
 
 #include "systrap.h"
+#include "systrap_private.h"
 #include "raw-syscalls.h"
 #include "syscall-names.h" /* for SYSCALL_MAX */
 #include "instr.h"
@@ -42,18 +43,6 @@ struct ibcs_sigframe
 	struct siginfo info;
 };
 
-struct generic_syscall {
-	struct ibcs_sigframe *saved_context;
-	int syscall_number;
-	long int args[6];
-};
-
-typedef void post_handler(struct generic_syscall *s, long int ret);
-typedef void /*(__attribute__((noreturn))*/ syscall_replacement/*)*/(
-	struct generic_syscall *s, 
-	post_handler *post
-);
-
 extern syscall_replacement *replaced_syscalls[SYSCALL_MAX];
 
 extern inline _Bool 
@@ -67,8 +56,8 @@ zaps_stack(struct generic_syscall *gs);
 	 "UNFIX_STACK_ALIGNMENT " \n\
 	  movq %%rax, %[ret]      \n"
 
-void pre_handling(struct generic_syscall *gsp);
-void post_handling(struct generic_syscall *gsp, long int ret);
+void systrap_pre_handling(struct generic_syscall *gsp);
+void systrap_post_handling(struct generic_syscall *gsp, long int ret);
 
 /*
  * The x86-64 syscall argument passing convention goes like this:
@@ -208,7 +197,7 @@ do_syscall_and_resume(struct generic_syscall *gsp)
 {
 	/* How can we post-handle a syscall after the stack is zapped by clone()?
 	 * Actually it's very easy. We can still call down. We just can't return. */
-	pre_handling(gsp);
+	systrap_pre_handling(gsp);
 	if (replaced_syscalls[gsp->syscall_number])
 	{
 		/* Since replaced_syscalls holds function pointers, these calls will 
@@ -216,7 +205,7 @@ do_syscall_and_resume(struct generic_syscall *gsp)
 		 * clone(), we have no way to get back here. So the semantics of a 
 		 * replaced syscall must include "do your own resumption". We therefore
 		 * pass the post-handling as a function. */
-		replaced_syscalls[gsp->syscall_number](gsp, &post_handling);
+		replaced_syscalls[gsp->syscall_number](gsp, &systrap_post_handling);
 	}
 	else
 	{
@@ -287,7 +276,7 @@ do_syscall_and_resume(struct generic_syscall *gsp)
 		 * re-load it here? Ideally we need to rewrite this whole function in assembly. 
 		 * We could make resume_from_sigframe a macro expanding to an asm volatile.... */
 		
-		post_handling(copied_gsp, ret); /* okay, because we have a stack (perhaps zeroed/new) */
+		systrap_post_handling(copied_gsp, ret); /* okay, because we have a stack (perhaps zeroed/new) */
 		/* FIXME: unsafe to access gsp here! Take a copy of *gsp! */
 		
 		if (!stack_zapped)

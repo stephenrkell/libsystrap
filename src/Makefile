@@ -192,5 +192,5 @@ trap-syscalls.so: $(filter-out dlmalloc.o,$(OBJS)) dynamic-list libantlr3c_pic.a
 .PHONY: clean
 clean:
 	rm -f trap-syscalls trap-syscalls.so
-	rm -f *.o
+	rm -f *.o *.a
 	rm -f .*.d

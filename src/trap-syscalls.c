@@ -7,6 +7,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include "systrap.h"
+#include "systrap_private.h"
 #include <footprints.h>
 
 _Bool __write_footprints;

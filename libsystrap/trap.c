@@ -33,8 +33,10 @@
 #include <string.h>
 #include <stdarg.h>
 #include "raw-syscalls.h"
+#include "systrap_private.h"
 #include "do-syscall.h"
 #include "elfutil.h"
+#include <maps.h> /* from liballocs */
 
 /* For clients building a standalone executable and wanting a simple test case, 
  * we allow them to set a test trap. */
@@ -100,55 +102,15 @@ static void instruction_cb(unsigned char *pos, unsigned len, void *arg)
 	if (is_syscall_instr(pos, pos + len)) replace_syscall(pos, len);
 }
 
-static void saw_mapping(const char *line_begin_pos, const char *line_end_pos)
+static int process_mapping_cb(struct proc_entry *ent, char *linebuf, size_t bufsz, void *arg)
 {
-	const char *line_pos = line_begin_pos;
-	unsigned long begin_addr = read_hex_num(&line_pos, line_end_pos);
-	++line_pos;
-	unsigned long end_addr = read_hex_num(&line_pos, line_end_pos);
-	++line_pos;
-	char r = *line_pos++;
-	char w = *line_pos++;
-	char x = *line_pos++;
-	char p __attribute__((unused)) = *line_pos++;
-	const char *newline = strchr(line_pos, '\n');
-	if (!newline) newline = line_pos;
-	const char *slash = strchr(line_pos, '/');
-	const char *filename_src = NULL;
-	size_t filename_sz;
-	if (slash && slash < newline && *(slash - 1) == ' ')
-	{
-		filename_src = slash;
-		const char *filename_end = strchr(filename_src, '\n');
-		if (!filename_end)
-		{
-			// hmm -- slash but no newline
-			filename_end = line_end_pos;
-		}
-		filename_sz = filename_end - filename_src;
-	}
-	else
-	{
-		// no filename present
-		filename_sz = 0;
-		filename_src = line_pos;
-	}
-	
-#ifndef PATH_MAX
-#define PATH_MAX 4096
-#endif
-	char filename[PATH_MAX + 1];
-	size_t copy_sz = (filename_sz < PATH_MAX) ? filename_sz : PATH_MAX;
-	strncpy(filename, filename_src, copy_sz);
-	filename[copy_sz] = '\0';
-
 	/* Skip ourselves, but remember our load address. */
 	void *expected_mapping_end = (void*) page_boundary_up((uintptr_t) &etext);
-	if ((const unsigned char *) end_addr >= (const unsigned char *) expected_mapping_end
-		 && (const unsigned char *) begin_addr < (const unsigned char *) expected_mapping_end)
+	if ((const unsigned char *) ent->second>= (const unsigned char *) expected_mapping_end
+		 && (const unsigned char *) ent->first < (const unsigned char *) expected_mapping_end)
 	{
-		our_text_begin_address = (const void *) begin_addr;
-		our_text_end_address = (const void *) end_addr;
+		our_text_begin_address = (const void *) ent->first;
+		our_text_end_address = (const void *) ent->second;
 		
 		/* Compute our load address from the phdr p_vaddr of this segment.
 		 * But how do we get at our phdrs?
@@ -157,30 +119,30 @@ static void saw_mapping(const char *line_begin_pos, const char *line_end_pos)
 		our_load_address = (uintptr_t) our_text_begin_address;
 
 		debug_printf(1, "Skipping our own text mapping: %p-%p\n", 
-			(void*) begin_addr, (void*) end_addr);
+			(void*) ent->first, (void*) ent->second);
 		
-		return;
+		return 0; // keep going
 	}
 
-	if (x == 'x')
+	if (ent->x == 'x')
 	{
-		if (w != 'w')
+		if (ent->w != 'w')
 		{
-			int ret = raw_mprotect((const void *) begin_addr,
-				(const char *) end_addr - (const char *) begin_addr,
+			int ret = raw_mprotect((const void *) ent->first,
+				(const char *) ent->second - (const char *) ent->first,
 				PROT_READ | PROT_WRITE | PROT_EXEC);
 			
 			/* If we failed, it might be on the vdso page. */
-			assert(ret == 0 || (intptr_t) begin_addr < 0);
-			if (ret != 0 && (intptr_t) begin_addr < 0)
+			assert(ret == 0 || (intptr_t) ent->first < 0);
+			if (ret != 0 && (intptr_t) ent->first < 0)
 			{
 				/* vdso/vsyscall handling: since we can't rewrite the instructions on these 
 				 * pages, instead we should execute-protect them. Then, when we take a trap, 
 				 * we need to emulate the instructions there. FIXME: implement this. */
 				
 				debug_printf(1, "Couldn't rewrite nor protect vdso mapping at %p\n", 
-						(void*) begin_addr);
-				return;
+						(void*) ent->first);
+				return 0; // keep going
 			}
 		}
 
@@ -194,14 +156,14 @@ static void saw_mapping(const char *line_begin_pos, const char *line_end_pos)
 		 * guaranteed to be the same. */
 		void *base_addr = NULL;
 		const void *next_section_start = vaddr_to_next_instruction_start(
-			(unsigned char *) begin_addr, filename[0] ? filename : NULL, &base_addr);
+			(unsigned char *) ent->first, ent->rest[0] ? ent->rest : NULL, &base_addr);
 
 		if (next_section_start)
 		{
 			begin_instr_pos = (unsigned char *) next_section_start;
-		} else begin_instr_pos = (unsigned char *) begin_addr;
+		} else begin_instr_pos = (unsigned char *) ent->first;
 		
-		unsigned char *end_instr_pos = (unsigned char *) end_addr;
+		unsigned char *end_instr_pos = (unsigned char *) ent->second;
 		/* What to do about byte sequences that look like syscalls 
 		 * but are "in the middle" of instructions? 
 		 * How do we know where to *start* parsing an instruction stream? 
@@ -217,16 +179,16 @@ static void saw_mapping(const char *line_begin_pos, const char *line_end_pos)
 		 * If we hit a ud2 that's not at such a site, we just do ud2.
 		 * FIXME: implement this.
 		 */
-		char debug_buf[line_end_pos - line_begin_pos + 1];
-		strncpy(debug_buf, line_begin_pos, line_end_pos - line_begin_pos);
-		debug_buf[sizeof debug_buf - 1] = '\0';
-		// assert that line_end_pos 
+		// char debug_buf[line_end_pos - line_begin_pos + 1];
+		// strncpy(debug_buf, line_begin_pos, line_end_pos - line_begin_pos);
+		// debug_buf[sizeof debug_buf - 1] = '\0';
+		// // assert that line_end_pos 
 		debug_printf(1, "Scanning for syscall instructions within %p-%p (%s)\n",
-			(void*) begin_addr, (void*) end_addr, debug_buf);
+			(void*) ent->first, (void*) ent->second, /*debug_buf */ "FIXME: reinstate debug printout");
 		
 		walk_instructions(begin_instr_pos, end_instr_pos, instruction_cb, NULL);
 		/* Now the paranoid second scan: check for in-betweens. */
-		unsigned char *instr_pos = (unsigned char *) begin_addr;
+		unsigned char *instr_pos = (unsigned char *) ent->first;
 		while (instr_pos != end_instr_pos)
 		{
 			if (is_syscall_instr(instr_pos, end_instr_pos))
@@ -239,16 +201,18 @@ static void saw_mapping(const char *line_begin_pos, const char *line_end_pos)
 		}
 
 		// restore original perms
-		if (w != 'w')
+		if (ent->w != 'w')
 		{
-			int ret = raw_mprotect((const void *) begin_addr,
-				(const char *) end_addr - (const char *) begin_addr,
-				(r == 'r' ? PROT_READ : 0)
-			|   (w == 'w' ? PROT_WRITE : 0)
-			|   (x == 'x' ? PROT_EXEC : 0));
+			int ret = raw_mprotect((const void *) ent->first,
+				(const char *) ent->second - (const char *) ent->first,
+				(ent->r == 'r' ? PROT_READ : 0)
+			|   (ent->w == 'w' ? PROT_WRITE : 0)
+			|   (ent->x == 'x' ? PROT_EXEC : 0));
 			assert(ret == 0);
 		}
 	}
+	
+	return 0; // keep going
 }
 
 static void handle_sigill(int num);
@@ -293,64 +257,9 @@ void trap_all_mappings(void)
 
 	if (fd != -1)
 	{
-		// we use a simple buffer and a read loop
-		char buf[8192];
-		unsigned int ret;
-		char *buf_pos = &buf[0]; // the next position to fill in the buffer
-		char *entry_start_pos = &buf[0]; // the position
-		size_t size_requested;
-		do
-		{
-			// read some stuff, perhaps filling up the buffer
-			size_requested = sizeof buf - (buf_pos - buf);
-			ret = raw_read(fd, buf_pos, size_requested);
-			char *buf_limit = buf_pos + ret;
-			assert(buf_limit <= &buf[sizeof buf]);
-
-			// we have zero or more complete entries in the buffer; iterate over them
-			char *seek_pos;
-			while (1)
-			{
-				seek_pos = entry_start_pos;
-				// search forward for a newline
-				while (seek_pos != buf_limit && *seek_pos != '\n')
-				{ ++seek_pos; }
-
-				// did we find one?
-				if (seek_pos == buf_limit)
-				{
-					// no!
-					// but we have a partial entry in the buffer
-					// between entry_start_pos and seek_pos;
-					// copy it to the start, re-set and continue
-					__builtin_memmove(&buf[0], entry_start_pos, seek_pos - entry_start_pos);
-					buf_pos = &buf[seek_pos - entry_start_pos];
-					entry_start_pos = &buf[0];
-					break;
-				}
-				else
-				{
-					assert(*seek_pos == '\n');
-					// we have a complete entry; read it and advance entry_start_pos
-					char debug_buf1[seek_pos - entry_start_pos + 1];
-					strncpy(debug_buf1, entry_start_pos, seek_pos - entry_start_pos);
-					debug_buf1[sizeof debug_buf1 - 1] = '\0';
-					debug_printf(1, "DEBUG: entry is: %s\n", debug_buf1);
-					char debug_buf2[buf_pos - buf];
-					strncpy(debug_buf2, buf, buf_pos - buf);
-					debug_buf2[sizeof debug_buf2 - 1] = '\0';
-					debug_printf(1, "DEBUG: buffer is: %s", debug_buf2);
-					saw_mapping(entry_start_pos, seek_pos);
-					entry_start_pos = seek_pos + 1;
-					// if the newline was the last in the buffer, break and read more
-					if (entry_start_pos == buf_pos + sizeof buf)
-					{ buf_pos = entry_start_pos = &buf[0]; break; }
-
-					// else we might have another entry; go round again
-					continue;
-				}
-			}
-		} while (ret > 0);
+		struct proc_entry entry;
+		char linebuf[8192];
+		for_each_maps_entry(fd, linebuf, sizeof linebuf, &entry, process_mapping_cb, NULL);
 		raw_close(fd);
 	}
 }

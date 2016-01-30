@@ -11,12 +11,12 @@
 /* Dummy pre- and post-handling -- the client library 
  * will override us (we're in an archive, remember). */
 void __attribute__((visibility("protected")))
-pre_handling(struct generic_syscall *gsp)
+systrap_pre_handling(struct generic_syscall *gsp)
 {
 }
 
 void __attribute__((visibility("protected")))
-post_handling(struct generic_syscall *gsp, long int ret)
+systrap_post_handling(struct generic_syscall *gsp, long int ret)
 {
 }
 
