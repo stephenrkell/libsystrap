@@ -21,17 +21,10 @@ extern void **p_err_stream;
 #include "systrap.h"
 #include "systrap_private.h"
 #include "raw-syscalls.h"
-#include "syscall-names.h" /* for SYSCALL_MAX */
 #include "instr.h"
 
-extern _Bool __write_footprints;
-extern _Bool __write_traces;
-extern void *footprints_out; /* really a FILE* */
-extern void *traces_out; /* really a FILE* */
 extern void *stderr;
 extern uintptr_t our_load_address;
-extern struct footprint_node *footprints;
-extern struct env_node *footprints_env;
 
 /* In kernel-speak this is a "struct sigframe" / "struct rt_sigframe" --
  * sadly no user-level header defines it. But it seems to be vaguely standard
@@ -42,8 +35,6 @@ struct ibcs_sigframe
 	struct ucontext uc;
 	struct siginfo info;
 };
-
-extern syscall_replacement *replaced_syscalls[SYSCALL_MAX];
 
 extern inline _Bool 
 __attribute__((always_inline,gnu_inline))

@@ -102,11 +102,99 @@ static void instruction_cb(unsigned char *pos, unsigned len, void *arg)
 	if (is_syscall_instr(pos, pos + len)) replace_syscall(pos, len);
 }
 
+void trap_one_executable_region(unsigned char *begin, unsigned char *end, const char *filename,
+	_Bool is_writable, _Bool is_readable)
+{
+	if (!is_writable)
+	{
+		int ret = raw_mprotect((const void *) begin, end - begin, 
+			PROT_READ | PROT_WRITE | PROT_EXEC);
+
+		/* If we failed, it might be on the vdso page. */
+		assert(ret == 0 || (intptr_t) begin < 0);
+		if (ret != 0 && (intptr_t) begin < 0)
+		{
+			/* vdso/vsyscall handling: since we can't rewrite the instructions on these 
+			 * pages, instead we should execute-protect them. Then, when we take a trap, 
+			 * we need to emulate the instructions there. FIXME: implement this. */
+
+			debug_printf(1, "Couldn't rewrite nor protect vdso mapping at %p\n", begin);
+			return;
+		}
+	}
+
+	// it's executable; scan for syscall instructions
+	unsigned char *begin_instr_pos;
+	/* An executable mapping might include some non-instructions 
+	 * that will cause our instruction walker to get misaligned. 
+	 * Instead, we would like to walk the *sections* individually,
+	 * then re-traverse the whole thing. So we mmap the section
+	 * header table. PROBLEM: we can't re-open a file that is
+	 * guaranteed to be the same. */
+	void *base_addr = NULL;
+	const void *next_section_start = vaddr_to_next_instruction_start(
+		begin, filename, &base_addr);
+
+	if (next_section_start)
+	{
+		begin_instr_pos = (unsigned char *) next_section_start;
+	} else begin_instr_pos = begin;
+
+	unsigned char *end_instr_pos = (unsigned char *) end;
+	/* What to do about byte sequences that look like syscalls 
+	 * but are "in the middle" of instructions? 
+	 * How do we know where to *start* parsing an instruction stream? 
+	 * 
+	 * For now, we
+	 * - start parsing at the beginning only
+	 * - do fixups
+	 * - then do another pass where we detect remaining syscall-instruction-alikes
+	 * - ... and warn if we see any
+	 * 
+	 * What about ud2-alikes that don't correspond to replaced instructions?
+	 * No problem: we just need to remember which sites we replaced.
+	 * If we hit a ud2 that's not at such a site, we just do ud2.
+	 * FIXME: implement this.
+	 */
+	// char debug_buf[line_end_pos - line_begin_pos + 1];
+	// strncpy(debug_buf, line_begin_pos, line_end_pos - line_begin_pos);
+	// debug_buf[sizeof debug_buf - 1] = '\0';
+	// // assert that line_end_pos 
+	debug_printf(1, "Scanning for syscall instructions within %p-%p (%s)\n",
+		begin, end, /*debug_buf */ "FIXME: reinstate debug printout");
+
+	walk_instructions(begin_instr_pos, end_instr_pos, instruction_cb, NULL);
+	/* Now the paranoid second scan: check for in-betweens. */
+	unsigned char *instr_pos = begin; // start from the real beginning
+	while (instr_pos != end)
+	{
+		if (is_syscall_instr(instr_pos, end_instr_pos))
+		{
+			debug_printf(0, "Warning: after instrumentation, bytes at %p "
+				"could make a syscall on violation of control flow integrity\n", 
+				instr_pos);
+		}
+		++instr_pos;
+	}
+
+	// restore original perms
+	if (is_writable)
+	{
+		int ret = raw_mprotect(begin, end - begin, 
+			(is_readable ? PROT_READ : 0)
+		|   (is_writable ? PROT_WRITE : 0)
+		|                  PROT_EXEC
+		);
+		assert(ret == 0);
+	}
+	
+}
+
 static int process_mapping_cb(struct proc_entry *ent, char *linebuf, size_t bufsz, void *arg)
 {
 	/* Skip ourselves, but remember our load address. */
 	void *expected_mapping_end = (void*) page_boundary_up((uintptr_t) &etext);
-	if ((const unsigned char *) ent->second>= (const unsigned char *) expected_mapping_end
+	if ((const unsigned char *) ent->second >= (const unsigned char *) expected_mapping_end
 		 && (const unsigned char *) ent->first < (const unsigned char *) expected_mapping_end)
 	{
 		our_text_begin_address = (const void *) ent->first;
@@ -126,90 +214,9 @@ static int process_mapping_cb(struct proc_entry *ent, char *linebuf, size_t bufs
 
 	if (ent->x == 'x')
 	{
-		if (ent->w != 'w')
-		{
-			int ret = raw_mprotect((const void *) ent->first,
-				(const char *) ent->second - (const char *) ent->first,
-				PROT_READ | PROT_WRITE | PROT_EXEC);
-			
-			/* If we failed, it might be on the vdso page. */
-			assert(ret == 0 || (intptr_t) ent->first < 0);
-			if (ret != 0 && (intptr_t) ent->first < 0)
-			{
-				/* vdso/vsyscall handling: since we can't rewrite the instructions on these 
-				 * pages, instead we should execute-protect them. Then, when we take a trap, 
-				 * we need to emulate the instructions there. FIXME: implement this. */
-				
-				debug_printf(1, "Couldn't rewrite nor protect vdso mapping at %p\n", 
-						(void*) ent->first);
-				return 0; // keep going
-			}
-		}
-
-		// it's executable; scan for syscall instructions
-		unsigned char *begin_instr_pos;
-		/* An executable mapping might include some non-instructions 
-		 * that will cause our instruction walker to get misaligned. 
-		 * Instead, we would like to walk the *sections* individually,
-		 * then re-traverse the whole thing. So we mmap the section
-		 * header table. PROBLEM: we can't re-open a file that is
-		 * guaranteed to be the same. */
-		void *base_addr = NULL;
-		const void *next_section_start = vaddr_to_next_instruction_start(
-			(unsigned char *) ent->first, ent->rest[0] ? ent->rest : NULL, &base_addr);
-
-		if (next_section_start)
-		{
-			begin_instr_pos = (unsigned char *) next_section_start;
-		} else begin_instr_pos = (unsigned char *) ent->first;
-		
-		unsigned char *end_instr_pos = (unsigned char *) ent->second;
-		/* What to do about byte sequences that look like syscalls 
-		 * but are "in the middle" of instructions? 
-		 * How do we know where to *start* parsing an instruction stream? 
-		 * 
-		 * For now, we
-		 * - start parsing at the beginning only
-		 * - do fixups
-		 * - then do another pass where we detect remaining syscall-instruction-alikes
-		 * - ... and warn if we see any
-		 * 
-		 * What about ud2-alikes that don't correspond to replaced instructions?
-		 * No problem: we just need to remember which sites we replaced.
-		 * If we hit a ud2 that's not at such a site, we just do ud2.
-		 * FIXME: implement this.
-		 */
-		// char debug_buf[line_end_pos - line_begin_pos + 1];
-		// strncpy(debug_buf, line_begin_pos, line_end_pos - line_begin_pos);
-		// debug_buf[sizeof debug_buf - 1] = '\0';
-		// // assert that line_end_pos 
-		debug_printf(1, "Scanning for syscall instructions within %p-%p (%s)\n",
-			(void*) ent->first, (void*) ent->second, /*debug_buf */ "FIXME: reinstate debug printout");
-		
-		walk_instructions(begin_instr_pos, end_instr_pos, instruction_cb, NULL);
-		/* Now the paranoid second scan: check for in-betweens. */
-		unsigned char *instr_pos = (unsigned char *) ent->first;
-		while (instr_pos != end_instr_pos)
-		{
-			if (is_syscall_instr(instr_pos, end_instr_pos))
-			{
-				debug_printf(0, "Warning: after instrumentation, bytes at %p "
-					"could make a syscall on violation of control flow integrity\n", 
-					instr_pos);
-			}
-			++instr_pos;
-		}
-
-		// restore original perms
-		if (ent->w != 'w')
-		{
-			int ret = raw_mprotect((const void *) ent->first,
-				(const char *) ent->second - (const char *) ent->first,
-				(ent->r == 'r' ? PROT_READ : 0)
-			|   (ent->w == 'w' ? PROT_WRITE : 0)
-			|   (ent->x == 'x' ? PROT_EXEC : 0));
-			assert(ret == 0);
-		}
+		trap_one_executable_region((unsigned char *) ent->first, (unsigned char *) ent->second,
+			 ent->rest[0] ? ent->rest : NULL,
+			ent->w == 'w', ent->r == 'r');
 	}
 	
 	return 0; // keep going
@@ -314,6 +321,9 @@ __attribute__ ((noinline)) static void _handle_sigill_debug_printf(int level, co
 	 va_end(vl);
 }
 
+/* We may or may not have syscall names linked in.
+ * This is just to avoid a dependency on our syscall interface spec.  */
+extern const char *syscall_names[SYSCALL_MAX + 1] __attribute__((weak));
 static void handle_sigill(int n)
 {
 	unsigned long *frame_base = __builtin_frame_address(0);
@@ -333,7 +343,7 @@ static void handle_sigill(int n)
 	assert(syscall_num >= 0);
 	assert(syscall_num < SYSCALL_MAX);
 	_handle_sigill_debug_printf(1, " which we think is syscall %s/%d\n",
-		syscall_names[syscall_num], syscall_num);
+		&syscall_names[0] ? syscall_names[syscall_num] : "(names not linked in)", syscall_num);
 
 	/* FIXME: check whether this syscall creates executable mappings; if so,
 	 * we make them nx, do the rewrite, then make them x. */
