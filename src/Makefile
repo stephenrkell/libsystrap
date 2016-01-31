@@ -164,10 +164,6 @@ comma := ,
 # We don't want user code calling into our exit(), hence having us make its syscalls.
 trap-syscalls.so: LDLIBS := -Bstatic \
 	$(SRCROOT)/libsystrap/libsystrap.a \
-	$(LIBOPDIS_A) \
-	$(LIBOPCODES_A) \
-	$(LIBBFD_A) \
-	$(LIBIBERTY_A) \
 	$(ZLIB_A) \
 	dlmalloc.a \
 	$(LIBC_A) \
