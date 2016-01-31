@@ -178,11 +178,11 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 	}
 
 	// restore original perms
-	if (is_writable)
+	if (!is_writable)
 	{
 		int ret = raw_mprotect(begin, end - begin, 
 			(is_readable ? PROT_READ : 0)
-		|   (is_writable ? PROT_WRITE : 0)
+		|                  PROT_WRITE
 		|                  PROT_EXEC
 		);
 		assert(ret == 0);
