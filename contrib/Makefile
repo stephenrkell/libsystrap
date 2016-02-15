@@ -19,7 +19,7 @@ build: build-opdis build-binutils build-zlib build-eglibc \
 
 EGLIBC_DIR := eglibc-2.19
 EGLIBC_TAR := eglibc-2.19-svnr25243.tar.bz2
-OPDIS_REPO := https://github.com/ojno/opdis.git
+OPDIS_REPO := https://github.com/mkfs/opdis.git
 ZLIB_DIR := zlib-1.2.8
 ZLIB_TAR := zlib-1.2.8.tar.gz
 BINUTILS_DIR := binutils-2.25
@@ -83,7 +83,7 @@ FORCE: ;
 # yes, MAKEINFO=true actually accomplishes that ¬_¬
 binutils-build/Makefile: $(BINUTILS_DIR)/configure
 	mkdir -p binutils-build
-	cd binutils-build && CFLAGS="-g -O2 -fPIC" ../$(BINUTILS_DIR)/$*/configure --prefix=$(CONTRIB) --with-included-gettext --disable-bootstrap --enable-ld --disable-gold --without-x --with-sysroot=$(CONTRIB)
+	cd binutils-build && CFLAGS="-g -O2 -fPIC" ../$(BINUTILS_DIR)/$*/configure --prefix=$(CONTRIB) --without-included-gettext --disable-bootstrap --enable-ld --disable-gold --without-x --with-sysroot=$(CONTRIB)
 
 # gah binutils
 .PHONY: build-binutils
