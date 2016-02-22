@@ -128,6 +128,50 @@ do_syscall3(struct generic_syscall *gsp)
 
 extern inline long int
 __attribute__((always_inline,gnu_inline)) 
+do_syscall4(struct generic_syscall *gsp)
+{
+	long int ret;
+	__asm__ volatile ("movq %[arg0], %%rdi \n\
+			   movq %[arg1], %%rsi \n\
+			   movq %[arg2], %%rdx \n\
+			   movq %[arg3], %%r10 \n"
+			   PERFORM_SYSCALL
+	  : [ret]  "=r" (ret)
+	  : [op]   "rm" ((long int) gsp->syscall_number)
+	  , [arg0] "rm" ((long int) gsp->args[0])
+	  , [arg1] "rm" ((long int) gsp->args[1])
+	  , [arg2] "rm" ((long int) gsp->args[2])
+	  , [arg3] "rm" ((long int) gsp->args[3])
+	  : "r12", SYSCALL_CLOBBER_LIST);
+
+	return ret;
+}
+
+extern inline long int
+__attribute__((always_inline,gnu_inline)) 
+do_syscall5(struct generic_syscall *gsp)
+{
+	long int ret;
+	__asm__ volatile ("movq %[arg0], %%rdi \n\
+			   movq %[arg1], %%rsi \n\
+			   movq %[arg2], %%rdx \n\
+			   movq %[arg3], %%r10 \n\
+			   movq %[arg4], %%r8  \n"
+			   PERFORM_SYSCALL
+	  : [ret]  "=r" (ret)
+	  : [op]   "rm" ((long int) gsp->syscall_number)
+	  , [arg0] "rm" ((long int) gsp->args[0])
+	  , [arg1] "rm" ((long int) gsp->args[1])
+	  , [arg2] "rm" ((long int) gsp->args[2])
+	  , [arg3] "rm" ((long int) gsp->args[3])
+	  , [arg4] "rm" ((long int) gsp->args[4])
+	  : "r12", SYSCALL_CLOBBER_LIST);
+
+	return ret;
+}
+
+extern inline long int
+__attribute__((always_inline,gnu_inline)) 
 do_syscall6(struct generic_syscall *gsp)
 {
 	long int ret;
