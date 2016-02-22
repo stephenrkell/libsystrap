@@ -102,45 +102,31 @@ static void instruction_cb(unsigned char *pos, unsigned len, void *arg)
 	if (is_syscall_instr(pos, pos + len)) replace_syscall(pos, len);
 }
 
-void trap_one_executable_region(unsigned char *begin, unsigned char *end, const char *filename,
+#define ROUND_DOWN_PTR_TO_PAGE(p) ROUND_DOWN_PTR((p), guess_page_size_unsafe())
+#define ROUND_UP_PTR_TO_PAGE(p) ROUND_UP_PTR((p), guess_page_size_unsafe())
+
+void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *end_instr_pos, 
 	_Bool is_writable, _Bool is_readable)
 {
+	const void *begin_page = ROUND_DOWN_PTR_TO_PAGE((const void *) begin_instr_pos);
+	const void *end_page = ROUND_UP_PTR_TO_PAGE((const void *) end_instr_pos);
 	if (!is_writable)
 	{
-		int ret = raw_mprotect((const void *) begin, end - begin, 
+		int ret = raw_mprotect(begin_page, end_page - begin_page,
 			PROT_READ | PROT_WRITE | PROT_EXEC);
 
 		/* If we failed, it might be on the vdso page. */
-		assert(ret == 0 || (intptr_t) begin < 0);
-		if (ret != 0 && (intptr_t) begin < 0)
+		assert(ret == 0 || (intptr_t) begin_page < 0);
+		if (ret != 0 && (intptr_t) begin_page < 0)
 		{
 			/* vdso/vsyscall handling: since we can't rewrite the instructions on these 
 			 * pages, instead we should execute-protect them. Then, when we take a trap, 
 			 * we need to emulate the instructions there. FIXME: implement this. */
 
-			debug_printf(1, "Couldn't rewrite nor protect vdso mapping at %p\n", begin);
+			debug_printf(1, "Couldn't rewrite nor protect vdso mapping at %p\n", begin_page);
 			return;
 		}
 	}
-
-	// it's executable; scan for syscall instructions
-	unsigned char *begin_instr_pos;
-	/* An executable mapping might include some non-instructions 
-	 * that will cause our instruction walker to get misaligned. 
-	 * Instead, we would like to walk the *sections* individually,
-	 * then re-traverse the whole thing. So we mmap the section
-	 * header table. PROBLEM: we can't re-open a file that is
-	 * guaranteed to be the same. */
-	void *base_addr = NULL;
-	const void *next_section_start = vaddr_to_next_instruction_start(
-		begin, filename, &base_addr);
-
-	if (next_section_start)
-	{
-		begin_instr_pos = (unsigned char *) next_section_start;
-	} else begin_instr_pos = begin;
-
-	unsigned char *end_instr_pos = (unsigned char *) end;
 	/* What to do about byte sequences that look like syscalls 
 	 * but are "in the middle" of instructions? 
 	 * How do we know where to *start* parsing an instruction stream? 
@@ -161,12 +147,12 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 	// debug_buf[sizeof debug_buf - 1] = '\0';
 	// // assert that line_end_pos 
 	debug_printf(1, "Scanning for syscall instructions within %p-%p (%s)\n",
-		begin, end, /*debug_buf */ "FIXME: reinstate debug printout");
+		begin_instr_pos, end_instr_pos, /*debug_buf */ "FIXME: reinstate debug printout");
 
 	walk_instructions(begin_instr_pos, end_instr_pos, instruction_cb, NULL);
 	/* Now the paranoid second scan: check for in-betweens. */
-	unsigned char *instr_pos = begin; // start from the real beginning
-	while (instr_pos != end)
+	unsigned char *instr_pos = (unsigned char *) begin_page; // start from the real beginning
+	while (instr_pos != end_page)
 	{
 		if (is_syscall_instr(instr_pos, end_instr_pos))
 		{
@@ -180,7 +166,7 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 	// restore original perms
 	if (!is_writable)
 	{
-		int ret = raw_mprotect(begin, end - begin, 
+		int ret = raw_mprotect(begin_page, end_page - begin_page, 
 			(is_readable ? PROT_READ : 0)
 		|                  PROT_WRITE
 		|                  PROT_EXEC
@@ -188,6 +174,31 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 		assert(ret == 0);
 	}
 	
+}
+
+void trap_one_executable_region(unsigned char *begin, unsigned char *end, const char *filename,
+	_Bool is_writable, _Bool is_readable)
+{
+	// it's executable; scan for syscall instructions
+	unsigned char *begin_instr_pos;
+	/* An executable mapping might include some non-instructions 
+	 * that will cause our instruction walker to get misaligned. 
+	 * Instead, we would like to walk the *sections* individually,
+	 * then re-traverse the whole thing. So we mmap the section
+	 * header table. PROBLEM: we can't re-open a file that is
+	 * guaranteed to be the same. */
+	void *base_addr = NULL;
+	const void *next_section_start = vaddr_to_next_instruction_start(
+		begin, filename, &base_addr);
+
+	if (next_section_start)
+	{
+		begin_instr_pos = (unsigned char *) next_section_start;
+	} else begin_instr_pos = begin;
+
+	unsigned char *end_instr_pos = (unsigned char *) end;
+	
+	trap_one_instruction_range(begin_instr_pos, end_instr_pos, is_writable, is_readable);
 }
 
 static int process_mapping_cb(struct proc_entry *ent, char *linebuf, size_t bufsz, void *arg)
