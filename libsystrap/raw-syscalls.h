@@ -4,7 +4,21 @@
 #include <unistd.h>
 #include <asm-generic/stat.h>
 #include <sys/syscall.h>
+
+#define timezone __asm_timezone
+#define timespec __asm_timespec
+#define timeval __asm_timeval
+#define itimerval __asm_itimerval
+#define itimerspec __asm_itimerspec
+#define sigset_t __asm_sigset_t
 #include <asm/signal.h>
+#undef timezone
+#undef timespec
+#undef timeval
+#undef itimerval
+#undef itimerspec
+#undef sigset_t
+
 #include <asm/fcntl.h>
 #include <sys/mman.h>
 #include <stdint.h>
@@ -32,8 +46,10 @@
 
 #define stringify(cond) #cond
 
+#ifndef assert
 #define assert(cond) \
 	do { ((cond) ? ((void) 0) : (__assert_fail("Assertion failed: \"" stringify((cond)) "\"", __FILE__, __LINE__, __func__ ))); }  while (0)
+#endif
 
 #define write_string(s) raw_write(2, (s), sizeof (s) - 1)
 #define write_chars(s, t)  raw_write(2, s, t - s)
