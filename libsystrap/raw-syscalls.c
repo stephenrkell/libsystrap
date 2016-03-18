@@ -66,8 +66,8 @@ int __attribute__((noinline)) raw_stat(char *filename, struct stat *buf) {
 	 return ret;
 }
 
-int __attribute__((noinline)) raw_nanosleep(struct timespec *req,
-			struct timespec *rem)
+int __attribute__((noinline)) raw_nanosleep(struct __asm_timespec *req,
+			struct __asm_timespec *rem)
 {
 	long int ret;
 	long int op = SYS_nanosleep;
@@ -217,7 +217,7 @@ int __attribute__((noinline)) raw_rt_sigaction(int signum, const struct sigactio
 {
 	long int ret;
 	long int op = SYS_rt_sigaction;
-	size_t sigsetsize = sizeof (sigset_t);
+	size_t sigsetsize = sizeof (__asm_sigset_t);
 	__asm__ volatile ("movq %1, %%rdi      # \n\
 			   movq %2, %%rsi      # \n\
 			   movq %3, %%rdx      # \n\

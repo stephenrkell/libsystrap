@@ -249,7 +249,7 @@ static void __attribute__((constructor)) startup(void)
 	char *sleep_for_seconds_str = getenv("TRAP_SYSCALLS_SLEEP_FOR_SECONDS");
 	char *stop_self_str = getenv("TRAP_SYSCALLS_STOP_SELF");
 	stop_self = (stop_self_str != NULL);
-	struct timespec one_second = { /* seconds */ 1, /* nanoseconds */ 0 };
+	struct __asm_timespec one_second = { /* seconds */ 1, /* nanoseconds */ 0 };
 	if (debug_level_str) debug_level = atoi(debug_level_str);
 	if (sleep_for_seconds_str) sleep_for_seconds = atoi(sleep_for_seconds_str);
 	debug_printf(0, "Debug level is %s=%d.\n", debug_level_str, debug_level);

@@ -61,8 +61,8 @@ void raw_exit(int status) __attribute__((noreturn));
 int raw_open(const char *pathname, int flags) __attribute__((noinline));
 int raw_fstat(int fd, struct stat *buf) __attribute__((noinline));
 int raw_stat(char *filename, struct stat *buf) __attribute__((noinline));
-int raw_nanosleep(struct timespec *req,
-		struct timespec *rem) __attribute__((noinline));
+int raw_nanosleep(struct __asm_timespec *req,
+		struct __asm_timespec *rem) __attribute__((noinline));
 int raw_getpid(void) __attribute__((noinline));
 int raw_kill(__kernel_pid_t pid, int sig) __attribute__((noinline));
 int raw_read(int fd, void *buf, size_t count) __attribute__((noinline));
