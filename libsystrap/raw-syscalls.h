@@ -2,7 +2,6 @@
 #define RAW_SYSCALLS_H__
 
 #include <unistd.h>
-#include <asm-generic/stat.h>
 #include <sys/syscall.h>
 
 #define timezone __asm_timezone
@@ -11,6 +10,7 @@
 #define itimerval __asm_itimerval
 #define itimerspec __asm_itimerspec
 #define sigset_t __asm_sigset_t
+#include <asm-generic/stat.h>
 #include <asm/signal.h>
 #undef timezone
 #undef timespec
@@ -18,6 +18,13 @@
 #undef itimerval
 #undef itimerspec
 #undef sigset_t
+
+/* HACK: define the timespec struct, the way the kernel defines it.
+ * We need this in raw_nanosleep.  */
+//struct __asm_timespec {
+//	__kernel_time_t tv_sec;
+//	long            tv_nsec;
+//};
 
 #include <asm/fcntl.h>
 #include <sys/mman.h>

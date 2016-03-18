@@ -25,14 +25,13 @@
  * with some libc headers, particularly typedefs related to signal
  * handling. We use inline assembly to make the few system calls
  * that we need. */
-#include <unistd.h>
-#include <asm/signal.h>
+#include "raw-syscalls.h"
+#define sigset_t __asm_sigset_t
 #include <asm/fcntl.h>
 #include <sys/mman.h>
 #include <stdint.h>
 #include <string.h>
 #include <stdarg.h>
-#include "raw-syscalls.h"
 #include "systrap_private.h"
 #include "do-syscall.h"
 #include "elfutil.h"
