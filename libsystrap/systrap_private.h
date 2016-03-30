@@ -1,13 +1,17 @@
 #ifndef SYSTRAP_PRIVATE_H_
 #define SYSTRAP_PRIVATE_H_
 
-extern void *stderr;
 extern int debug_level __attribute__((visibility("hidden")));
 extern int sleep_for_seconds __attribute__((visibility("hidden")));
 extern int stop_self __attribute__((visibility("hidden")));
 extern int self_pid __attribute__((visibility("hidden")));
-extern void *stderr;
-extern void **p_err_stream;
+
+#ifdef SYSTRAP_DEFINE_FILE
+struct _IO_FILE;
+typedef struct _IO_FILE FILE;
+#endif
+extern FILE *stderr;
+extern FILE **p_err_stream;
 
 extern char *getenv (const char *__name) __THROW __nonnull ((1)) __wur;
 extern int atoi (const char *__nptr)
@@ -16,10 +20,10 @@ extern int atoi (const char *__nptr)
 void *calloc(size_t, size_t);
 void free(void*);
 /* avoid stdio because of sigset_t conflict */
-void *fdopen(int fd, const char *mode);
-int fprintf(void *stream, const char *format, ...);
-int vfprintf(void *stream, const char *format, va_list args);
-int fflush(void *stream);
+FILE *fdopen(int fd, const char *mode);
+int fprintf(FILE *stream, const char *format, ...);
+int vfprintf(FILE *stream, const char *format, va_list args);
+int fflush(FILE *stream);
 
 #define debug_printf(lvl, fmt, ...) do { \
     if ((lvl) <= debug_level) { \

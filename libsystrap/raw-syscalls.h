@@ -1,8 +1,7 @@
 #ifndef RAW_SYSCALLS_H__
 #define RAW_SYSCALLS_H__
 
-#include <unistd.h>
-#include <sys/syscall.h>
+#include <sys/types.h>
 
 #define timezone __asm_timezone
 #define timespec __asm_timespec
@@ -10,24 +9,26 @@
 #define itimerval __asm_itimerval
 #define itimerspec __asm_itimerspec
 #define sigset_t __asm_sigset_t
-#include <asm-generic/stat.h>
 #include <asm/signal.h>
+#include <asm/sigcontext.h>
+#include <asm/siginfo.h>
+#include <asm/ucontext.h>
+#include <asm/types.h>
+#include <asm/posix_types.h>
+#include <asm-generic/stat.h>
 #undef timezone
 #undef timespec
 #undef timeval
 #undef itimerval
 #undef itimerspec
 #undef sigset_t
-
-/* HACK: define the timespec struct, the way the kernel defines it.
- * We need this in raw_nanosleep.  */
-//struct __asm_timespec {
-//	__kernel_time_t tv_sec;
-//	long            tv_nsec;
-//};
+/* sys/time.h (which later code wants to include)
+ * conflicts with linux/time.h, which asm/signal.h includes :-( */
+#undef ITIMER_REAL
+#undef ITIMER_VIRTUAL
+#undef ITIMER_PROF
 
 #include <asm/fcntl.h>
-#include <sys/mman.h>
 #include <stdint.h>
 
 /* Our callee-save registers are

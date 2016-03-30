@@ -155,7 +155,7 @@ void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *e
 	{
 		if (is_syscall_instr(instr_pos, end_instr_pos))
 		{
-			debug_printf(0, "Warning: after instrumentation, bytes at %p "
+			debug_printf(1, "Warning: after instrumentation, bytes at %p "
 				"could make a syscall on violation of control flow integrity\n", 
 				instr_pos);
 		}
@@ -251,18 +251,18 @@ static void __attribute__((constructor)) startup(void)
 	struct __asm_timespec one_second = { /* seconds */ 1, /* nanoseconds */ 0 };
 	if (debug_level_str) debug_level = atoi(debug_level_str);
 	if (sleep_for_seconds_str) sleep_for_seconds = atoi(sleep_for_seconds_str);
-	debug_printf(0, "Debug level is %s=%d.\n", debug_level_str, debug_level);
+	debug_printf(1, "Debug level is %s=%d.\n", debug_level_str, debug_level);
 	if (stop_self) {
 		self_pid = raw_getpid();
-		debug_printf(0, "TRAP_SYSCALLS_STOP_SELF is set, sending SIGSTOP to self (pid %d)\n", self_pid);
+		debug_printf(1, "TRAP_SYSCALLS_STOP_SELF is set, sending SIGSTOP to self (pid %d)\n", self_pid);
 		raw_kill(self_pid, SIGSTOP);
 	}
-	debug_printf(0, "TRAP_SYSCALLS_SLEEP_FOR_SECONDS is %s, pausing for %d seconds", sleep_for_seconds_str, sleep_for_seconds);
+	debug_printf(1, "TRAP_SYSCALLS_SLEEP_FOR_SECONDS is %s, pausing for %d seconds", sleep_for_seconds_str, sleep_for_seconds);
 	for (int i = 0; i < sleep_for_seconds; i++) {
 		raw_nanosleep(&one_second, NULL);
-		debug_printf(0, ".");
+		debug_printf(1, ".");
 	}
-	debug_printf(0, "\n");
+	debug_printf(1, "\n");
 
 	//trap_all_mappings();
 	// install_sigill_handler();

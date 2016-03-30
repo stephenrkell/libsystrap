@@ -1,29 +1,22 @@
 #ifndef DO_SYSCALL_H_
 #define DO_SYSCALL_H_
 
+#include "raw-syscalls.h" /* always include raw-syscalls first, and let it do the asm includes */
+
 #include <stddef.h>
-#include <asm/types.h>
-#include <asm/posix_types.h>
 #include <unistd.h>
 #include <stdint.h>
-#include <asm/signal.h>
-#include <asm/sigcontext.h>
-#include <asm/siginfo.h>
-#include <asm/ucontext.h>
 #include <alloca.h>
 #include <string.h>
 #include <sys/syscall.h>
 #include <stdarg.h>
 
 extern int debug_level;
-extern void **p_err_stream;
 
 #include "systrap.h"
 #include "systrap_private.h"
-#include "raw-syscalls.h"
 #include "instr.h"
 
-extern void *stderr;
 extern uintptr_t our_load_address;
 
 /* In kernel-speak this is a "struct sigframe" / "struct rt_sigframe" --
