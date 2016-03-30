@@ -16,6 +16,9 @@
 			  "UNFIX_STACK_ALIGNMENT " \n" \
 	  : /* no output*/ : "rm"(retcode), "rm"(op) : "r12", SYSCALL_CLOBBER_LIST);
 
+#include <stdlib.h>
+#include <sys/syscall.h>
+
 void (__attribute__((noreturn)) raw_exit)(int status)
 {
 	long int op;

@@ -13,6 +13,7 @@ $(CONTRIB)/config.mk:
 include $(CONFIG)
 
 CFLAGS += -DRELF_DEFINE_STRUCTURES
+CFLAGS += -DSYSTRAP_DEFINE_FILE
 
 ifeq ($(LIBALLOCS_DIR),)
 $(error Please install the liballocs source tree and set LIBALLOCS_DIR)

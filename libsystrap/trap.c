@@ -238,7 +238,7 @@ int debug_level __attribute__((visibility("hidden")));
 int sleep_for_seconds __attribute__((visibility("hidden")));
 int stop_self __attribute__((visibility("hidden")));
 int self_pid __attribute__((visibility("hidden")));
-void **p_err_stream __attribute__((visibility("hidden"))) = &stderr;
+FILE **p_err_stream __attribute__((visibility("hidden"))) = &stderr;
 
 /* We initialize our error-reporting stuff, but don't actually 
  * set up any traps. That's left to the client. */
