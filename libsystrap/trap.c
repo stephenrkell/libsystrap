@@ -180,6 +180,7 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 {
 	// it's executable; scan for syscall instructions
 	unsigned char *begin_instr_pos;
+	unsigned char *end_instr_pos;
 	/* An executable mapping might include some non-instructions 
 	 * that will cause our instruction walker to get misaligned. 
 	 * Instead, we would like to walk the *sections* individually,
@@ -187,15 +188,20 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 	 * header table. PROBLEM: we can't re-open a file that is
 	 * guaranteed to be the same. */
 	void *base_addr = NULL;
-	const void *next_section_start = vaddr_to_next_instruction_start(
-		begin, filename, &base_addr);
+	const void *first_section_start = vaddr_to_nearest_instruction(
+		begin, filename, 0, &base_addr);
+	const void *last_section_end = vaddr_to_nearest_instruction(
+		end, filename, 1, &base_addr);
 
-	if (next_section_start)
+	if (first_section_start)
 	{
-		begin_instr_pos = (unsigned char *) next_section_start;
-	} else begin_instr_pos = begin;
+		begin_instr_pos = (unsigned char *) first_section_start;
+	} else begin_instr_pos = (unsigned char *) begin;
 
-	unsigned char *end_instr_pos = (unsigned char *) end;
+	if (last_section_end)
+	{
+		end_instr_pos = (unsigned char *) last_section_end;
+	} else end_instr_pos = (unsigned char *) end;
 	
 	trap_one_instruction_range(begin_instr_pos, end_instr_pos, is_writable, is_readable);
 }

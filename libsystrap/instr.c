@@ -1,6 +1,7 @@
 #include "instr.h" /* our API -- in C */
 #include <assert.h>
 #include <string.h>
+#include "x86_defs.h"
 
 /* 
 #include <memory>
@@ -161,14 +162,44 @@ static opdis_insn_t *get_opdis_insn(unsigned char *ins, unsigned char *end)
 	}
 	return cur_insn;
 }
+static __thread struct cpu_user_regs regs = {
+};
+static __thread struct x86_emulate_ctxt ctxt = {
+	.addr_size = 64,
+	.sp_size = 64
+};
+static int insn_fetch(
+        enum x86_segment seg,
+        unsigned long offset,
+        void *p_data,
+        unsigned int bytes,
+        struct x86_emulate_ctxt *ctxt)
+{
+	memcpy(p_data, (void*) offset, bytes);
+	return X86EMUL_OKAY;
+}
+
+static struct x86_emulate_ops ops = {
+	.insn_fetch = insn_fetch
+};
 
 unsigned long
 __attribute__((visibility("protected")))
 instr_len(unsigned const char *ins, unsigned const char *end)
 {
 	get_opdis_insn((unsigned char *) ins, (unsigned char *) end);
-	
-	return cur_insn_len;
+	unsigned long opdis_len = cur_insn_len;
+	if (!ctxt.regs) ctxt.regs = &regs;
+	ctxt.regs->rip = (uintptr_t) ins;
+	int x86_decode_len = x86_decode(&ctxt, &ops);
+	int x86_decode_err = (x86_decode_len > 0) ? 0 : -x86_decode_len;
+	if (x86_decode_len < 1) x86_decode_len = 1; // squash errors and try next byte
+	if (opdis_len != x86_decode_len)
+	{
+		warnx("opdis and x86_decode disagree on length of instruction at %p (%d versus %d; err %d)",
+			ins, (int) opdis_len, (int) x86_decode_len, (int) x86_decode_err);
+	}
+	return x86_decode_len;
 }
 
 int is_syscall_instr(unsigned const char *ins, unsigned const char *end)

@@ -56,6 +56,9 @@ ifneq ($(MAKECMDGOALS),clean)
 -include $(DEPS)
 endif
 
+x86_decode.o: CFLAGS += -include x86_defs.h -include stdio.h 
+x86_decode.o instr.o: CFLAGS += -std=gnu11
+
 # Also extract 	$(LIBOPDIS_A), $(LIBOPCODES_A), $(LIBBFD_A) and $(LIBIBERTY_A),
 # and re-add their members to our archive.  This allows clients to link to us
 # without concern for these dependencies, which they probably don't have

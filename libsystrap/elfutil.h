@@ -37,7 +37,7 @@ const ElfW(Phdr) *vaddr_to_load_phdr(unsigned char *begin_addr, const char *fnam
 const ElfW(Ehdr) *vaddr_to_ehdr(unsigned char *begin_addr, const char *fname, void **out_base_addr)
 		__attribute__((visibility("protected")));
 
-const void *vaddr_to_next_instruction_start(unsigned char *begin_addr, const char *fname, void **out_base_addr);
+const void *vaddr_to_nearest_instruction(unsigned char *begin_addr, const char *fname, _Bool backwards, void **out_base_addr);
 
 extern inline uintptr_t __attribute__((always_inline,gnu_inline))
 page_boundary_up(uintptr_t addr)
