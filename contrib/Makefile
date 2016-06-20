@@ -19,18 +19,20 @@ build: build-opdis build-binutils build-zlib build-eglibc \
 
 EGLIBC_DIR := eglibc-2.19
 EGLIBC_TAR := eglibc-2.19-svnr25243.tar.bz2
+EGLIBC_TAR_URL := http://downloads.yoctoproject.org/releases/eglibc/eglibc-2.19-svnr25243.tar.bz2
 OPDIS_REPO := https://github.com/mkfs/opdis.git
 ZLIB_DIR := zlib-1.2.8
 ZLIB_TAR := zlib-1.2.8.tar.gz
-BINUTILS_DIR := binutils-2.25
-BINUTILS_TAR := binutils-2.25.tar.gz
-DOWNLOAD_BASE := https://ojno.github.io/trap-syscalls-deps
+ZLIB_TAR_URL := http://zlib.net/zlib-1.2.8.tar.gz
+BINUTILS_DIR := binutils-2.26
+BINUTILS_TAR := binutils-2.26.tar.bz2
+BINUTILS_TAR_URL := ftp://ftp.gnu.org/gnu/binutils/binutils-2.26.tar.bz2
 DOWNLOAD := wget
 
 # ----------------------------------------------
 
 $(EGLIBC_TAR):
-	$(DOWNLOAD) $(DOWNLOAD_BASE)/$(EGLIBC_TAR)
+	$(DOWNLOAD) http://downloads.yoctoproject.org/releases/eglibc/$(EGLIBC_TAR)
 $(EGLIBC_DIR)/libc/configure: $(EGLIBC_TAR)
 	tar -k -xvjf "$<"
 	touch "$@"
@@ -43,7 +45,7 @@ build-eglibc: $(EGLIBC_DIR)/libc/build/Makefile
 	CFLAGS="-g -O1 -fPIC -DPIC" CPPFLAGS="" $(MAKE) -C $(EGLIBC_DIR)/libc/build
 
 $(ZLIB_TAR):
-	$(DOWNLOAD) $(DOWNLOAD_BASE)/$(ZLIB_TAR)
+	$(DOWNLOAD) $(ZLIB_TAR_URL)
 $(ZLIB_DIR)/configure: $(ZLIB_TAR)
 	tar -k -xvzf "$<"
 	touch "$@"
@@ -59,15 +61,15 @@ opdis/configure: opdis/bootstrap
 	cd opdis && ./bootstrap
 opdis-build/Makefile: opdis/configure | build-binutils
 	mkdir -p opdis-build
-	cd opdis-build && CPPFLAGS="-I$(CONTRIB)/binutils-2.25/include -I$(CONTRIB)/binutils-build/bfd" CFLAGS="-fPIC -g -I$(CONTRIB)/binutils-2.25/include -I$(CONTRIB)/binutils-build/bfd" LDFLAGS="-L$(CONTRIB)/binutils-build/libiberty -L$(CONTRIB)/binutils-build/bfd -L$(CONTRIB)/binutils-build/intl -L$(CONTRIB)/binutils-build/opcodes" ../opdis/configure
+	cd opdis-build && CPPFLAGS="-I$(CONTRIB)/binutils-2.26/include -I$(CONTRIB)/binutils-build/bfd" CFLAGS="-fPIC -g -I$(CONTRIB)/binutils-2.26/include -I$(CONTRIB)/binutils-build/bfd" LDFLAGS="-L$(CONTRIB)/binutils-build/libiberty -L$(CONTRIB)/binutils-build/bfd -L$(CONTRIB)/binutils-build/intl -L$(CONTRIB)/binutils-build/opcodes" ../opdis/configure
 .PHONY: build-opdis
 build-opdis: opdis-build/Makefile
 	$(MAKE) -C opdis-build
 
 $(BINUTILS_TAR): 
-	$(DOWNLOAD) $(DOWNLOAD_BASE)/$(BINUTILS_TAR)
+	$(DOWNLOAD) $(BINUTILS_TAR_URL)
 $(BINUTILS_DIR)/configure: $(BINUTILS_TAR)
-	tar -k -xvzf "$(BINUTILS_TAR)"
+	tar -k -xjf "$(BINUTILS_TAR)"
 	touch "$@"
 
 #binutils-build/Makefile: $(BINUTILS_DIR)/configure
@@ -120,7 +122,7 @@ RTLD_OBJ_DIR := $$(LIBC_DIR)/elf\n\
 RTLD_SO := $$(RTLD_OBJ_DIR)/ld.so\n\
 RTLD_LIBC_A := $$(RTLD_OBJ_DIR)/rtld-libc.a\n\
 LIBOPDIS_A := $$(CONTRIB)/opdis-build/dist/.libs/libopdis.a \n\
-LIBOPCODES_DIR := $$(CONTRIB)/binutils-2.25 \n\
+LIBOPCODES_DIR := $$(CONTRIB)/binutils-2.26 \n\
 BFD_DIR := $$(CONTRIB)/binutils-build/bfd \n\
 LIBOPCODES_A := $$(CONTRIB)/binutils-build/opcodes/libopcodes.a \n\
 LIBBFD_A := $$(CONTRIB)/binutils-build/bfd/libbfd.a \n\
