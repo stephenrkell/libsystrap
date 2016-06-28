@@ -205,9 +205,9 @@ static uint8_t twobyte_table[256] = {
     /* 0x50 - 0x5F */
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     /* 0x60 - 0x6F */
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ImplicitOps|ModRM,
+    DstReg|SrcMem|ModRM, DstReg|SrcMem|ModRM, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, DstReg|SrcMem|ModRM|Mov, ImplicitOps|ModRM,
     /* 0x70 - 0x7F */
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ImplicitOps|ModRM,
+    DstReg|ModRM|SrcImmByte, 0, 0, 0, DstReg|SrcMem|ModRM, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ImplicitOps|ModRM,
     /* 0x80 - 0x87 */
     ImplicitOps, ImplicitOps, ImplicitOps, ImplicitOps,
     ImplicitOps, ImplicitOps, ImplicitOps, ImplicitOps,
@@ -247,12 +247,22 @@ static uint8_t twobyte_table[256] = {
     /* 0xC8 - 0xCF */
     ImplicitOps, ImplicitOps, ImplicitOps, ImplicitOps,
     ImplicitOps, ImplicitOps, ImplicitOps, ImplicitOps,
-    /* 0xD0 - 0xDF */
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    /* 0xD0 - 0xD7 */
+    0, 0, 0, 0, 0, 0, 0, DstReg|SrcReg|ModRM|Mov,
+    /* 0xD8 - 0xDF */
+    0, 0, SrcMem|DstReg|ModRM, 0, 0, 0, DstReg|SrcMem|ModRM, 0,
     /* 0xE0 - 0xEF */
-    0, 0, 0, 0, 0, 0, 0, ImplicitOps|ModRM, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, ImplicitOps|ModRM, 0, 0, 0, DstReg|SrcMem|ModRM, 0, 0, 0, DstReg|SrcMem|ModRM,
     /* 0xF0 - 0xFF */
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+};
+
+static uint8_t threebyte_table_38[256] = {
+    [0x29] = SrcReg|DstReg|ModRM
+};
+
+static uint8_t threebyte_table_3a[256] = {
+
 };
 
 #define REX_PREFIX 0x40
@@ -587,7 +597,7 @@ x86_decode(
     /* Shadow copy of register state. Committed on successful emulation. */
     struct cpu_user_regs _regs = *ctxt->regs;
 
-    uint8_t b, d, sib, sib_index, sib_base, twobyte = 0, rex_prefix = 0;
+    uint8_t b, d, sib, sib_index, sib_base, twobyte = 0, threebyte = 0, rex_prefix = 0;
     uint8_t modrm = 0, modrm_mod = 0, modrm_reg = 0, modrm_rm = 0;
     union vex vex = {};
     unsigned int op_bytes, def_op_bytes, ad_bytes, def_ad_bytes;
@@ -676,7 +686,7 @@ x86_decode(
     d = opcode_table[b];
     if ( d == 0 )
     {
-        /* Two-byte opcode? */
+        /* Two-byte opcode? FIXME: could also be three-byte, even though not VEX-prefixed? */
         if ( b == 0x0f )
         {
             twobyte = 1;
@@ -716,17 +726,17 @@ x86_decode(
                 generate_exception_if(rex_prefix || vex.pfx, EXC_UD, -1);
 
                 vex.raw[0] = modrm;
-                if ( b & 1 )
+                if ( b & 1 ) // 0xc5, a.k.a. two-byte VEX
                 {
-                    vex.raw[1] = modrm;
+                    vex.raw[1] = modrm; // init then modify
                     vex.opcx = vex_0f;
                     vex.x = 1;
                     vex.b = 1;
                     vex.w = 0;
                 }
-                else
+                else // 0xc4, a.k.a. three-byte VEX
                 {
-                    vex.raw[1] = insn_fetch_type(uint8_t);
+                    vex.raw[1] = insn_fetch_type(uint8_t); // we've now fetched *three* bytes: 0xc[45], modrm/vex[0], and vex[1]
                     if ( mode_64bit() )
                     {
                         if ( !vex.b )
@@ -743,15 +753,107 @@ x86_decode(
                 if ( mode_64bit() && !vex.r )
                     rex_prefix |= REX_R;
 
-                fail_if(vex.opcx != vex_0f);
-                twobyte = 1;
-                b = insn_fetch_type(uint8_t);
+                /* currently:
+                 * 'b' has the first byte, 0xc[45]
+                 * 'modrm' has the second physical byte
+                 * 'vex.raw[1]' may have the third physical byte, if we're three-byte-VEX.
+                 *
+                 * We haven't read the opcode yet!
+                 * BUT we know that it begins 0f,
+                 *      and we may know that it begins 0f 38 or 0f 3a.
+                 * We want to proceed with using 'b' to index the twobyte table.
+                 * So we need to set 'b' to the byte that comes after '0f'. */
+                switch (vex.opcx)
+                {
+                    case vex_0f:
+                        b = insn_fetch_type(uint8_t);
+                        goto vex_supplied_after_0f;
+                    case vex_0f38:
+                        b = threebyte = 0x38;
+                        goto vex_supplied_after_0f;
+                    case vex_0f3a:
+                        b = threebyte = 0x3a;
+                        goto vex_supplied_after_0f;
+                    default: fail_if(1);
+                }
+                /* Don't fail on 38 and 3a.
+                 * Here's what qemu does.
+                 
+                  -- remember the 3byte; it's either 3a, 38 or (plain 0f case) the actual next by
+                  
+                  -- look up properties of the 3byte (need_modrm, ...)
+                          in the *twobyte* table,
+                          i.e. for instructions 0f xx ..., we look up xx
+                  -- some of them say IS_3BYTE_OPCODE; if so, we fetch the actual third byte, "op
+                          and look up the same properties in two separate tables:
+                             one for the "38" three-byte opcodes,
+                             one for the "3a" three-byte opcodes.
+                          
+   if (prefixes & PREFIX_VEX_0F)
+    {
+      used_prefixes |= PREFIX_VEX_0F | PREFIX_VEX_0F38 | PREFIX_VEX_0F3A;
+      if (prefixes & PREFIX_VEX_0F38)
+        threebyte = 0x38;
+      else if (prefixes & PREFIX_VEX_0F3A)
+        threebyte = 0x3a;
+      else
+        threebyte = *codep++;
+      goto vex_opcode;
+    }
+  if (*codep == 0x0f)
+    {
+      fetch_data(info, codep + 2);
+      threebyte = codep[1];
+      codep += 2;
+    vex_opcode:
+      dp = &dis386_twobyte[threebyte];
+      need_modrm = twobyte_has_modrm[threebyte];
+      uses_DATA_prefix = twobyte_uses_DATA_prefix[threebyte];
+      uses_REPNZ_prefix = twobyte_uses_REPNZ_prefix[threebyte];
+      uses_REPZ_prefix = twobyte_uses_REPZ_prefix[threebyte];
+      uses_LOCK_prefix = (threebyte & ~0x02) == 0x20;
+      if (dp->name == NULL && dp->op[0].bytemode == IS_3BYTE_OPCODE)
+   {
+          fetch_data(info, codep + 2);
+     op = *codep++;
+     switch (threebyte)
+       {
+       case 0x38:
+         uses_DATA_prefix = threebyte_0x38_uses_DATA_prefix[op];
+         uses_REPNZ_prefix = threebyte_0x38_uses_REPNZ_prefix[op];
+         uses_REPZ_prefix = threebyte_0x38_uses_REPZ_prefix[op];
+         break;
+       case 0x3a:
+         uses_DATA_prefix = threebyte_0x3a_uses_DATA_prefix[op];
+         uses_REPNZ_prefix = threebyte_0x3a_uses_REPNZ_prefix[op];
+         uses_REPZ_prefix = threebyte_0x3a_uses_REPZ_prefix[op];
+         break;
+       default:
+         break;
+       }
+   }
+    }
+  else
+    {
+                 */
+                
+                /* we're definitely a two- or three-byte insn here */
+            vex_supplied_after_0f:
                 d = twobyte_table[b];
 
                 /* Unrecognised? */
                 if ( d == 0 )
-                    goto cannot_emulate;
-
+                {
+                    if (threebyte == 0x38 || threebyte == 0x3a)
+                    {
+                        b = insn_fetch_type(uint8_t);
+                        d = (threebyte == 0x38 ? threebyte_table_38 : threebyte_table_3a)[b];
+                    }
+                    
+                    if (d == 0) goto cannot_emulate;
+                }
+                else twobyte = 1;
+                /* Now we're past the opcode and can fetch the actual modrm byte. */
                 modrm = insn_fetch_type(uint8_t);
                 modrm_mod = (modrm & 0xc0) >> 6;
 
@@ -835,7 +937,7 @@ x86_decode(
                 {
                     ea.mem.seg  = x86_seg_ss;
                     ea.mem.off += _regs.esp;
-                    if ( !twobyte && (b == 0x8f) )
+                    if ( !twobyte && !threebyte && (b == 0x8f) )
                         /* POP <rm> computes its EA post increment. */
                         ea.mem.off += ((mode_64bit() && (op_bytes == 4))
                                        ? 8 : op_bytes);
@@ -870,7 +972,7 @@ x86_decode(
                         ((op_bytes == 8) ? 4 : op_bytes);
                 else if ( (d & SrcMask) == SrcImmByte )
                     ea.mem.off += 1;
-                else if ( !twobyte && ((b & 0xfe) == 0xf6) &&
+                else if ( !twobyte && !threebyte && ((b & 0xfe) == 0xf6) &&
                           ((modrm_reg & 7) <= 1) )
                     /* Special case in Grp3: test has immediate operand. */
                     ea.mem.off += (d & ByteOp) ? 1
@@ -894,7 +996,7 @@ x86_decode(
         ea.mem.seg = override_seg;
 
     /* Early operand adjustments. */
-    if ( !twobyte )
+    if ( !twobyte && !threebyte )
         switch ( b )
         {
         case 0xf6 ... 0xf7: /* Grp3 */
@@ -1087,6 +1189,13 @@ x86_decode(
 
     if ( twobyte )
         goto twobyte_insn;
+
+    if ( threebyte == 0x38 )
+        goto threebyte_insn_38;
+
+    if ( threebyte == 0x3a )
+        goto threebyte_insn_3a;
+
 
     // fetch mostly finished here...
 
@@ -1397,6 +1506,23 @@ x86_decode(
 //         _regs.eflags |= even_parity(dst.val) ? EFLG_PF : 0;
         break;
     }
+    }
+    goto report;
+
+ threebyte_insn_38:
+    switch (b)
+    {
+        case 0x29:
+            goto report;
+            
+        default: goto cannot_emulate;
+    }
+    goto report;
+
+ threebyte_insn_3a:
+    switch (b)
+    {
+        default: goto report;
     }
     goto report;
 
