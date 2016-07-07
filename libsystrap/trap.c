@@ -1,13 +1,13 @@
 /*
- * trap-syscalls.c
+ * trap.c
  *
- * This is the mechanism that reads the code to be run, and replace
+ * This is the mechanism that reads the code to be run, and replaces
  * system call instructions with traps to gain control of the execution
  * flow.
  */
 
-/* Basic idea: we are a preloaded library whose constructor
- * - write-protects all executable pages
+/* Basic idea:
+ * - write-protect all executable pages
  *     -- using /proc/self/maps to enumerate them?
  *	YES, but must read using raw syscalls.
  *
@@ -32,6 +32,8 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdarg.h>
+#include <alloca.h>
+#include <err.h>
 #include "systrap_private.h"
 #include "do-syscall.h"
 #include "elfutil.h"
@@ -109,10 +111,27 @@ void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *e
 {
 	const void *begin_page = ROUND_DOWN_PTR_TO_PAGE((const void *) begin_instr_pos);
 	const void *end_page = ROUND_UP_PTR_TO_PAGE((const void *) end_instr_pos);
+	
+	static struct link_map *ld_so_link_map;
+	if (!ld_so_link_map)
+	{
+		ld_so_link_map = get_highest_loaded_object_below(&_r_debug);
+	}
+	
+	struct link_map *range_link_map = get_highest_loaded_object_below(begin_instr_pos);
+	_Bool range_is_in_ld_so = (ld_so_link_map && range_link_map && 
+		ld_so_link_map == range_link_map);
+	
 	if (!is_writable)
 	{
+		/* NOTE: sometimes our own code will need to call into the dynamic
+		 * loader, e.g. to call __tls_get_addr. So if we're walking the 
+		 * dynamic loader, leave it executable. This isn't really an extra
+		 * security weakness because our own code is in the same boat. 
+		 * When we *are* the dynamic loader (emerald-style), this problem
+		 * will go away, though our own code will be larger. */
 		int ret = raw_mprotect(begin_page, end_page - begin_page,
-			PROT_READ | PROT_WRITE | PROT_EXEC);
+			PROT_READ | PROT_WRITE | (range_is_in_ld_so ? PROT_EXEC : 0));
 
 		/* If we failed, it might be on the vdso page. */
 		assert(ret == 0 || (intptr_t) begin_page < 0);
@@ -167,7 +186,6 @@ void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *e
 	{
 		int ret = raw_mprotect(begin_page, end_page - begin_page, 
 			(is_readable ? PROT_READ : 0)
-		|                  PROT_WRITE
 		|                  PROT_EXEC
 		);
 		assert(ret == 0);
@@ -196,17 +214,39 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 	if (first_section_start)
 	{
 		begin_instr_pos = (unsigned char *) first_section_start;
-	} else begin_instr_pos = (unsigned char *) begin;
+	}
+	else
+	{
+		warnx("could not look up first instruction address after %p", begin);
+		begin_instr_pos = (unsigned char *) begin;
+	}
 
 	if (last_section_end)
 	{
 		end_instr_pos = (unsigned char *) last_section_end;
-	} else end_instr_pos = (unsigned char *) end;
+	}
+	else
+	{
+		warnx("could not look up previous instruction address at %p", end);
+		end_instr_pos = (unsigned char *) end;
+	}
 	
-	trap_one_instruction_range(begin_instr_pos, end_instr_pos, is_writable, is_readable);
+	if (is_writable && 0 == strcmp(filename, "[stack]")) // FIXME: sysdep
+	{
+		/* We've found an executable stack region. These are generally 
+		 * bad for security. HACK: let's try just de-executabling it. */
+		warnx("Removing execute permission from stack region %p-%p", begin, end);
+		int ret = raw_mprotect(begin, (char*) end - (char*) begin, 
+			PROT_READ | PROT_WRITE);
+		if (ret != 0) warnx("Warning: failed to remove execute permission from stack region %p-%p", begin, end);
+	}
+	else
+	{
+		trap_one_instruction_range(begin_instr_pos, end_instr_pos, is_writable, is_readable);
+	}
 }
 
-static int process_mapping_cb(struct proc_entry *ent, char *linebuf, size_t bufsz, void *arg)
+static int process_mapping_cb(struct proc_entry *ent, char *linebuf, void *arg)
 {
 	/* Skip ourselves, but remember our load address. */
 	void *expected_mapping_end = (void*) page_boundary_up((uintptr_t) &etext);
@@ -276,13 +316,34 @@ static void __attribute__((constructor)) startup(void)
 
 void trap_all_mappings(void)
 {
+	/* When we process mappings, we do mprotect()s, which can change the memory map, 
+	 * including removing/adding lines. So there's a race condition unless we eagerly
+	 * snapshot the map. Do that here. */
 	int fd = raw_open("/proc/self/maps", O_RDONLY);
-
 	if (fd != -1)
 	{
-		struct proc_entry entry;
+		/* We run during startup, so the number of distinct /proc lines should be small. */
+	#define MAX_LINES 1024
+		char *lines[MAX_LINES];
+		int n = 0;
+		ssize_t linesz;
 		char linebuf[8192];
-		for_each_maps_entry(fd, linebuf, sizeof linebuf, &entry, process_mapping_cb, NULL);
+		while (-1 != (linesz = get_a_line(linebuf, sizeof linebuf, fd)))
+		{
+			lines[n] = alloca(linesz + 1);
+			if (!lines[n]) abort();
+			strncpy(lines[n], linebuf, linesz);
+			lines[n][linesz] = '\0';
+			++n;
+		}
+		
+		/* Now we have an array containing the lines. */
+		struct proc_entry entry;
+		for (int i = 0; i < n; ++i)
+		{
+			int ret = process_one_maps_entry(lines[i], &entry, process_mapping_cb, NULL);
+		}
+
 		raw_close(fd);
 	}
 }
