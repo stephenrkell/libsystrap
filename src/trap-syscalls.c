@@ -6,119 +6,98 @@
 // #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <link.h>
 #include "systrap.h"
 #include "systrap_private.h"
+#include "syscall-names.h"
 #include <footprints.h>
 
-_Bool __write_footprints;
+/* We are a preloaded library whose constructor
+ * calls libsystrap to divert all syscalls
+ * into the generic syscall emulation path; we provide
+ * pre_handler and post_handler to print stuff. */
+
 _Bool __write_traces;
-void *footprints_out __attribute__((visibility("hidden"))) /* really FILE* */;
 void *traces_out __attribute__((visibility("hidden"))) /* really FILE* */;
-int footprint_fd __attribute__((visibility("hidden")));
 int trace_fd __attribute__((visibility("hidden")));
-char *footprints_spec_filename __attribute__((visibility("hidden")));
-struct env_node *footprints_env __attribute__((visibility("hidden"))) = NULL;
-struct footprint_node *footprints __attribute__((visibility("hidden"))) = NULL;
 
-#ifndef EXECUTABLE
-#define RETURN_VALUE
-static void __attribute__((constructor)) startup(void)
+static void startup(void) __attribute__((constructor(101)));
+static void startup(void)
 {
-#else
-#define RETURN_VALUE 0
-extern void *__libsystrap_ignore_ud2_addr;
-// scratch test code
-int main(void)
-{
-#endif
-
-	char *footprint_fd_str = getenv("TRAP_SYSCALLS_FOOTPRINT_FD");
+	if (getenv("TRAP_SYSCALLS_DELAY_STARTUP"))
+	{
+		sleep(atoi(getenv("TRAP_SYSCALLS_DELAY_STARTUP")));
+	}
+	
 	char *trace_fd_str = getenv("TRAP_SYSCALLS_TRACE_FD");
-	footprints_spec_filename = getenv("TRAP_SYSCALLS_FOOTPRINT_SPEC_FILENAME");
-	struct timespec one_second = { /* seconds */ 1, /* nanoseconds */ 0 };
 	if (trace_fd_str) trace_fd = atoi(trace_fd_str);
-	if (footprint_fd_str) footprint_fd = atoi(footprint_fd_str);
-
-	/* Is fd open? If so, it's the input fd for our sanity check info
-	 * from systemtap. */
-	debug_printf(0, "TRAP_SYSCALLS_FOOTPRINT_FD is %s, ", footprint_fd_str);
-	if (footprint_fd > 2)
-	{
-		struct stat buf;
-		int stat_ret = raw_fstat(footprint_fd, &buf);
-		if (stat_ret == 0) {
-			debug_printf(0, "fd %d is open; outputting systemtap cross-check info.\n", footprint_fd);
-			/* PROBLEM: ideally we'd read in the stap script's output ourselves, and process
-			 * it at every system call. But by reading in stuff from stap, we're doing more
-			 * copying to/from userspace, so creating a feedback loop which would blow up.
-			 *
-			 * Instead we write out what we think we touched, and do a diff outside the process.
-			 * This also adds noise to stap's output, but without the feedback cycle: we ourselves
-			 * won't read the extra output, hence won't write() more stuff in response.
-			 */
-			__write_footprints = 1;
-			footprints_out = fdopen(footprint_fd, "a");
-			if (!footprints_out)
-				{
-					debug_printf(0, "Could not open footprints output stream for writing!\n");
-				}
-
-			if (footprints_spec_filename) {
-
-				 footprints = parse_footprints_from_file(footprints_spec_filename, &footprints_env);
-				 
-			} else {
-				 debug_printf(0, "no footprints spec filename provided\n", footprints_spec_filename);
-			}
-
-			
-		} else {
-			debug_printf(0, "fd %d is closed; skipping systemtap cross-check info.\n", footprint_fd);
-		}
-
-	}
-	else
-	{
-		debug_printf(0, "skipping systemtap cross-check info\n");
-	}
 
 	debug_printf(0, "TRAP_SYSCALLS_TRACE_FD is %s, ", trace_fd_str);
-	if (!trace_fd_str || trace_fd == 2) {
+	if (!trace_fd_str || trace_fd == 2)
+	{
 		debug_printf(0, "dup'ing stderr, ");
 		trace_fd = dup(2);
 	}
 	
-	if (trace_fd >= 0) {
-		struct stat buf;
-		int stat_ret = raw_fstat(trace_fd, &buf);
-		if (stat_ret == 0) {
+	if (trace_fd >= 0)
+	{
+		if (fcntl(F_GETFD, trace_fd) != -1)
+		{
 			debug_printf(0, "fd %d is open; outputting traces there.\n", trace_fd);
 			__write_traces = 1;
 			traces_out = fdopen(trace_fd, "a");
 			if (!traces_out)
-				{
-					debug_printf(0, "Could not open traces output stream for writing!\n");
-				}
-		} else {
+			{
+				debug_printf(0, "Could not open traces output stream for writing!\n");
+			}
+		}
+		else
+		{
 			debug_printf(0, "fd %d is closed; not outputting traces.\n", trace_fd);
 		}
-	} else {
-		debug_printf(0, "not outputting traces.\n");
 	}
+	else debug_printf(0, "not outputting traces.\n");
 	
 	trap_all_mappings();
 	install_sigill_handler();
-	
-#ifdef EXECUTABLE
-	// HACK for testing: do a ud2 right now!
-	ignore_ud2_addr = &&ud2_addr;
-ud2_addr:
-	__asm__ ("ud2\n");
+}
 
-	// we must also exit without running any libdl exit handlers,
-	// because we're an executable so our csu/startfiles include some cleanup
-	// that will now cause traps (this isn't necessary in the shared library case)
-	raw_exit(0);
-#endif
-	return RETURN_VALUE;
+void print_pre_syscall(void *stream, struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, void *ret)
+			__attribute__((visibility("protected")));
+void print_pre_syscall(void *stream, struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, void *ret) {
+	fprintf(stream, "== %d == > %p (%s+0x%x) %s(%p, %p, %p, %p, %p, %p)\n",
+			 getpid(), 
+			 calling_addr,
+			 calling_object->l_name,
+			 (char*) calling_addr - (char*) calling_object->l_addr,
+			 syscall_names[gsp->syscall_number],
+			 gsp->args[0],
+			 gsp->args[1],
+			 gsp->args[2],
+			 gsp->args[3],
+			 gsp->args[4],
+			 gsp->args[5]
+		);
+	fflush(stream);
+}
+
+void print_post_syscall(void *stream, struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, void *ret)
+			__attribute__((visibility("protected")));
+void print_post_syscall(void *stream, struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, void *ret) {
+	fprintf(stream, "== %d == < %p (%s+0x%x) %s(%p, %p, %p, %p, %p, %p) = %p\n",
+		getpid(),
+		calling_addr,
+		calling_object->l_name,
+		(char*) calling_addr - (char*) calling_object->l_addr,
+		syscall_names[gsp->syscall_number],
+			gsp->args[0],
+			gsp->args[1],
+			gsp->args[2],
+			gsp->args[3],
+			gsp->args[4],
+			gsp->args[5],
+		ret
+	);
+	fflush(stream);
 }

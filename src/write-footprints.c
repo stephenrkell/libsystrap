@@ -7,6 +7,13 @@
 #include <footprints.h>
 #include "write-footprints.h"
 
+_Bool __write_footprints;
+void *footprints_out __attribute__((visibility("hidden"))) /* really FILE* */;
+int footprint_fd __attribute__((visibility("hidden")));
+char *footprints_spec_filename __attribute__((visibility("hidden")));
+struct env_node *footprints_env __attribute__((visibility("hidden"))) = NULL;
+struct footprint_node *footprints __attribute__((visibility("hidden"))) = NULL;
+
 static struct uniqtype *uniqtype_for_syscall(int syscall_num)
 {
 	const char *syscall_name = syscall_names[syscall_num];
@@ -36,7 +43,7 @@ static struct uniqtype *uniqtype_for_syscall(int syscall_num)
 void __attribute__((visibility("protected")))
 write_footprint(void *base, size_t len, enum footprint_direction direction, const char *syscall)
 {
-	 fprintf(footprints_out, "footprint: %s base=0x%016lx n=0x%016lx syscall=%s\n", footprint_direction_str[direction], (void*) base, (void*) len, syscall);
+	fprintf(footprints_out, "footprint: %s base=0x%016lx n=0x%016lx syscall=%s\n", footprint_direction_str[direction], (void*) base, (void*) len, syscall);
 	fflush(footprints_out);
 }
 
@@ -52,50 +59,21 @@ static void list_add(void *obj, struct uniqtype *t, void *arg)
 	*head = new_node;
 }
 
-static void print_pre_syscall(void *stream, struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, void *ret) {
-	 fprintf(stream, "== %d == > %p (%s+0x%x) %s(%p, %p, %p, %p, %p, %p)\n",
-			 raw_getpid(), 
-			 calling_addr,
-			 calling_object->l_name,
-			 (char*) calling_addr - (char*) calling_object->l_addr,
-			 syscall_names[gsp->syscall_number],
-			 gsp->args[0],
-			 gsp->args[1],
-			 gsp->args[2],
-			 gsp->args[3],
-			 gsp->args[4],
-			 gsp->args[5]
-		  );
-	 fflush(stream);
-}
+#define PRINT_BOTH(printer) do { \
+	if (__write_footprints && footprints_out) { \
+		printer(footprints_out, gsp, calling_addr, calling_object, ret); \
+	} \
+	if (__write_traces && traces_out) { \
+		printer(traces_out, gsp, calling_addr, calling_object, ret); \
+	} } while (0)
 
-static void print_post_syscall(void *stream, struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, void *ret) {
-	fprintf(stream, "== %d == < %p (%s+0x%x) %s(%p, %p, %p, %p, %p, %p) = %p\n",
-		raw_getpid(),
-		calling_addr,
-		calling_object->l_name,
-		(char*) calling_addr - (char*) calling_object->l_addr,
-		syscall_names[gsp->syscall_number],
-			gsp->args[0],
-			gsp->args[1],
-			gsp->args[2],
-			gsp->args[3],
-			gsp->args[4],
-			gsp->args[5],
-		ret
-	);
-	fflush(stream);
-}
+static void print_pre(struct generic_syscall *gsp, void *calling_addr, 
+	struct link_map *calling_object, void *ret) 
+{ PRINT_BOTH(print_pre_syscall); }
 
-static void print_to_streams(struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, void *ret, void (*printer)(void *_stream, struct generic_syscall *_gsp, void *_calling_addr, struct link_map *_calling_object, void *_ret)) {
-	if (__write_footprints && footprints_out) {
-		printer(footprints_out, gsp, calling_addr, calling_object, ret);
-	}
-
-	if (__write_traces && traces_out) {
-		printer(traces_out, gsp, calling_addr, calling_object, ret);
-	}
-}
+static void print_post(struct generic_syscall *gsp, void *calling_addr, 
+	struct link_map *calling_object, void *ret) 
+{ PRINT_BOTH(print_post_syscall); }
 
 struct evaluator_state *supply_syscall_footprint(struct evaluator_state *eval,
                                                  struct footprint_node *fp,
@@ -137,15 +115,13 @@ void write_footprint_union(struct union_node *node, enum footprint_direction dir
 }
 
 void __attribute__((visibility("protected")))
-pre_handling(struct generic_syscall *gsp)
+systrap_pre_handling(struct generic_syscall *gsp)
 {
 	/* Now walk the footprint. We print out a line per-syscall before and after
 	 * to bracket the invididual footprint items. */
 	void *calling_addr = (void*) gsp->saved_context->uc.uc_mcontext.rip;
 	struct link_map *calling_object = get_link_map(calling_addr);
-	
-	/* send same output to stderr and, if we're writing them, footprints_out */
-	print_to_streams(gsp, calling_addr, calling_object, NULL, &print_pre_syscall);
+	print_pre(gsp, calling_addr, calling_object, NULL);
 	
 	struct uniqtype *call = uniqtype_for_syscall(gsp->syscall_number);
 	if (call)
@@ -158,7 +134,7 @@ pre_handling(struct generic_syscall *gsp)
 		 * Every pointer argument to the syscall is a root. 
 		 * (Note that the syscall arguments themselves don't live in memory,
 		 * so we can't start directly from a unique root.)
-uniq		 */
+		 */
 
 
 		struct footprint_node *fp = get_footprints_for(footprints, syscall_names[gsp->syscall_number]);
@@ -216,10 +192,52 @@ uniq		 */
 }
 
 void __attribute__((visibility("protected")))
-post_handling(struct generic_syscall *gsp, long int ret)
+systrap_post_handling(struct generic_syscall *gsp, long int ret)
 {
 	void *calling_addr = (void*) gsp->saved_context->uc.uc_mcontext.rip;
 	struct link_map *calling_object = get_link_map(calling_addr);
-	print_to_streams(gsp, calling_addr, calling_object, (void *)ret, &print_post_syscall);
+	print_post(gsp, calling_addr, calling_object, (void *)ret);
 }
 
+static void __attribute__((constructor(102))) init_footprints(void)
+{
+	char *footprint_fd_str = getenv("TRAP_SYSCALLS_FOOTPRINT_FD");
+	footprints_spec_filename = getenv("TRAP_SYSCALLS_FOOTPRINT_SPEC_FILENAME");
+	struct timespec one_second = { /* seconds */ 1, /* nanoseconds */ 0 };
+	if (footprint_fd_str) footprint_fd = atoi(footprint_fd_str);
+
+	/* Is fd open? If so, it's the input fd for our sanity check info
+	 * from systemtap. */
+	debug_printf(0, "TRAP_SYSCALLS_FOOTPRINT_FD is %s, ", footprint_fd_str);
+	if (footprint_fd > 2)
+	{
+		struct stat buf;
+		int stat_ret = raw_fstat(footprint_fd, &buf);
+		if (stat_ret == 0) 
+		{
+			debug_printf(0, "fd %d is open; outputting systemtap cross-check info.\n", footprint_fd);
+			/* PROBLEM: ideally we'd read in the stap script's output ourselves, and process
+			 * it at every system call. But by reading in stuff from stap, we're doing more
+			 * copying to/from userspace, so creating a feedback loop which would blow up.
+			 *
+			 * Instead we write out what we think we touched, and do a diff outside the process.
+			 * This also adds noise to stap's output, but without the feedback cycle: we ourselves
+			 * won't read the extra output, hence won't write() more stuff in response.
+			 */
+			__write_footprints = 1;
+			footprints_out = fdopen(footprint_fd, "a");
+			if (!footprints_out)
+			{
+				debug_printf(0, "Could not open footprints output stream for writing!\n");
+			}
+
+			if (footprints_spec_filename)
+			{
+				footprints = parse_footprints_from_file(footprints_spec_filename, &footprints_env);
+			}
+			else debug_printf(0, "no footprints spec filename provided\n", footprints_spec_filename);
+		}
+		else debug_printf(0, "fd %d is closed; skipping systemtap cross-check info.\n", footprint_fd);
+	} 
+	else debug_printf(0, "skipping systemtap cross-check info\n");
+}

@@ -1,38 +1,11 @@
-# I can think of a few ways of achieving syscall interposition:
-#
-# - (in a dynamically linked binary) overriding the C library's wrappers
-# - (in a statically linked binary)  ptrace(TRACE_ME)
-# - (in either case)                 breakpointing on any syscall instruction (HMM, CFI-style problems)
-#
-# other things: vsyscall page, vdso
-#
-# Problem with libc: wrappers do not have publicly available names, nor
-# consistent names.
-#
-# Problem with ptrace(TRACE_ME) -- you need a separate thread to trace from.
-# BUT otherwise that might not be so bad.
-#
-# Problem with breakpointing: self-modifying code (JIT),
-
-default: trap-syscalls.so
-
-#LIBOPCODES_A ?= /usr/local/src/binutils-pic-build.hg/build/opcodes/libopcodes.a
-#LIBBFD_A ?= /usr/local/src/binutils-pic-build.hg/build/bfd/libbfd.a
-#
-#ifeq ($(realpath $(LIBOPCODES_A)),)
-#$(error Could not find libopcodes.a! Please set LIBOPCODES_A)
-#endif
-#ifeq ($(realpath $(LIBBFD_A)),)
-#$(error Could not find libbfd.a! Please set LIBBFD_A)
-#endif
-#
-#LDLIBS +=  $(LIBOPCODES_A) $(LIBBFD_A)
 
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 SRCROOT := $(realpath $(dir $(THIS_MAKEFILE)))/..
 
 CONTRIB := $(SRCROOT)/contrib
 CONFIG := $(CONTRIB)/config.mk
+
+default: trace-syscalls.so
 
 $(CONTRIB)/config.mk:
 	$(MAKE) -C $(CONTRIB)
@@ -45,9 +18,15 @@ ifeq ($(LIBALLOCS_DIR),)
 $(error Please install the liballocs source tree and set LIBALLOCS_DIR)
 endif
 
-ifeq ($(LIBFOOTPRINTS_DIR),)
-$(error Please install the libfootprints source tree and set LIBFOOTPRINTS_DIR)
-endif
+# don't insist on libfootprints
+# ifeq ($(LIBFOOTPRINTS_DIR),)
+# $(error Please install the libfootprints source tree and set LIBFOOTPRINTS_DIR)
+# endif
+
+# ditto for syscall-introspect-tools
+# ifeq ($(SYSCALL_INTROSPECT_TOOLS_DIR),)
+# $(error Please install the syscall-introspect-tools source tree and set SYSCALL_INTROSPECT_TOOLS_DIR)
+# endif
 
 ifeq ($(ANTLR3C_DIR),)
 $(error Please install the libantlr3c source tree and set ANTLR3C_DIR)
@@ -57,18 +36,12 @@ ifeq ($(realpath $(SRCROOT)/libsystrap/libsystrap.a),)
 $(error Please build libsystrap first)
 endif
 
-
-#LIBC_A ?= -lc -ldl
-
+# We don't currently use llvm, but once did; if we do again...
 # LLVM_CXXFLAGS ?= $(shell llvm-config --cxxflags)
 # LIBLLVM_ARCHIVE ?= -lllvm_X86 -lllvm
 # LIBSTDCXX_ARCHIVE ?= -lstdc++
+# CFLAGS += $(LLVM_INCLUDES)
 
-#LIBOPDIS_A := $(CONTRIB)/opdis-build/src/.libs/libopdis.a
-#LIBOPCODES_A := -lopcodes
-#LIBBFD_A := -lbfd
-#LIBIBERTY_A := $(CONTRIB)
-#LIBALLOCS_A := $(LIBALLOCS_DIR)/.libs/liballocs.a
 FOOTPRINTS_A := $(LIBFOOTPRINTS_DIR)/src/.libs/libfootprints.a $(LIBFOOTPRINTS_DIR)/src/.libs/libfootprints_syscalls.a
 
 # PROBLEM: this archive always contains non-PIC code
@@ -80,13 +53,8 @@ ANTLR3C_A := libantlr3c_pic.a
 libantlr3c_pic.a: $(wildcard $(ANTLR3C_DIR)/.libs/*.o)
 	$(AR) r "$@" $^
 
-#ZLIB_A := $(CONTRIB)/zlib-1.2.8/libz.a
-
-#SYSCALL_INTERFACE_DIR ?= $(dir $(THIS_MAKEFILE))/../../syscall-interfaces/scripts
-#SYSCALL_INTERFACE := linux
-
-#vpath %.c $(SYSCALL_INTERFACE_DIR)
 vpath %.c $(LIBALLOCS_DIR)/src
+vpath %.h
 
 CFLAGS += -g 
 CFLAGS += -Wall -Wno-unused-label -Wno-comment
@@ -94,26 +62,37 @@ CFLAGS += -O2
 #CFLAGS += -O0
 CFLAGS += -fPIC
 CFLAGS += -ffreestanding -fno-omit-frame-pointer
-#CFLAGS += -I$(SYSCALL_INTERFACE_DIR)
 
+# HACK: circular referential structure between us and liballocs
 CFLAGS += -I $(LIBALLOCS_DIR)/include
 CFLAGS += -I $(LIBFOOTPRINTS_DIR)/include
 CFLAGS += -I $(DWARFIDL_DIR)/include
 CFLAGS += -I $(ANTLR3C_DIR)
 CFLAGS += -I $(ANTLR3C_DIR)/include
 CFLAGS += -I $(DWARFIDL_DIR)/parser
-# CFLAGS += $(LLVM_INCLUDES)
 CFLAGS += -I $(SRCROOT)/libsystrap
+CFLAGS += -I $(SYSCALL_INTROSPECT_TOOLS)/scripts
 
 CXXFLAGS := $(CXXFLAGS) $(CFLAGS) # eagerly latch CFLAGS now; don't want later additions
+
+# can now add C-specific options to CFLAGS
 CFLAGS += -std=c99
 CXXFLAGS += -std=c++11 $(LLVM_CXXFLAGS)
 
-#SYSCALL_IFACE_SRC := $(SYSCALL_INTERFACE)-syscall-ifacetypes.c
-#SYSCALL_IFACE_O := $(patsubst %.c,%.o,$(SYSCALL_IFACE_SRC))
-
 linux-syscall-ifacetypes.c:
 
+# This is a quick but incomplete way to build 
+linux-syscall-macros.h:
+	( /usr/bin/cpp -E -D"__SYSCALL(num,decl)=decl" - </dev/null | \
+           sed -r '/^(#.*)?$$/ d' | sort | uniq | sed 's/^\(.*\)/SYSCALL(\1)/') > "$@" || (rm -f "$@"; false)
+
+# Avoid building local incomplete .h if we have the complete one at hand.
+# This means we don't need a working syscall-introspect-tools to proceed,
+# but we'll pick it up if its linux-syscall-macros.h has been built.
+vpath %.h $(SYSCALL_INTROSPECT_TOOLS)/scripts
+syscall-names.o: linux-syscall-macros.h
+
+# HACK: more liballocs dependency -- split off a librefl or librunt to isolate these?
 C_SRC := $(wildcard *.c) uniqtype-bfs.c # $(SYSCALL_IFACE_SRC)
 S_SRC := $(wildcard *.s)
 CC_SRC := $(wildcard *.cc)
@@ -123,8 +102,6 @@ CC_DEPS := $(patsubst %.cc,.%.d,$(CC_SRC))
 DEPS := $(C_DEPS) $(CC_DEPS)
 OBJS := $(patsubst %.c,%.o,$(C_SRC)) $(patsubst %.cc,%.o,$(CC_SRC)) $(patsubst %.s,%.o,$(S_SRC))
 
-DEPS += .trap-syscalls-exec.d
-
 $(CC_DEPS): .%.d: %.cc
 	$(CXX) -MM $(CXXFLAGS) $+ > "$@" || rm -f "$@"
 $(C_DEPS): .%.d: %.c
@@ -133,13 +110,6 @@ $(C_DEPS): .%.d: %.c
 ifneq ($(MAKECMDGOALS),clean)
 -include $(DEPS)
 endif
-
-trap-syscalls-exec.o: trap-syscalls.c
-	$(CC) $(filter-out -fPIC,$(CFLAGS)) -DEXECUTABLE -o "$@" "$<"
-
-# standalone program, for testing
-trap-syscalls: $(filter-out trap-syscalls.o,$(OBJS)) trap-syscalls-exec.o
-	$(CXX) $(filter-out -fPIC,$(CFLAGS)) -o "$@" $+ $(LDFLAGS) $(LDLIBS)
 
 #dynamic-list: $(SYSCALL_IFACE_O)
 #	( echo '{'; nm --format=posix "$<" | sed 's/[[:blank:]].*/;/'; echo '};') > "$@" || rm -f "$@"
@@ -152,17 +122,18 @@ dlmalloc.o: CFLAGS += -DHAVE_MORECORE=0
 dlmalloc.a: dlmalloc.o
 	$(AR) r "$@" $^
 
-# We have to defsym __GI____assert_fail because it's defined in the same file as 
-# __assert_fail, and some libc symbols refer to it using this alias. Otherwise
-# the libc archive's __assert_fail gets pulled in because it's the only definition
-# of __GI____assert_fail, and we have to use its __assert_fail too.
-
 null := #
 space := $(null) #
 comma := ,
 # FIXME: make our dynamic symbols hidden! 
 # We don't want user code calling into our exit(), hence having us make its syscalls.
-trap-syscalls.so: LDLIBS := -Bstatic \
+trace-syscalls.so: LDLIBS := -Bstatic \
+	$(SRCROOT)/libsystrap/libsystrap.a \
+	$(ZLIB_A) \
+	dlmalloc.a \
+	$(LIBC_A) 
+
+trace-sysfoot.so: LDLIBS := -Bstatic \
 	$(SRCROOT)/libsystrap/libsystrap.a \
 	$(ZLIB_A) \
 	dlmalloc.a \
@@ -172,12 +143,20 @@ trap-syscalls.so: LDLIBS := -Bstatic \
 	$(DWARFIDL_DIR)/parser/dwarfidlSimpleCParser.o \
 	$(ANTLR3C_A)
 
-trap-syscalls.so: LDFLAGS += -nostdlib -Wl,--hash-style=sysv -Wl,--no-as-needed
-trap-syscalls.so: $(filter-out dlmalloc.o,$(OBJS)) dynamic-list libantlr3c_pic.a $(SRCROOT)/libsystrap/libsystrap.a dlmalloc.a
+trace-syscalls.so trace-sysfoot.so: LDFLAGS += -nostdlib -Wl,--hash-style=sysv -Wl,--no-as-needed
+
+trace-syscalls.so trace-sysfoot.so: trap-syscalls.o syscall-names.o handle-syscall.o dlmalloc.a
+trace-sysfoot.so: $(filter-out dlmalloc.o,$(OBJS)) libantlr3c_pic.a
+
+# We have to defsym __GI____assert_fail because it's defined in the same file as 
+# __assert_fail, and some libc symbols refer to it using this alias. Otherwise
+# the libc archive's __assert_fail gets pulled in because it's the only definition
+# of __GI____assert_fail, and we have to use its __assert_fail too.
+trace-syscalls.so trace-sysfoot.so: dynamic-list $(SRCROOT)/libsystrap/libsystrap.a
 	$(CC) -shared -Bsymbolic \
 		-fuse-ld=gold \
 		-Wl,--dynamic-list,dynamic-list \
-		-Wl,-h,trap-syscalls.so \
+		-Wl,-h,trace-syscalls.so \
 		-Wl,--version-script,version-script \
 		-o "$@" $(filter-out dynamic-list,$(filter-out %.a,$+)) \
 		$(LDFLAGS) -Wl,-z,muldefs \
@@ -187,6 +166,6 @@ trap-syscalls.so: $(filter-out dlmalloc.o,$(OBJS)) dynamic-list libantlr3c_pic.a
 
 .PHONY: clean
 clean:
-	rm -f trap-syscalls trap-syscalls.so
+	rm -f trace-syscalls.so
 	rm -f *.o *.a
 	rm -f .*.d
