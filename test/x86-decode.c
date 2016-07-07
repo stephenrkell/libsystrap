@@ -1,4 +1,5 @@
 #include "x86_defs.h"
+#include <udis86.h> // for comparison against udis86
 #include <string.h>
 
 _Bool any_failed;
@@ -798,6 +799,10 @@ struct instr_test {
 
 int main(void)
 {
+	ud_t ud_obj;
+	ud_init(&ud_obj);
+	ud_set_mode(&ud_obj, 64);
+	
 	for (struct instr_test *t = &tests[0]; 
 			t < &tests[sizeof tests / sizeof (struct instr_test)];
 			++t)
@@ -814,6 +819,23 @@ int main(void)
 			warnx("Decode test %d incorrect at %p (gave %d, should be %d)", 
 				num, t->instr_bytes, len, t->len);
 			any_failed = 1;
+		}
+		
+		// try udis86
+		ud_set_input_buffer(&ud_obj, (const uint8_t *) t->instr_bytes, 15 /* HACK */);
+		int ud_ret = ud_decode(&ud_obj);
+		if (!ud_ret)
+		{
+			warnx("Decode test %d: libudis86 failed at %p", num, t->instr_bytes);
+		}
+		else
+		{
+			unsigned ud_len = ud_insn_len(&ud_obj);
+			if (ud_len != t->len)
+			{
+				warnx("Decode test %d: libudis86 incorrect at %p (gave %d, should be %d)", 
+					num, t->instr_bytes, (int) ud_len, t->len);
+			}
 		}
 	}
 	
