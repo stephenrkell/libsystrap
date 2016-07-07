@@ -143,7 +143,7 @@ static uint8_t opcode_table[256] = {
     /* 0xC0 - 0xC7 */
     ByteOp|DstMem|SrcImm|ModRM, DstMem|SrcImmByte|ModRM,
     ImplicitOps, ImplicitOps,
-    DstReg|SrcMem|ModRM|Mov, DstReg|SrcMem|ModRM|Mov,
+    DstReg|SrcMem|ModRM|Mov, DstReg|SrcMem|ModRM|Mov, // <-- VEX prefixes here
     ByteOp|DstMem|SrcImm|ModRM|Mov, DstMem|SrcImm|ModRM|Mov,
     /* 0xC8 - 0xCF */
     ImplicitOps, ImplicitOps, ImplicitOps, ImplicitOps,
@@ -178,7 +178,7 @@ static uint8_t twobyte_table[256] = {
     /* 0x08 - 0x0F */
     ImplicitOps, ImplicitOps, 0, /* 0 */ ImplicitOps /* ud2! */, 0, ImplicitOps|ModRM, 0, 0,
     /* 0x10 - 0x17 */
-    ImplicitOps|ModRM, ImplicitOps|ModRM, 0, 0, 0, 0, 0, 0,
+    ImplicitOps|ModRM, ImplicitOps|ModRM, ImplicitOps|ModRM, SrcReg|DstMem|ModRM, 0, 0, SrcMem|DstReg|ModRM, 0,
     /* 0x18 - 0x1F */
     ImplicitOps|ModRM, ImplicitOps|ModRM, ImplicitOps|ModRM, ImplicitOps|ModRM,
     ImplicitOps|ModRM, ImplicitOps|ModRM, ImplicitOps|ModRM, ImplicitOps|ModRM,
@@ -186,12 +186,12 @@ static uint8_t twobyte_table[256] = {
     ImplicitOps|ModRM, ImplicitOps|ModRM, ImplicitOps|ModRM, ImplicitOps|ModRM,
     0, 0, 0, 0,
     /* 0x28 - 0x2F */
-    ImplicitOps|ModRM, ImplicitOps|ModRM, 0, ImplicitOps|ModRM, 0, 0, 0, 0,
+    ImplicitOps|ModRM, ImplicitOps|ModRM, SrcReg|DstReg|ModRM, ImplicitOps|ModRM, SrcReg|DstReg|ModRM, 0, SrcReg|DstReg|ModRM, 0,
     /* 0x30 - 0x37 */
     ImplicitOps, ImplicitOps, ImplicitOps, 0,
     ImplicitOps, ImplicitOps, 0, 0,
     /* 0x38 - 0x3F */
-    0, 0, 0, 0, 0, 0, 0, 0,
+    /* threebyte */ 0, 0, /* threebyte */ 0, 0, 0, 0, 0, 0,
     /* 0x40 - 0x47 */
     DstReg|SrcMem|ModRM|Mov, DstReg|SrcMem|ModRM|Mov,
     DstReg|SrcMem|ModRM|Mov, DstReg|SrcMem|ModRM|Mov,
@@ -202,12 +202,16 @@ static uint8_t twobyte_table[256] = {
     DstReg|SrcMem|ModRM|Mov, DstReg|SrcMem|ModRM|Mov,
     DstReg|SrcMem|ModRM|Mov, DstReg|SrcMem|ModRM|Mov,
     DstReg|SrcMem|ModRM|Mov, DstReg|SrcMem|ModRM|Mov,
-    /* 0x50 - 0x5F */
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    /* 0x60 - 0x6F */
-    DstReg|SrcMem|ModRM, DstReg|SrcMem|ModRM, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, DstReg|SrcMem|ModRM|Mov, ImplicitOps|ModRM,
+    /* 0x50 - 0x57 */
+    0, 0, 0, 0, SrcMem|DstReg|ModRM, SrcMem|DstReg|ModRM, SrcReg|DstReg|ModRM, SrcReg|DstReg|ModRM, 
+    /* 0x58 - 0x5f */
+    SrcMem|DstReg|ModRM, SrcMem|DstReg|ModRM, 0, 0, SrcReg|DstReg|ModRM, 0, SrcReg|DstReg|ModRM, 0,
+    /* 0x60 - 0x67 */
+    DstReg|SrcMem|ModRM, DstReg|SrcMem|ModRM, DstReg|SrcReg|ModRM, 0, ImplicitOps|ModRM, 0, SrcReg|DstReg|ModRM, 0, 
+    /* 0x68 - 0x6f */
+    0, 0, SrcReg|DstReg|ModRM, 0, DstReg|SrcReg|ModRM, 0, DstReg|SrcMem|ModRM|Mov, ImplicitOps|ModRM,
     /* 0x70 - 0x7F */
-    DstReg|ModRM|SrcImmByte, 0, 0, 0, DstReg|SrcMem|ModRM, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ImplicitOps|ModRM,
+    DstReg|ModRM|SrcImmByte, 0, 0, DstReg|ModRM|SrcImmByte, DstReg|SrcMem|ModRM, 0, DstReg|SrcReg|ModRM, 0, 0, 0, 0, 0, 0, 0, DstReg|SrcMem|ModRM, ImplicitOps|ModRM,
     /* 0x80 - 0x87 */
     ImplicitOps, ImplicitOps, ImplicitOps, ImplicitOps,
     ImplicitOps, ImplicitOps, ImplicitOps, ImplicitOps,
@@ -237,32 +241,35 @@ static uint8_t twobyte_table[256] = {
     DstReg|SrcMem|ModRM|Mov, DstReg|SrcMem|ModRM|Mov,
     ByteOp|DstReg|SrcMem|ModRM|Mov, DstReg|SrcMem16|ModRM|Mov,
     /* 0xB8 - 0xBF */
-    0, 0, DstBitBase|SrcImmByte|ModRM, DstBitBase|SrcReg|ModRM,
+    SrcReg|DstReg|ModRM, 0, DstBitBase|SrcImmByte|ModRM, DstBitBase|SrcReg|ModRM,
     DstReg|SrcMem|ModRM, DstReg|SrcMem|ModRM,
     ByteOp|DstReg|SrcMem|ModRM|Mov, DstReg|SrcMem16|ModRM|Mov,
     /* 0xC0 - 0xC7 */
     ByteOp|DstMem|SrcReg|ModRM, DstMem|SrcReg|ModRM,
     0, DstMem|SrcReg|ModRM|Mov,
-    0, 0, 0, ImplicitOps|ModRM,
+    0, 0, SrcReg|DstReg|ModRM|SrcImmByte, ImplicitOps|ModRM,
     /* 0xC8 - 0xCF */
     ImplicitOps, ImplicitOps, ImplicitOps, ImplicitOps,
     ImplicitOps, ImplicitOps, ImplicitOps, ImplicitOps,
     /* 0xD0 - 0xD7 */
-    0, 0, 0, 0, 0, 0, 0, DstReg|SrcReg|ModRM|Mov,
+    0, 0, 0, 0, DstReg|SrcReg|ModRM, 0, SrcReg|DstMem|ModRM, DstReg|SrcReg|ModRM|Mov,
     /* 0xD8 - 0xDF */
-    0, 0, SrcMem|DstReg|ModRM, 0, 0, 0, DstReg|SrcMem|ModRM, 0,
+    0, 0, SrcMem|DstReg|ModRM, ImplicitOps|ModRM, 0, 0, DstReg|SrcMem|ModRM, SrcReg|DstReg|ModRM,
     /* 0xE0 - 0xEF */
     0, 0, 0, 0, 0, 0, 0, ImplicitOps|ModRM, 0, 0, 0, DstReg|SrcMem|ModRM, 0, 0, 0, DstReg|SrcMem|ModRM,
     /* 0xF0 - 0xFF */
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    SrcMem|DstReg|ModRM, 0, 0, 0, SrcReg|DstReg|ModRM, 0, 0, 0, ImplicitOps|ModRM, 0, 0, 0, 0, 0, SrcReg|DstReg|ModRM, 0
 };
 
 static uint8_t threebyte_table_38[256] = {
+    [0x00] = SrcReg|DstReg|ModRM,
+    [0x17] = SrcReg|DstReg|ModRM,
     [0x29] = SrcReg|DstReg|ModRM
 };
 
 static uint8_t threebyte_table_3a[256] = {
-
+    [0xf] = SrcReg|DstReg|ModRM|SrcImmByte,
+    [0x63] = DstReg|ModRM|SrcImmByte
 };
 
 #define REX_PREFIX 0x40
@@ -686,12 +693,23 @@ x86_decode(
     d = opcode_table[b];
     if ( d == 0 )
     {
-        /* Two-byte opcode? FIXME: could also be three-byte, even though not VEX-prefixed? */
+        /* Two-byte opcode? */
         if ( b == 0x0f )
         {
             twobyte = 1;
             b = insn_fetch_type(uint8_t);
             d = twobyte_table[b];
+            
+            if ( d == 0 )
+            {
+                if ( b == 0x38 || b == 0x3a )
+                {
+                    twobyte = 0;
+                    threebyte = b;
+                    b = insn_fetch_type(uint8_t);
+                    d = (threebyte == 0x38 ? threebyte_table_38 : threebyte_table_3a)[b];
+                }
+            }
         }
 
         /* Unrecognised? */
@@ -708,7 +726,7 @@ x86_decode(
         modrm = insn_fetch_type(uint8_t);
         modrm_mod = (modrm & 0xc0) >> 6;
 
-        if ( !twobyte && ((b & ~1) == 0xc4) )
+        if ( !twobyte && !threebyte && ((b & ~1) == 0xc4) )
             switch ( def_ad_bytes )
             {
             default:
@@ -1512,10 +1530,7 @@ x86_decode(
  threebyte_insn_38:
     switch (b)
     {
-        case 0x29:
-            goto report;
-            
-        default: goto cannot_emulate;
+        default: goto report;
     }
     goto report;
 
