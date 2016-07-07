@@ -4,3 +4,12 @@ contrib/*
 *.a
 *.so
 */.*.d
+src/footprints.h
+src/linux-syscall-macros.h
+test/getpid
+test/hello
+test/read
+test/time
+test/true
+test/write
+test/x86-decode
