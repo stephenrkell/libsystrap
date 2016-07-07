@@ -63,6 +63,16 @@
 #define write_chars(s, t)  raw_write(2, s, t - s)
 #define write_ulong(a)   raw_write(2, fmt_hex_num((a)), 18)
 
+/* In kernel-speak this is a "struct sigframe" / "struct rt_sigframe" --
+ * sadly no user-level header defines it. But it seems to be vaguely standard
+ * per-architecture (here Intel iBCS). */
+struct ibcs_sigframe
+{
+	char *pretcode;
+	struct ucontext uc;
+	struct siginfo info;
+};
+
 void restore_rt(void); /* in restorer.s */
 
 void raw_exit(int status) __attribute__((noreturn));

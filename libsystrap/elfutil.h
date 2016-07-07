@@ -17,7 +17,40 @@ void __assert_fail(const char * assertion, const char * file, unsigned int line,
 #define PAGE_SIZE 4096
 #endif
 
-extern uintptr_t our_load_address;
+// extern uintptr_t our_load_address;
+// struct r_debug
+// {
+// 	int r_version;
+// 	struct link_map *r_map;
+// };
+// struct link_map
+// {
+// 	Elf64_Addr l_addr;
+// 	char *l_name;
+// 	Elf64_Dyn *l_ld;
+// 	struct link_map *l_next, *l_prev;
+// };
+// extern struct r_debug _r_debug;
+// 
+// // pilfered from relf.h in liballocs
+// inline
+// struct link_map*
+// get_highest_loaded_object_below(void *ptr)
+// {
+// 	/* Walk all the loaded objects' load addresses. 
+// 	 * The load address we want is the next-lower one. */
+// 	struct link_map *highest_seen = NULL;
+// 	for (struct link_map *l = _r_debug.r_map; l; l = l->l_next)
+// 	{
+// 		if (!highest_seen || 
+// 				((char*) l->l_addr > (char*) highest_seen->l_addr
+// 					&& (char*) l->l_addr <= (char*) ptr))
+// 		{
+// 			highest_seen = l;
+// 		}
+// 	}
+// 	return highest_seen;
+// }
 
 // another non-portable thingy... FIXME: replace dl_iterate_phdr with 
 // walking the link_map, *or* implement our own dl_iterate_phdr for portability

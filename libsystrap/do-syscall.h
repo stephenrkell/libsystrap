@@ -19,16 +19,6 @@ extern int debug_level;
 
 extern uintptr_t our_load_address;
 
-/* In kernel-speak this is a "struct sigframe" / "struct rt_sigframe" --
- * sadly no user-level header defines it. But it seems to be vaguely standard
- * per-architecture (here Intel iBCS). */
-struct ibcs_sigframe
-{
-	char *pretcode;
-	struct ucontext uc;
-	struct siginfo info;
-};
-
 extern inline _Bool 
 __attribute__((always_inline,gnu_inline))
 zaps_stack(struct generic_syscall *gs);
