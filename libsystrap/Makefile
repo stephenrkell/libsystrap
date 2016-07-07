@@ -27,6 +27,7 @@ CFLAGS += -O2
 CFLAGS += -fPIC
 CFLAGS += -ffreestanding -fno-omit-frame-pointer
 
+CFLAGS += -I $(UDIS86_DIR)
 CFLAGS += -I $(OPDIS_DIR)
 CFLAGS += -I $(LIBOPCODES_DIR)/include
 CFLAGS += -I $(BFD_DIR)
@@ -59,12 +60,14 @@ endif
 x86_decode.o: CFLAGS += -include x86_defs.h -include stdio.h 
 x86_decode.o instr.o: CFLAGS += -std=gnu11
 
+instr.o: CFLAGS += -DUSE_UDIS86 -DUSE_X86_DECODE -DUSE_OPDIS
+
 # Also extract 	$(LIBOPDIS_A), $(LIBOPCODES_A), $(LIBBFD_A) and $(LIBIBERTY_A),
 # and re-add their members to our archive.  This allows clients to link to us
 # without concern for these dependencies, which they probably don't have
 # available in PIC form.
 libsystrap.a: $(OBJS)
-	objs_list=$$( for fname in $(LIBOPDIS_A) $(LIBOPCODES_A) $(LIBBFD_A) $(LIBIBERTY_A); do \
+	objs_list=$$( for fname in $(LIBUDIS86_A) $(LIBOPDIS_A) $(LIBOPCODES_A) $(LIBBFD_A) $(LIBIBERTY_A); do \
 		$(AR) vx "$$fname"; done | \
 		grep '^x - ' | sed 's/^x - //' | tee objs_list ); \
 	$(AR) r "$@" $^ $${objs_list}; \

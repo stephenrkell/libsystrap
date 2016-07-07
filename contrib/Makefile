@@ -4,7 +4,7 @@ CONTRIB := $(realpath $(dir $(THIS_MAKEFILE)))
 default: all
 all: build config.mk
 .PHONY: default all build independent
-build: build-opdis build-binutils build-zlib build-eglibc \
+build: build-udis86 build-opdis build-binutils build-zlib build-eglibc \
 #build-liballocs build-dwarfidl build-libfootprints
 
 # don't remove intermediates
@@ -21,6 +21,7 @@ EGLIBC_DIR := eglibc-2.19
 EGLIBC_TAR := eglibc-2.19-svnr25243.tar.bz2
 EGLIBC_TAR_URL := http://downloads.yoctoproject.org/releases/eglibc/eglibc-2.19-svnr25243.tar.bz2
 OPDIS_REPO := https://github.com/mkfs/opdis.git
+UDIS86_REPO := https://github.com/vmt/udis86.git
 ZLIB_DIR := zlib-1.2.8
 ZLIB_TAR := zlib-1.2.8.tar.gz
 ZLIB_TAR_URL := http://zlib.net/zlib-1.2.8.tar.gz
@@ -65,6 +66,16 @@ opdis-build/Makefile: opdis/configure | build-binutils
 .PHONY: build-opdis
 build-opdis: opdis-build/Makefile
 	$(MAKE) -C opdis-build
+
+.PHONY: build-udis86
+build-udis86: udis86/Makefile
+	$(MAKE) -C udis86
+udis86/autogen.sh:
+	git clone $(UDIS86_REPO)
+udis86/configure: udis86/autogen.sh
+	cd udis86 && ./autogen.sh
+udis86/Makefile: udis86/configure
+	cd udis86 && CFLAGS=-fPIC ./configure --enable-shared=no --enable-static=yes
 
 $(BINUTILS_TAR): 
 	$(DOWNLOAD) $(BINUTILS_TAR_URL)
@@ -121,15 +132,17 @@ LIBC_A := $$(LIBC_DIR)/libc_pic.a $$(LIBC_DIR)/libc_nonshared.a \n\
 RTLD_OBJ_DIR := $$(LIBC_DIR)/elf\n\
 RTLD_SO := $$(RTLD_OBJ_DIR)/ld.so\n\
 RTLD_LIBC_A := $$(RTLD_OBJ_DIR)/rtld-libc.a\n\
+LIBUDIS86_A := $$(CONTRIB)/udis86/libudis86/.libs/libudis86.a \n\
 LIBOPDIS_A := $$(CONTRIB)/opdis-build/dist/.libs/libopdis.a \n\
 LIBOPCODES_DIR := $$(CONTRIB)/binutils-2.26 \n\
 BFD_DIR := $$(CONTRIB)/binutils-build/bfd \n\
 LIBOPCODES_A := $$(CONTRIB)/binutils-build/opcodes/libopcodes.a \n\
 LIBBFD_A := $$(CONTRIB)/binutils-build/bfd/libbfd.a \n\
 LIBIBERTY_A := $$(CONTRIB)/binutils-build/libiberty/libiberty.a \n\
-LIBALLOCS_DIR := $$(CONTRIB)/liballocs \n\
+LIBALLOCS_DIR ?= $(realpath $(dir $(THIS_MAKEFILE)))/../../liballocs \n\
 LIBFOOTPRINTS_DIR := $$(CONTRIB)/libfootprints \n\
 ANTLR3C_DIR := $$(CONTRIB)/libantlr3c-3.4 \n\
 DWARFIDL_DIR := $$(CONTRIB)/dwarfidl \n\
 OPDIS_DIR := $$(CONTRIB)/opdis \n\
+UDIS86_DIR := $$(CONTRIB)/udis86 \n\
 ZLIB_A ?= $$(CONTRIB)/zlib-1.2.8/libz.a' | sed '/^\\$$/ d' | sed 's/ *$$//' > "$@"

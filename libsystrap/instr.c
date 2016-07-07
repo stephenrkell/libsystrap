@@ -1,8 +1,17 @@
 #include "instr.h" /* our API -- in C */
 #include <assert.h>
 #include <string.h>
+#include <err.h>
+#ifdef USE_UDIS86
+#include <udis86.h>
+#endif
+#ifdef USE_X86_DECODE
 #include "x86_defs.h"
-
+#endif
+#ifdef USE_OPDIS
+#include <opdis/opdis.h>
+#include <opdis/x86_decoder.h>
+#endif
 /* 
 #include <memory>
 
@@ -66,59 +75,98 @@ instr_len(unsigned char *ins)
 }
 
 */
-
-#include <opdis/opdis.h>
-#include <opdis/x86_decoder.h>
-
-static opdis_t o;
-static int decode_cb(const opdis_insn_buf_t in, opdis_insn_t * out,
-	const opdis_byte_t * buf, opdis_off_t offset,
-	opdis_vma_t vma, opdis_off_t length, void * arg);
-// static decode_cb *orig_decode;
-
-static void fini() __attribute__((destructor));
-static void fini() 
+static _Bool is_ud2(const unsigned char *ins)
 {
-	/* DON'T terminate us. This will free buffers that we need right up 
-	 * until we do the exit() syscall. */
-	// if (o) opdis_term(o);
+	return ins[0] == 0x0f && ins[1] == 0x0b;
 }
+/* We have three different ways of calculating the instruction length: 
+ * x86-decode (preferred), libudis86, and opdis (slowest).
+ * We want to allow configuration to select any one or more of these.
+ * If none is defined, we select one or two based on NDEBUG. */
+
+#if !defined(USE_X86_DECODE) && !defined(USE_UDIS86) && !defined(USE_OPDIS)
+#ifdef NDEBUG
+#define USE_X86_DECODE
+#else
+#define USE_X86_DECODE
+#define USE_OPDIS
+#endif
+#endif
+
+#ifdef USE_UDIS86
+static ud_t ud_obj;
+static void init_udis86() __attribute__((constructor));
+static void init_udis86()
+{
+	ud_init(&ud_obj);
+	ud_set_mode(&ud_obj, 64); // FIXME: sysdep
+}
+static int instr_len_udis86(unsigned char *ins, unsigned char *end)
+{
+	ud_set_input_buffer(&ud_obj, (const uint8_t *) ins, 15 /* HACK */);
+	int ud_ret = ud_decode(&ud_obj);
+	if (ud_ret)
+	{
+		unsigned ud_len = ud_insn_len(&ud_obj);
+		return ud_len;
+	}
+	else return -1;
+}
+#endif
+#ifdef USE_X86_DECODE
+static __thread unsigned const char *limit;
+static __thread struct cpu_user_regs regs = {
+};
+static __thread struct x86_emulate_ctxt ctxt = {
+	.addr_size = 64,
+	.sp_size = 64
+};
+static int insn_fetch(
+        enum x86_segment seg,
+        unsigned long offset,
+        void *p_data,
+        unsigned int bytes,
+        struct x86_emulate_ctxt *ctxt)
+{
+	if ((unsigned const char *) offset + bytes > limit) return X86EMUL_EXCEPTION;
+	memcpy(p_data, (void*) offset, bytes);
+	return X86EMUL_OKAY;
+}
+static struct x86_emulate_ops ops = {
+	.insn_fetch = insn_fetch
+};
+static int instr_len_x86_decode(unsigned const char *ins, unsigned const char *end)
+{
+	limit = end;
+	if (!ctxt.regs) ctxt.regs = &regs;
+	ctxt.regs->rip = (uintptr_t) ins;
+	int x86_decode_len = x86_decode(&ctxt, &ops);
+	// int x86_decode_err = (x86_decode_len > 0) ? 0 : -x86_decode_len;
+	if (x86_decode_len < 1) return -1;
+	return x86_decode_len;
+}
+#endif
+#ifdef USE_OPDIS
+#define MAX_INSN_LENGTH 16
 #define OPDIS_BUF_LEN 32
 #define OPDIS_MAX_OPERANDS 5 /* ? */
 #define OPDIS_ASCII_SZ 64 /* ? */
 #define OPDIS_MNEMONIC_SZ 12 /* ? */
 #define OPDIS_OP_ASCII_SZ 8 /* ? */
-
-#define MAX_INSN_LENGTH 16
-
-static _Bool is_ud2(const unsigned char *ins)
-{
-	return ins[0] == 0x0f && ins[1] == 0x0b;
-}
-
+static opdis_t o;
+static __thread opdis_insn_t *cur_insn;
+static __thread opdis_off_t  cur_insn_len;
 static int decode_cb(const opdis_insn_buf_t in, opdis_insn_t * out,
-	const opdis_byte_t * buf, opdis_off_t offset,
-	opdis_vma_t vma, opdis_off_t length, void * arg)
+	   const opdis_byte_t * buf, opdis_off_t offset,
+	   opdis_vma_t vma, opdis_off_t length, void * arg)
 {
 	int ret = /* opdis_x86_att_decoder */ opdis_default_decoder(in, out, buf, offset, vma, length, NULL);
 	if (ret) *((opdis_off_t *) arg) = length;
 	return ret; /* i.e. always stop disassembling after a single instruction */
 }
-
-static void display_cb(const opdis_insn_t *i, void *arg)
-{
-	return;
-}
-
-/* static int display_cb */
-
-
-static __thread opdis_insn_t *cur_insn;
-static __thread opdis_off_t  cur_insn_len;
-
+static void display_cb(const opdis_insn_t *i, void *arg) { return; }
 static opdis_insn_t *get_opdis_insn(unsigned char *ins, unsigned char *end)
 {
-	// unsigned char opdis_buf[OPDIS_BUF_LEN];
 	uintptr_t len = (uintptr_t) end - (uintptr_t) ins;
 	opdis_buffer_t buf = {
 		.len = (len > MAX_INSN_LENGTH) ? MAX_INSN_LENGTH : len,
@@ -162,44 +210,52 @@ static opdis_insn_t *get_opdis_insn(unsigned char *ins, unsigned char *end)
 	}
 	return cur_insn;
 }
-static __thread struct cpu_user_regs regs = {
-};
-static __thread struct x86_emulate_ctxt ctxt = {
-	.addr_size = 64,
-	.sp_size = 64
-};
-static int insn_fetch(
-        enum x86_segment seg,
-        unsigned long offset,
-        void *p_data,
-        unsigned int bytes,
-        struct x86_emulate_ctxt *ctxt)
+static int instr_len_opdis(unsigned char *ins, unsigned char *end)
 {
-	memcpy(p_data, (void*) offset, bytes);
-	return X86EMUL_OKAY;
+	get_opdis_insn((unsigned char *) ins, (unsigned char *) end);
+	return cur_insn_len;
 }
-
-static struct x86_emulate_ops ops = {
-	.insn_fetch = insn_fetch
-};
+#endif /* opdis */
 
 unsigned long
 __attribute__((visibility("protected")))
 instr_len(unsigned const char *ins, unsigned const char *end)
 {
-	get_opdis_insn((unsigned char *) ins, (unsigned char *) end);
-	unsigned long opdis_len = cur_insn_len;
-	if (!ctxt.regs) ctxt.regs = &regs;
-	ctxt.regs->rip = (uintptr_t) ins;
-	int x86_decode_len = x86_decode(&ctxt, &ops);
-	int x86_decode_err = (x86_decode_len > 0) ? 0 : -x86_decode_len;
-	if (x86_decode_len < 1) x86_decode_len = 1; // squash errors and try next byte
-	if (opdis_len != x86_decode_len)
-	{
-		warnx("opdis and x86_decode disagree on length of instruction at %p (%d versus %d; err %d)",
-			ins, (int) opdis_len, (int) x86_decode_len, (int) x86_decode_err);
-	}
-	return x86_decode_len;
+	// don't let the decoders see ud2
+	if (end - ins > 1 && is_ud2(ins)) return 2;
+	
+	int len = 1;
+	_Bool got_len = 0;
+	
+#define TRY_DECODER(fragment) \
+	int fragment ## _len = instr_len_ ## fragment((unsigned char *)ins, (unsigned char*) end); \
+	do { if (fragment ## _len > 0) \
+	{ \
+		if (got_len && len != fragment ## _len) \
+		{ \
+			warnx(#fragment " disagreed with earlier decode about instruction length" \
+				" at %p (gave %d, vs %d)", \
+				ins, (int) fragment ## _len, len); \
+		} \
+		got_len = 1; \
+		len = fragment ## _len; \
+	} \
+	else \
+	{ \
+		warnx(#fragment " could not decode instruction at %p", ins); \
+	} } while (0)
+	
+#ifdef USE_X86_DECODE
+	TRY_DECODER(x86_decode);
+#endif
+#ifdef USE_UDIS86
+	TRY_DECODER(udis86);
+#endif
+#ifdef USE_OPDIS
+	TRY_DECODER(opdis);
+#endif
+	if (!got_len) { /* we could warn here */ }
+	return len;
 }
 
 int is_syscall_instr(unsigned const char *ins, unsigned const char *end)
