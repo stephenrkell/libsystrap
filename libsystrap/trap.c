@@ -106,6 +106,8 @@ static void instruction_cb(unsigned char *pos, unsigned len, void *arg)
 #define ROUND_DOWN_PTR_TO_PAGE(p) ROUND_DOWN_PTR((p), guess_page_size_unsafe())
 #define ROUND_UP_PTR_TO_PAGE(p) ROUND_UP_PTR((p), guess_page_size_unsafe())
 
+void *__tls_get_addr(); // in ld.so
+
 void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *end_instr_pos, 
 	_Bool is_writable, _Bool is_readable)
 {
@@ -115,8 +117,13 @@ void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *e
 	static struct link_map *ld_so_link_map;
 	if (!ld_so_link_map)
 	{
-		ld_so_link_map = get_highest_loaded_object_below(&_r_debug);
+		ld_so_link_map = get_highest_loaded_object_below(__tls_get_addr);
 	}
+	debug_printf(1, "_r_debug is at %p\n", &_r_debug);
+	debug_printf(1, "We think ld.so's link map is at %p, base %p, filename %s\n",
+		ld_so_link_map, 
+		ld_so_link_map ? (void*) ld_so_link_map->l_addr : (void*) -1,
+		ld_so_link_map ? ld_so_link_map->l_name : "(can't deref null)");
 	
 	struct link_map *range_link_map = get_highest_loaded_object_below(begin_instr_pos);
 	_Bool range_is_in_ld_so = (ld_so_link_map && range_link_map && 
@@ -210,6 +217,16 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 		begin, filename, 0, &base_addr);
 	const void *last_section_end = vaddr_to_nearest_instruction(
 		end, filename, 1, &base_addr);
+	/* These might return respectively (void*)-1 and (void*)0, to signify
+	 * "no instructions in that range, according to section headers".
+	 * The section headers are pretty reliable, so we choose not to
+	 * conservatively include this region. Instead we'll silently iterate
+	 * over zero instructions. This "no instructions found" usually happens
+	 * for ld.so whose text segment has been remapped RW and written to by
+	 * the ld.so bootstrap phase. This means it gets split into two /proc
+	 * lines, only one of which contains any instructions, so we hit the 
+	 * "no instructions" case for the second one. Note that we will do a 
+	 * "paranoid scan" anyway. */
 
 	if (first_section_start)
 	{
@@ -217,7 +234,8 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 	}
 	else
 	{
-		warnx("could not look up first instruction address after %p", begin);
+		debug_printf(0, "in executable mapping %p-%p, could not use shdrs to locate first instruction after %p (file %s); being conservative", 
+			begin, end, begin, filename);
 		begin_instr_pos = (unsigned char *) begin;
 	}
 
@@ -227,7 +245,8 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 	}
 	else
 	{
-		warnx("could not look up previous instruction address at %p", end);
+		debug_printf(0, "in executable mapping %p-%p, could not use shdrs to locate previous instruction before %p (file %s); being conservative",
+			begin, end, end, filename);
 		end_instr_pos = (unsigned char *) end;
 	}
 	
@@ -235,10 +254,10 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 	{
 		/* We've found an executable stack region. These are generally 
 		 * bad for security. HACK: let's try just de-executabling it. */
-		warnx("Removing execute permission from stack region %p-%p", begin, end);
+		debug_printf(0, "removing execute permission from stack region %p-%p", begin, end);
 		int ret = raw_mprotect(begin, (char*) end - (char*) begin, 
 			PROT_READ | PROT_WRITE);
-		if (ret != 0) warnx("Warning: failed to remove execute permission from stack region %p-%p", begin, end);
+		if (ret != 0) debug_printf(0, "failed to remove execute permission from stack region %p-%p", begin, end);
 	}
 	else
 	{
