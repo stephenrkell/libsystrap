@@ -1,6 +1,7 @@
 #include "instr.h" /* our API -- in C */
 #include <assert.h>
 #include <string.h>
+#include <stdio.h>
 #include <err.h>
 #ifdef USE_UDIS86
 #include <udis86.h>
@@ -182,8 +183,8 @@ static opdis_insn_t *get_opdis_insn(unsigned char *ins, unsigned char *end)
 		opdis_set_arch(o, bfd_arch_i386, bfd_mach_x86_64, NULL);
 		opdis_set_display(o, display_cb, NULL);
 		opdis_set_decoder(o, decode_cb, &cur_insn_len);
-		assert(o->buf);
-		assert(o->buf->string);
+		// assert(o->buf);
+		// assert(o->buf->string);
 	}
 	if (!cur_insn)
 	{
@@ -217,6 +218,16 @@ static int instr_len_opdis(unsigned char *ins, unsigned char *end)
 }
 #endif /* opdis */
 
+static void print_hex_bytes(FILE *stream, unsigned char *start, unsigned char *end)
+{
+	for (unsigned char *pos = start; pos != end; ++pos)
+	{
+		if (pos != start) fprintf(stream, " ");
+		fprintf(stream, "%02x", *pos);
+	}
+	fprintf(stream, "\n");
+}
+
 unsigned long
 __attribute__((visibility("protected")))
 instr_len(unsigned const char *ins, unsigned const char *end)
@@ -236,6 +247,8 @@ instr_len(unsigned const char *ins, unsigned const char *end)
 			warnx(#fragment " disagreed with earlier decode about instruction length" \
 				" at %p (gave %d, vs %d)", \
 				ins, (int) fragment ## _len, len); \
+			print_hex_bytes(stderr, (unsigned char *)ins, (unsigned char*) ins + \
+				(((int) fragment ## _len > len) ? (int) fragment ## _len : len)); \
 		} \
 		got_len = 1; \
 		len = fragment ## _len; \

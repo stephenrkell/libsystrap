@@ -4,6 +4,7 @@
 #include <asm/fcntl.h>
 #include <sys/mman.h>
 #include <stdlib.h>
+#include <err.h>
 
 #include <relf.h>
 
@@ -148,14 +149,19 @@ const void *vaddr_to_nearest_instruction(unsigned char *search_addr, const char 
 		void *m = NULL;
 		uintptr_t off_start = page_boundary_down(ehdr->e_shoff);
 		uintptr_t off_end = page_boundary_up(ehdr->e_shoff + ehdr->e_shnum * ehdr->e_shentsize);
-		if (!sht && fname)
+		if (!sht)
 		{
-			int fd = raw_open(fname, O_RDONLY);
-			assert(fd >= 0);
-			m = raw_mmap(NULL, off_end - off_start, PROT_READ, MAP_PRIVATE, fd, page_boundary_down(ehdr->e_shoff));
-			if (m == MAP_FAILED) abort();
-			close(fd);
-			sht = (ElfW(Shdr) *)((unsigned char *) m + (ehdr->e_shoff - page_boundary_down(ehdr->e_shoff)));
+			if (fname)
+			{
+				int fd = raw_open(fname, O_RDONLY);
+				assert(fd >= 0);
+				m = raw_mmap(NULL, off_end - off_start, PROT_READ, MAP_PRIVATE, fd, page_boundary_down(ehdr->e_shoff));
+				if (m == MAP_FAILED) abort();
+				close(fd);
+				sht = (ElfW(Shdr) *)((unsigned char *) m + (ehdr->e_shoff - page_boundary_down(ehdr->e_shoff)));
+			}
+			else warnx("can't mmap the section headers for instruction %s %p, filename %s, load addr %p", 
+				backwards ? "before" : "at", search_addr, fname ? fname : "(none)", base_addr);
 		}
 		if (!sht) return NULL;
 		
@@ -164,28 +170,33 @@ const void *vaddr_to_nearest_instruction(unsigned char *search_addr, const char 
 		int current_nearest_i = -1;
 		for (int i = 0; i < ehdr->e_shnum; ++i)
 		{
-			uintptr_t actual_section_vaddr
+			uintptr_t actual_section_search_vaddr
 			 = (uintptr_t)(((unsigned char *) base_addr) + sht[i].sh_addr)
 					+ (backwards ? sht[i].sh_size : 0);
+			// warnx("saw a section with %s vaddr %p", backwards ? "end" : "begin", (void*) actual_section_search_vaddr);
 			if ((sht[i].sh_flags & SHF_EXECINSTR)
 				&& (sht[i].sh_flags & SHF_ALLOC)
 				&& (backwards ? (
-						(actual_section_vaddr <= (uintptr_t) search_addr 
-					&& actual_section_vaddr > current_nearest)
-						) : (actual_section_vaddr >= (uintptr_t) search_addr 
-					&& actual_section_vaddr < current_nearest)
+						(actual_section_search_vaddr <= (uintptr_t) search_addr 
+					&& actual_section_search_vaddr > current_nearest)
+						) : (actual_section_search_vaddr >= (uintptr_t) search_addr 
+					&& actual_section_search_vaddr < current_nearest)
 				)
 				&& sht[i].sh_size > 0)
 			{
 				current_nearest_i = i;
-				current_nearest = actual_section_vaddr;
+				current_nearest = actual_section_search_vaddr;
 			}
 		}
 
 		if (m) raw_munmap(m, off_end - off_start);
 
 		if (current_nearest_i != -1) return (void*) current_nearest;
-	}
+		
+		//warnx("no section header matched when searching for instruction %s %p, filename %s, load addr %p", 
+		//		backwards ? "before" : "at", search_addr, fname ? fname : "(none)", base_addr);
+		return backwards ? 0 : (void*) -1;
+	} else warnx("could not map ELF header for %s", fname);
 	
 	return NULL;
 }
