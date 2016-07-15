@@ -27,6 +27,14 @@ CFLAGS += -O2
 CFLAGS += -fPIC
 CFLAGS += -ffreestanding -fno-omit-frame-pointer
 
+instr.o: CFLAGS += -DUSE_X86_DECODE
+
+ifeq ($(DEBUG),)
+CFLAGS += -DNDEBUG
+else
+instr.o: CFLAGS += -DUSE_OPDIS
+endif
+
 CFLAGS += -I $(UDIS86_DIR)
 CFLAGS += -I $(OPDIS_DIR)
 CFLAGS += -I $(LIBOPCODES_DIR)/include
@@ -60,7 +68,7 @@ endif
 x86_decode.o: CFLAGS += -include x86_defs.h -include stdio.h 
 x86_decode.o instr.o: CFLAGS += -std=gnu11
 
-instr.o: CFLAGS += -DUSE_UDIS86 -DUSE_X86_DECODE -DUSE_OPDIS
+#-DUSE_UDIS86 \
 
 # Also extract 	$(LIBOPDIS_A), $(LIBOPCODES_A), $(LIBBFD_A) and $(LIBIBERTY_A),
 # and re-add their members to our archive.  This allows clients to link to us
