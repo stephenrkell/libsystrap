@@ -141,8 +141,36 @@ typedef struct cpu_user_regs cpu_user_regs_t;
 #define cpu_has_amd_erratum(nr)  0 
      // cpu_has_amd_erratum(&current_cpu_data, AMD_ERRATUM_##nr)
 
+/* Lifted from struct operand in the .c file */
+enum operand_type { OP_REG, OP_MEM, OP_IMM, OP_NONE };
+
+/* We define some decode ops. These are callbacks 
+ * which fire as the instruction is decoded.
+ * One is for opcode, another for arguments,
+ * a third for encoded instruction *end*.
+ * The callback returns a flag saying whether or not to bother
+ * continuing; */
+
+/* User asked to abort, via callback. */
+#define X86EMUL_USER_ABORT 4
+
+struct x86_decode_ops
+{
+	// int (*saw_prefix)(int prefix);
+	int (*saw_opcode)(int opcode);
+	int (*saw_operand)(enum operand_type type, unsigned int bytes,
+		uint32_t *val,
+		uint32_t *origval,
+		unsigned long *p_reg,
+		enum x86_segment *p_mem_seg,
+		unsigned long *p_mem_off);
+	int (*next_instr)(unsigned char *pos);
+	int (*finished_decode)(void);
+};
+
 int
 x86_decode(
     struct x86_emulate_ctxt *ctxt,
-    const struct x86_emulate_ops  *ops);
+    const struct x86_emulate_ops  *ops,
+    const struct x86_decode_ops *decode_ops);
 

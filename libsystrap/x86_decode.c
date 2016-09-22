@@ -329,7 +329,7 @@ union vex {
 
 /* Type, address-of, and value of an instruction's operand. */
 struct operand {
-    enum { OP_REG, OP_MEM, OP_IMM, OP_NONE } type;
+    enum operand_type type;
     unsigned int bytes;
 
     /* Up to 128-byte operand value, addressable as ulong or uint32_t[]. */
@@ -599,7 +599,8 @@ in_realmode(
 int
 x86_decode(
     struct x86_emulate_ctxt *ctxt,
-    const struct x86_emulate_ops  *ops)
+    const struct x86_emulate_ops  *ops,
+    const struct x86_decode_ops *decode_ops)
 {
     /* Shadow copy of register state. Committed on successful emulation. */
     struct cpu_user_regs _regs = *ctxt->regs;
@@ -876,7 +877,7 @@ x86_decode(
                 modrm_mod = (modrm & 0xc0) >> 6;
 
                 break;
-            }
+            } /* end if b in {0xc4,0xc5} */
 
         modrm_reg = ((rex_prefix & 4) << 1) | ((modrm & 0x38) >> 3);
         modrm_rm  = modrm & 0x07;
@@ -1007,7 +1008,15 @@ x86_decode(
                 break;
             }
             ea.mem.off = truncate_ea(ea.mem.off);
-        }
+        } /* end else 32/64-bit ModR/M decode */
+    } /* end if apparently ModRM */
+    
+    /* really finished opcode decode now, so ... */
+    if (decode_ops->saw_opcode)
+    {
+        if (threebyte) decode_ops->saw_opcode(0x0f << 8 | (threebyte << 8) | b);
+        else if (twobyte) decode_ops->saw_opcode((0x0f << 8) | b);
+        else decode_ops->saw_opcode(b);
     }
 
     if ( override_seg != -1 && ea.type == OP_MEM )
@@ -1481,6 +1490,42 @@ x86_decode(
  done:
     //printf("Op size %d bytes, ip %p, rc %d, len %d\n", op_bytes, (void*) _regs.eip, rc,
     //    (char*) _regs.eip - (char*) ctxt->regs->eip);
+
+#define ARGS(op) \
+                op.type, \
+                op.bytes, \
+                &op.bigval[0], \
+                &op.orig_bigval[0], \
+                (op.type == OP_REG) ? op.reg : NULL, \
+                (op.type == OP_MEM) ? &op.mem.seg : NULL, \
+                (op.type == OP_MEM) ? &op.mem.off : NULL
+    
+    if (rc == 0)
+    {
+        if (decode_ops->saw_operand)
+        {
+            if (src.type != OP_NONE
+                && decode_ops->saw_operand(
+                        ARGS(src)
+                    )) return -X86EMUL_USER_ABORT;
+
+            if (dst.type != OP_NONE
+                &&  decode_ops->saw_operand(
+                        ARGS(dst)
+                    )) return -X86EMUL_USER_ABORT;
+
+            if ((ea.type = OP_REG /* make "sure" we really do have a memory addr operand */
+                    || (ea.type == OP_MEM && (d & ModRM)))
+                &&  decode_ops->saw_operand(
+                        ARGS(ea)
+                    )) return -X86EMUL_USER_ABORT;
+        }
+        if (decode_ops->next_instr && 
+                decode_ops->next_instr((unsigned char*) _regs.eip)) return -X86EMUL_USER_ABORT;
+    }
+    
+    if (decode_ops->finished_decode && decode_ops->finished_decode()) return -X86EMUL_USER_ABORT;
+    
     return (rc == 0) ? (char*) _regs.eip - (char*) ctxt->regs->eip : -rc;
 
  twobyte_insn:
