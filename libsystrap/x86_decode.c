@@ -22,7 +22,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
-
+ 
 /* Operand sizes: 8-bit operands or specified/overridden size. */
 #define ByteOp      (1<<0) /* 8-bit operands. */
 /* Destination operand type. */
@@ -347,10 +347,11 @@ struct operand {
     /* OP_REG: Pointer to register field. */
     unsigned long *reg;
 
-    /* OP_MEM: Segment and offset. */
+    /* OP_MEM: Segment and offset. Also remember any register(s) it came from. */
     struct {
         enum x86_segment seg;
         unsigned long    off;
+        unsigned fromreg1, fromreg2;
     } mem;
 };
 #ifdef __x86_64__
@@ -621,6 +622,8 @@ x86_decode(
      */
     struct operand ea = { .type = OP_MEM, .reg = REG_POISON };
     ea.mem.seg = x86_seg_ds; /* gcc may reject anon union initializer */
+    ea.mem.fromreg1 = (unsigned) -1;
+    ea.mem.fromreg2 = (unsigned) -1;
 
     ctxt->retire.byte = 0;
 
@@ -896,32 +899,44 @@ x86_decode(
             {
             case 0:
                 ea.mem.off = _regs.ebx + _regs.esi;
+                ea.mem.fromreg1 = offsetof(struct cpu_user_regs, ebx);
+                ea.mem.fromreg2 = offsetof(struct cpu_user_regs, esi);
                 break;
             case 1:
                 ea.mem.off = _regs.ebx + _regs.edi;
+                ea.mem.fromreg1 = offsetof(struct cpu_user_regs, ebx);
+                ea.mem.fromreg2 = offsetof(struct cpu_user_regs, edi);
                 break;
             case 2:
                 ea.mem.seg = x86_seg_ss;
                 ea.mem.off = _regs.ebp + _regs.esi;
+                ea.mem.fromreg1 = offsetof(struct cpu_user_regs, ebp);
+                ea.mem.fromreg2 = offsetof(struct cpu_user_regs, ss);
                 break;
             case 3:
                 ea.mem.seg = x86_seg_ss;
                 ea.mem.off = _regs.ebp + _regs.edi;
+                ea.mem.fromreg1 = offsetof(struct cpu_user_regs, ebp);
+                ea.mem.fromreg2 = offsetof(struct cpu_user_regs, edi);
                 break;
             case 4:
                 ea.mem.off = _regs.esi;
+                ea.mem.fromreg1 = offsetof(struct cpu_user_regs, esi);
                 break;
             case 5:
                 ea.mem.off = _regs.edi;
+                ea.mem.fromreg1 = offsetof(struct cpu_user_regs, edi);
                 break;
             case 6:
                 if ( modrm_mod == 0 )
                     break;
                 ea.mem.seg = x86_seg_ss;
                 ea.mem.off = _regs.ebp;
+                ea.mem.fromreg1 = offsetof(struct cpu_user_regs, ebp);
                 break;
             case 7:
                 ea.mem.off = _regs.ebx;
+                ea.mem.fromreg1 = offsetof(struct cpu_user_regs, ebx);
                 break;
             }
             switch ( modrm_mod )
@@ -947,8 +962,11 @@ x86_decode(
                 sib = insn_fetch_type(uint8_t);
                 sib_index = ((sib >> 3) & 7) | ((rex_prefix << 2) & 8);
                 sib_base  = (sib & 7) | ((rex_prefix << 3) & 8);
-                if ( sib_index != 4 )
-                    ea.mem.off = *(long*)decode_register(sib_index, &_regs, 0);
+                if ( sib_index != 4 ) {
+                    long *ptr = (long*)decode_register(sib_index, &_regs, 0);
+                    ea.mem.off = *ptr;
+                    ea.mem.fromreg1 = (char*) ptr - (char*) &_regs;
+                }
                 ea.mem.off <<= (sib >> 6) & 3;
                 if ( (modrm_mod == 0) && ((sib_base & 7) == 5) )
                     ea.mem.off += insn_fetch_type(int32_t);
@@ -965,14 +983,21 @@ x86_decode(
                 {
                     ea.mem.seg  = x86_seg_ss;
                     ea.mem.off += _regs.ebp;
+                    ea.mem.fromreg2 = offsetof(struct cpu_user_regs, ebp);
                 }
                 else
-                    ea.mem.off += *(long*)decode_register(sib_base, &_regs, 0);
+                {
+                    long *ptr = (long*)decode_register(sib_base, &_regs, 0);
+                    ea.mem.off += *ptr;
+                    ea.mem.fromreg2 = (char*) ptr - (char*) &_regs;
+                }
             }
             else
             {
                 modrm_rm |= (rex_prefix & 1) << 3;
-                ea.mem.off = *(long *)decode_register(modrm_rm, &_regs, 0);
+                long *ptr = (long *)decode_register(modrm_rm, &_regs, 0);
+                ea.mem.off = *ptr;
+                ea.mem.fromreg1 = (char*) ptr - (char*) &_regs;
                 if ( (modrm_rm == 5) && (modrm_mod != 0) )
                     ea.mem.seg = x86_seg_ss;
             }
@@ -1498,7 +1523,9 @@ x86_decode(
                 &op.orig_bigval[0], \
                 (op.type == OP_REG) ? op.reg : NULL, \
                 (op.type == OP_MEM) ? &op.mem.seg : NULL, \
-                (op.type == OP_MEM) ? &op.mem.off : NULL
+                (op.type == OP_MEM) ? &op.mem.off : NULL, \
+                (op.type == OP_MEM) ? &op.mem.fromreg1 : NULL, \
+                (op.type == OP_MEM) ? &op.mem.fromreg2 : NULL \
     
     if (rc == 0)
     {

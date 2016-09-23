@@ -72,6 +72,10 @@ struct cpu_user_regs;
 #define __DECL_REG(name) uint64_t r ## name
 #endif
 
+#ifndef offsetof
+#define offsetof(st, m) ((size_t)&(((st *)0)->m))
+#endif
+
 struct cpu_user_regs {
     uint64_t r15;
     uint64_t r14;
@@ -163,7 +167,9 @@ struct x86_decode_ops
 		uint32_t *origval,
 		unsigned long *p_reg,
 		enum x86_segment *p_mem_seg,
-		unsigned long *p_mem_off);
+		unsigned long *p_mem_off,
+		unsigned long *p_mem_fromreg1,
+		unsigned long *p_mem_fromreg2);
 	int (*next_instr)(unsigned char *pos);
 	int (*finished_decode)(void);
 };

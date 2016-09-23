@@ -160,20 +160,59 @@ static int instr_len_x86_decode(unsigned const char *ins, unsigned const char *e
 
 typedef void saw_operand_client_cb(int /*type*/, unsigned int /*bytes*/, uint32_t */*val*/,
 		unsigned long */*p_reg*/, int */*p_mem_seg*/, unsigned long */*p_mem_off*/,
-		void */*arg*/);
+		int */*p_fromreg1*/, int */*p_fromreg2*/, void */*arg*/);
 static __thread struct
 {
 	saw_operand_client_cb *client_cb;
 	void *arg;
 } active_cb_state;
+
+int convert_one_reg(unsigned regnum)
+{
+#define CASE(frag, FRAG) case (offsetof(struct cpu_user_regs, frag)): return DWARF_X86_64_ ## FRAG;
+	switch (regnum)
+	{
+		CASE(r15, R15)
+		CASE(r14, R14)
+		CASE(r13, R13)
+		CASE(r12, R12)
+		CASE(rbp, RBP)
+		CASE(rbx, RBX)
+		CASE(r11, R11)
+		CASE(r10, R10)
+		CASE(r9,  R9)
+		CASE(r8,  R8)
+		CASE(rax, RAX)
+		CASE(rcx, RCX)
+		CASE(rdx, RDX)
+		CASE(rsi, RSI)
+		CASE(rdi, RDI)
+		CASE(rip, RIP)
+		case (unsigned)-1:
+		default:
+			return -1;
+	}
+#undef CASE
+}
 int relay_operand(enum operand_type type, unsigned int bytes,
 		uint32_t *val,
 		uint32_t *origval,
 		unsigned long *p_reg,
 		enum x86_segment *p_mem_seg,
-		unsigned long *p_mem_off)
+		unsigned long *p_mem_off,
+		unsigned long *p_fromreg1,
+		unsigned long *p_fromreg2)
 {
-	active_cb_state.client_cb(type, bytes, origval, p_reg, (int*) p_mem_seg, p_mem_off, 
+	/* We need to translate register numbers from x86_decode's internal numbering
+	 * into DWARF register numbers. */
+	int converted_reg;
+	int converted_fromreg1;
+	int converted_fromreg2;
+	active_cb_state.client_cb(type, bytes, origval, 
+		p_reg ? (converted_reg = convert_one_reg(*p_reg), &converted_reg) : NULL,
+		(int*) p_mem_seg, p_mem_off, 
+		p_fromreg1 ? (converted_fromreg1 = convert_one_reg(*p_fromreg1), &converted_fromreg1) : NULL,
+		p_fromreg2 ? (converted_fromreg2 = convert_one_reg(*p_fromreg2), &converted_fromreg2) : NULL, 
 		active_cb_state.arg);
 	return 0;
 }
@@ -185,6 +224,7 @@ int enumerate_operands(unsigned const char *ins, unsigned const char *end,
 	void *mcontext_as_void,
 	void (*saw_operand)(int /*type*/, unsigned int /*bytes*/, uint32_t */*val*/,
 		unsigned long */*p_reg*/, int */*p_mem_seg*/, unsigned long */*p_mem_off*/,
+		unsigned long *p_fromreg1, unsigned long *p_fromreg2,
 		void */*arg*/),
 	void *arg
 	)
