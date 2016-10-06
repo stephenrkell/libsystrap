@@ -224,7 +224,7 @@ int enumerate_operands(unsigned const char *ins, unsigned const char *end,
 	void *mcontext_as_void,
 	void (*saw_operand)(int /*type*/, unsigned int /*bytes*/, uint32_t */*val*/,
 		unsigned long */*p_reg*/, int */*p_mem_seg*/, unsigned long */*p_mem_off*/,
-		unsigned long *p_fromreg1, unsigned long *p_fromreg2,
+		int *p_fromreg1, int *p_fromreg2,
 		void */*arg*/),
 	void *arg
 	)
