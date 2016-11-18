@@ -70,12 +70,18 @@ x86_decode.o instr.o: CFLAGS += -std=gnu11
 
 #-DUSE_UDIS86 \
 
+ifneq ($(shell uname -s),FreeBSD)
+ARCHIVES := $(LIBUDIS86_A) $(LIBOPDIS_A) $(LIBOPCODES_A) $(LIBBFD_A) $(LIBIBERTY_A)
+else
+ARCHIVES :=
+endif
+
 # Also extract 	$(LIBOPDIS_A), $(LIBOPCODES_A), $(LIBBFD_A) and $(LIBIBERTY_A),
 # and re-add their members to our archive.  This allows clients to link to us
 # without concern for these dependencies, which they probably don't have
 # available in PIC form.
 libsystrap.a: $(OBJS)
-	objs_list=$$( for fname in $(LIBUDIS86_A) $(LIBOPDIS_A) $(LIBOPCODES_A) $(LIBBFD_A) $(LIBIBERTY_A); do \
+	objs_list=$$( for fname in $(ARCHIVES); do \
 		$(AR) vx "$$fname"; done | \
 		grep '^x - ' | sed 's/^x - //' | tee objs_list ); \
 	$(AR) r "$@" $^ $${objs_list}; \

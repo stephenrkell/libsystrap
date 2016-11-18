@@ -1,11 +1,20 @@
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 CONTRIB := $(realpath $(dir $(THIS_MAKEFILE)))
 
+KERNEL ?= $(shell uname -s)
+
 default: all
 all: build config.mk
 .PHONY: default all build independent
+
+ifeq ($(KERNEL),Linux)
 build: build-udis86 build-opdis build-binutils build-zlib build-eglibc \
 #build-liballocs build-dwarfidl build-libfootprints
+else
+ifeq ($(KERNEL),FreeBSD)
+build: build-udis86
+endif
+endif
 
 # don't remove intermediates
 .SECONDARY:
@@ -126,23 +135,23 @@ install-binutils: build-binutils
 independent: $(EGLIBC_TAR) $(ZLIB_TAR) $(BINUTILS_TAR) opdis/configure
 
 config.mk:
-	echo 'CONTRIB := $(realpath $(dir $@)) \n\
-LIBC_DIR := $(wildcard $(CONTRIB)/eglibc-*/libc/build) \n\
-LIBC_A := $$(LIBC_DIR)/libc_pic.a $$(LIBC_DIR)/libc_nonshared.a \n\
-RTLD_OBJ_DIR := $$(LIBC_DIR)/elf\n\
-RTLD_SO := $$(RTLD_OBJ_DIR)/ld.so\n\
-RTLD_LIBC_A := $$(RTLD_OBJ_DIR)/rtld-libc.a\n\
-LIBUDIS86_A := $$(CONTRIB)/udis86/libudis86/.libs/libudis86.a \n\
-LIBOPDIS_A := $$(CONTRIB)/opdis-build/dist/.libs/libopdis.a \n\
-LIBOPCODES_DIR := $$(CONTRIB)/binutils-2.26 \n\
-BFD_DIR := $$(CONTRIB)/binutils-build/bfd \n\
-LIBOPCODES_A := $$(CONTRIB)/binutils-build/opcodes/libopcodes.a \n\
-LIBBFD_A := $$(CONTRIB)/binutils-build/bfd/libbfd.a \n\
-LIBIBERTY_A := $$(CONTRIB)/binutils-build/libiberty/libiberty.a \n\
+	printf 'CONTRIB := $(realpath $(dir $@)) \n\
+LIBC_DIR ?= $(wildcard $(CONTRIB)/eglibc-*/libc/build) \n\
+LIBC_A ?= $$(LIBC_DIR)/libc_pic.a $$(LIBC_DIR)/libc_nonshared.a \n\
+RTLD_OBJ_DIR ?= $$(LIBC_DIR)/elf\n\
+RTLD_SO ?= $$(RTLD_OBJ_DIR)/ld.so\n\
+RTLD_LIBC_A ?= $$(RTLD_OBJ_DIR)/rtld-libc.a\n\
+LIBUDIS86_A ?= $$(CONTRIB)/udis86/libudis86/.libs/libudis86.a \n\
+LIBOPDIS_A ?= $$(CONTRIB)/opdis-build/dist/.libs/libopdis.a \n\
+LIBOPCODES_DIR ?= $$(CONTRIB)/binutils-2.26 \n\
+BFD_DIR ?= $$(CONTRIB)/binutils-build/bfd \n\
+LIBOPCODES_A ?= $$(CONTRIB)/binutils-build/opcodes/libopcodes.a \n\
+LIBBFD_A ?= $$(CONTRIB)/binutils-build/bfd/libbfd.a \n\
+LIBIBERTY_A ?= $$(CONTRIB)/binutils-build/libiberty/libiberty.a \n\
 LIBALLOCS_DIR ?= $(realpath $(dir $(THIS_MAKEFILE)))/../../liballocs \n\
-LIBFOOTPRINTS_DIR := $$(CONTRIB)/libfootprints \n\
-ANTLR3C_DIR := $$(CONTRIB)/libantlr3c-3.4 \n\
-DWARFIDL_DIR := $$(CONTRIB)/dwarfidl \n\
-OPDIS_DIR := $$(CONTRIB)/opdis \n\
-UDIS86_DIR := $$(CONTRIB)/udis86 \n\
+LIBFOOTPRINTS_DIR ?= $$(CONTRIB)/libfootprints \n\
+ANTLR3C_DIR ?= $$(CONTRIB)/libantlr3c-3.4 \n\
+DWARFIDL_DIR ?= $$(CONTRIB)/dwarfidl \n\
+OPDIS_DIR ?= $$(CONTRIB)/opdis \n\
+UDIS86_DIR ?= $$(CONTRIB)/udis86 \n\
 ZLIB_A ?= $$(CONTRIB)/zlib-1.2.8/libz.a' | sed '/^\\$$/ d' | sed 's/ *$$//' > "$@"

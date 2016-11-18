@@ -2,9 +2,9 @@
 #include <sys/syscall.h>
 
 #define SYSCALL(n) \
-[__NUM_ ## n] = #n,
+[SYS_ ## n] = #n,
 
 const char *syscall_names[] = {
-#include "linux-syscall-macros.h"
+#include "syscall-macros.h"
 	NULL
 };

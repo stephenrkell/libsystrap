@@ -11,7 +11,7 @@
 #include "systrap.h"
 #include "systrap_private.h"
 #include "syscall-names.h"
-#include <footprints.h>
+/* #include <footprints.h> */
 
 /* We are a preloaded library whose constructor
  * calls libsystrap to divert all syscalls

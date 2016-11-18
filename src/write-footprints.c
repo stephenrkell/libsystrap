@@ -119,7 +119,7 @@ systrap_pre_handling(struct generic_syscall *gsp)
 {
 	/* Now walk the footprint. We print out a line per-syscall before and after
 	 * to bracket the invididual footprint items. */
-	void *calling_addr = (void*) gsp->saved_context->uc.uc_mcontext.rip;
+	void *calling_addr = (void*) gsp->saved_context->uc.uc_mcontext.MC_REG(rip);
 	struct link_map *calling_object = get_link_map(calling_addr);
 	print_pre(gsp, calling_addr, calling_object, NULL);
 	
@@ -194,7 +194,7 @@ systrap_pre_handling(struct generic_syscall *gsp)
 void __attribute__((visibility("protected")))
 systrap_post_handling(struct generic_syscall *gsp, long int ret)
 {
-	void *calling_addr = (void*) gsp->saved_context->uc.uc_mcontext.rip;
+	void *calling_addr = (void*) gsp->saved_context->uc.uc_mcontext.MC_REG(rip);
 	struct link_map *calling_object = get_link_map(calling_addr);
 	print_post(gsp, calling_addr, calling_object, (void *)ret);
 }

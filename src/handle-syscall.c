@@ -19,7 +19,7 @@ void print_pre_syscall(void *stream, struct generic_syscall *gsp, void *calling_
 void __attribute__((visibility("protected"),weak))
 systrap_pre_handling(struct generic_syscall *gsp)
 {
-	void *calling_addr = (void*) gsp->saved_context->uc.uc_mcontext.rip;
+	void *calling_addr = (void*) gsp->saved_context->uc.uc_mcontext.MC_REG(rip);
 	struct link_map *calling_object = get_highest_loaded_object_below(calling_addr);
 	print_pre_syscall(traces_out, gsp, calling_addr, calling_object, NULL);
 }
@@ -27,7 +27,7 @@ systrap_pre_handling(struct generic_syscall *gsp)
 void __attribute__((visibility("protected"),weak))
 systrap_post_handling(struct generic_syscall *gsp)
 {
-	void *calling_addr = (void*) gsp->saved_context->uc.uc_mcontext.rip;
+	void *calling_addr = (void*) gsp->saved_context->uc.uc_mcontext.MC_REG(rip);
 	struct link_map *calling_object = get_highest_loaded_object_below(calling_addr);
 	print_post_syscall(traces_out, gsp, calling_addr, calling_object, NULL);
 }

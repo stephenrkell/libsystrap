@@ -26,13 +26,20 @@
  * handling. We use inline assembly to make the few system calls
  * that we need. */
 #include "raw-syscalls.h"
+#ifdef __linux__
 #define sigset_t __asm_sigset_t
-#include <asm/fcntl.h>
+#endif
 #include <sys/mman.h>
 #include <stdint.h>
 #include <string.h>
 #include <stdarg.h>
+#ifdef __linux__
 #include <alloca.h>
+#endif
+#ifdef __FreeBSD__
+#include <stdlib.h>
+#include <fcntl.h>
+#endif
 #include <err.h>
 #include "systrap_private.h"
 #include "do-syscall.h"
@@ -303,7 +310,7 @@ int debug_level __attribute__((visibility("hidden")));
 int sleep_for_seconds __attribute__((visibility("hidden")));
 int stop_self __attribute__((visibility("hidden")));
 int self_pid __attribute__((visibility("hidden")));
-FILE **p_err_stream __attribute__((visibility("hidden"))) = &stderr;
+FILE **p_err_stream __attribute__((visibility("hidden")));
 
 /* We initialize our error-reporting stuff, but don't actually 
  * set up any traps. That's left to the client. */
@@ -375,8 +382,10 @@ void install_sigill_handler(void)
 		//.sa_sigaction = &handle_sigtrap,
 		.sa_handler = &handle_sigill,
 		.sa_mask = 0,
-		.sa_flags = /*SA_SIGINFO |*/ 0x04000000u /* SA_RESTORER */ | /*SA_RESTART |*/ SA_NODEFER,
-		.sa_restorer = restore_rt
+		.sa_flags = /*SA_SIGINFO |*/ 0x04000000u /* SA_RESTORER */ | /*SA_RESTART |*/ SA_NODEFER
+		#ifndef __FreeBSD__
+		, .sa_restorer = restore_rt
+		#endif
 	};
 	struct sigaction oldaction;
 	raw_rt_sigaction(SIGILL, &action, &oldaction);
@@ -426,16 +435,16 @@ static void handle_sigill(int n)
 	struct ibcs_sigframe *p_frame = (struct ibcs_sigframe *) (frame_base + 1);
 
 	/* Decode the syscall using sigcontext. */
-	_handle_sigill_debug_printf(1, "Took a trap from instruction at %p", p_frame->uc.uc_mcontext.rip);
+	_handle_sigill_debug_printf(1, "Took a trap from instruction at %p", p_frame->uc.uc_mcontext.MC_REG(rip));
 #ifdef EXECUTABLE
-	if (p_frame->uc.uc_mcontext.rip == (uintptr_t) ignore_ud2_addr)
+	if (p_frame->uc.uc_mcontext.MC_REG(rip) == (uintptr_t) ignore_ud2_addr)
 	{
 		_handle_sigill_debug_printf(1, " which is our test trap address; continuing.\n");
 		resume_from_sigframe(0, p_frame, 2);
 		return;
 	}
 #endif
-	unsigned long syscall_num = (unsigned long) p_frame->uc.uc_mcontext.rax;
+	unsigned long syscall_num = (unsigned long) p_frame->uc.uc_mcontext.MC_REG(rax);
 	assert(syscall_num >= 0);
 	assert(syscall_num < SYSCALL_MAX);
 	_handle_sigill_debug_printf(1, " which we think is syscall %s/%d\n",
@@ -448,12 +457,12 @@ static void handle_sigill(int n)
 		.saved_context = p_frame,
 		.syscall_number = syscall_num,
 		.args = {
-			p_frame->uc.uc_mcontext.rdi,
-			p_frame->uc.uc_mcontext.rsi,
-			p_frame->uc.uc_mcontext.rdx,
-			p_frame->uc.uc_mcontext.r10,
-			p_frame->uc.uc_mcontext.r8,
-			p_frame->uc.uc_mcontext.r9
+			p_frame->uc.uc_mcontext.MC_REG(rdi),
+			p_frame->uc.uc_mcontext.MC_REG(rsi),
+			p_frame->uc.uc_mcontext.MC_REG(rdx),
+			p_frame->uc.uc_mcontext.MC_REG(r10),
+			p_frame->uc.uc_mcontext.MC_REG(r8),
+			p_frame->uc.uc_mcontext.MC_REG(r9)
 		}
 	};
 

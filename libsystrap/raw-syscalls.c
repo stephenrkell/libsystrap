@@ -174,7 +174,7 @@ void *__attribute__((noinline)) raw_mmap(void *addr, size_t length, int prot, in
                   int fd, off_t offset)
 {
 	long int ret;
-	long int op = __NR_mmap;
+	long int op = SYS_mmap;
 	__asm__ volatile ("movq %[arg0], %%rdi \n\
 			   movq %[arg1], %%rsi \n\
 			   movq %[arg2], %%rdx \n\
@@ -219,7 +219,7 @@ int __attribute__((noinline)) raw_rt_sigaction(int signum, const struct sigactio
 		     struct sigaction *oldact)
 {
 	long int ret;
-	long int op = SYS_rt_sigaction;
+	long int op = SYS_sigaction;
 	size_t sigsetsize = sizeof (__asm_sigset_t);
 	__asm__ volatile ("movq %1, %%rdi      # \n\
 			   movq %2, %%rsi      # \n\
@@ -246,8 +246,10 @@ static void install_sigabrt_handler(void)
 	struct sigaction action = {
 		.sa_handler = &handle_sigabrt,
 		.sa_mask = 0,
-		.sa_flags = /*SA_SIGINFO |*/ 0x04000000u /* SA_RESTORER */ | /*SA_RESTART |*/ SA_NODEFER,
-		.sa_restorer = restore_rt
+		.sa_flags = /*SA_SIGINFO |*/ 0x04000000u /* SA_RESTORER */ | /*SA_RESTART |*/ SA_NODEFER
+		#ifndef __FreeBSD__
+		, .sa_restorer = restore_rt
+		#endif
 	};
 	int ret = raw_rt_sigaction(SIGABRT, &action, NULL);
 	assert(ret == 0);

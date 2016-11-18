@@ -1,6 +1,7 @@
-
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 SRCROOT := $(realpath $(dir $(THIS_MAKEFILE)))/..
+
+SYS := $(shell uname -s | tr A-Z a-z )
 
 CONTRIB := $(SRCROOT)/contrib
 CONFIG := $(CONTRIB)/config.mk
@@ -10,6 +11,10 @@ default: trace-syscalls.so
 $(CONTRIB)/config.mk:
 	$(MAKE) -C $(CONTRIB)
 
+ifeq ($(SYS),freebsd)
+LIBC_DIR ?= /usr/lib
+LIBC_A ?= /usr/lib/libc_pic.a
+endif
 include $(CONFIG)
 
 CFLAGS += -DRELF_DEFINE_STRUCTURES -DSYSTRAP_DEFINE_FILE
@@ -79,18 +84,26 @@ CXXFLAGS := $(CXXFLAGS) $(CFLAGS) # eagerly latch CFLAGS now; don't want later a
 CFLAGS += -std=c99
 CXXFLAGS += -std=c++11 $(LLVM_CXXFLAGS)
 
-linux-syscall-ifacetypes.c:
+$(SYS)-syscall-ifacetypes.c:
 
 # This is a quick but incomplete way to build 
 linux-syscall-macros.h:
 	( /usr/bin/cpp -E -D"__SYSCALL(num,decl)=decl" - </dev/null | \
            sed -r '/^(#.*)?$$/ d' | sort | uniq | sed 's/^\(.*\)/SYSCALL(\1)/') > "$@" || (rm -f "$@"; false)
 
+freebsd-syscall-macros.h:
+	cat /usr/include/sys/syscall.h | grep 'SYS_[a-z][A-Za-z0-9_]*' | cut -f2 | \
+    sed 's/SYS_\(.*\)/SYSCALL(\1)/' > "$@" || (rm -f "$@"; false)
+
 # Avoid building local incomplete .h if we have the complete one at hand.
 # This means we don't need a working syscall-introspect-tools to proceed,
-# but we'll pick it up if its linux-syscall-macros.h has been built.
+# but we'll pick it up if its syscall-macros.h has been built.
 vpath %.h $(SYSCALL_INTROSPECT_TOOLS)/scripts
-syscall-names.o: linux-syscall-macros.h
+
+syscall-macros.h: $(SYS)-syscall-macros.h
+	cp "$<" "$@"
+
+syscall-names.o: $(SYS)-syscall-macros.h
 
 # HACK: more liballocs dependency -- split off a librefl or librunt to isolate these?
 C_SRC := $(wildcard *.c) uniqtype-bfs.c # $(SYSCALL_IFACE_SRC)
@@ -103,9 +116,9 @@ DEPS := $(C_DEPS) $(CC_DEPS)
 OBJS := $(patsubst %.c,%.o,$(C_SRC)) $(patsubst %.cc,%.o,$(CC_SRC)) $(patsubst %.s,%.o,$(S_SRC))
 
 $(CC_DEPS): .%.d: %.cc
-	$(CXX) -MM $(CXXFLAGS) $+ > "$@" || rm -f "$@"
+	$(CXX) -MG -MM $(CXXFLAGS) $+ > "$@" || rm -f "$@"
 $(C_DEPS): .%.d: %.c
-	$(CC) -MM $(CFLAGS) $+ > "$@" || rm -f "$@"
+	$(CC) -MG -MM $(CFLAGS) $+ > "$@" || rm -f "$@"
 
 ifneq ($(MAKECMDGOALS),clean)
 -include $(DEPS)
@@ -129,7 +142,13 @@ comma := ,
 # We don't want user code calling into our exit(), hence having us make its syscalls.
 trace-syscalls.so: LDLIBS := -Bstatic \
 	$(SRCROOT)/libsystrap/libsystrap.a \
-	$(ZLIB_A) \
+
+ifneq ($(SYS),freebsd)
+trace-syscalls.so: LDLIBS += \
+	$(ZLIB_A)
+endif
+
+trace-syscalls.so: LDLIBS += \
 	dlmalloc.a \
 	$(LIBC_A) 
 

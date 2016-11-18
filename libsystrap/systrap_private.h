@@ -10,12 +10,12 @@ extern int self_pid __attribute__((visibility("hidden")));
 struct _IO_FILE;
 typedef struct _IO_FILE FILE;
 #endif
-extern FILE *stderr;
+/* Don't declare stderr ourselves; e.g. in FreeBSD it's really called __stderrp. */
+/* extern FILE *stderr; */
 extern FILE **p_err_stream;
 
-extern char *getenv (const char *__name) __THROW __nonnull ((1)) __wur;
-extern int atoi (const char *__nptr)
-     __THROW __attribute_pure__ __nonnull ((1)) __wur;
+extern char *getenv (const char *__name);
+extern int atoi (const char *__nptr);
 /* avoid stdlib and stdio for sigset_t conflict reasons */
 void *calloc(size_t, size_t);
 void free(void*);
@@ -27,6 +27,7 @@ int fflush(FILE *stream);
 
 #define debug_printf(lvl, fmt, ...) do { \
     if ((lvl) <= debug_level) { \
+      if (!p_err_stream) *p_err_stream = fdopen(2, "w"); \
       fprintf(*p_err_stream, fmt, ## __VA_ARGS__ ); \
       fflush(*p_err_stream); \
     } \

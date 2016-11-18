@@ -1,7 +1,9 @@
 #include "elfutil.h"
 #include <stddef.h>
 #include <string.h>
+#ifdef __linux__
 #include <asm/fcntl.h>
+#endif
 #include <sys/mman.h>
 #include <stdlib.h>
 #include <err.h>

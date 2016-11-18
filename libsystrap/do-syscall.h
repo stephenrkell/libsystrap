@@ -6,7 +6,12 @@
 #include <stddef.h>
 #include <unistd.h>
 #include <stdint.h>
+#ifdef HAVE_ALLOCA_H_
 #include <alloca.h>
+#endif
+#ifdef __FreeBSD__
+#include <stdlib.h>
+#endif
 #include <string.h>
 #include <sys/syscall.h>
 #include <stdarg.h>
@@ -203,10 +208,10 @@ resume_from_sigframe(long int ret, struct ibcs_sigframe *p_frame, unsigned instr
 	 * it away for me. So do it in volatile assembly. */
 
 	// set the return value
-	__asm__ volatile ("movq %1, %0" : "=m"(p_frame->uc.uc_mcontext.rax) : "r"(ret) : "memory");
+	__asm__ volatile ("movq %1, %0" : "=m"(p_frame->uc.uc_mcontext.MC_REG(rax)) : "r"(ret) : "memory");
 
 	// adjust the saved program counter to point past the trapping instr
-	__asm__ volatile ("movq %1, %0" : "=m"(p_frame->uc.uc_mcontext.rip) : "r"(p_frame->uc.uc_mcontext.rip + instr_len) : "memory");
+	__asm__ volatile ("movq %1, %0" : "=m"(p_frame->uc.uc_mcontext.MC_REG(rip)) : "r"(p_frame->uc.uc_mcontext.MC_REG(rip) + instr_len) : "memory");
 }
 
 extern inline void 
@@ -265,7 +270,7 @@ do_syscall_and_resume(struct generic_syscall *gsp)
 		}
 		
 		register unsigned trap_len __asm__ ("rsi") = instr_len(
-			(unsigned char*) gsp->saved_context->uc.uc_mcontext.rip,
+			(unsigned char*) gsp->saved_context->uc.uc_mcontext.MC_REG(rip),
 			(unsigned char*) -1 /* we don't know where the end of the mapping is */
 			);
 		
@@ -311,7 +316,7 @@ do_syscall_and_resume(struct generic_syscall *gsp)
 			
 			struct ibcs_sigframe *p_frame = (struct ibcs_sigframe *) ((char*) new_top_of_stack - sizeof (struct ibcs_sigframe));
 			/* Make sure that the new stack pointer is the one returned to the caller. */
-			p_frame->uc.uc_mcontext.rsp = (uintptr_t) new_top_of_stack;
+			p_frame->uc.uc_mcontext.MC_REG(rsp) = (uintptr_t) new_top_of_stack;
 			/* Do the usual manipulations of saved context, to return and resume from the syscall. */
 			resume_from_sigframe(ret, p_frame, trap_len);
 			/* Hack our rsp so that the epilogue / sigret will execute correctly. */
@@ -332,8 +337,12 @@ extern inline _Bool
 __attribute__((always_inline,gnu_inline))
 zaps_stack(struct generic_syscall *gsp)
 {
+#ifdef __FreeBSD__
+	return 0;
+#else
 	return gsp->syscall_number == __NR_clone
 				&& gsp->args[1] /* newstack */ != 0;
+#endif
 }
 
 #endif
