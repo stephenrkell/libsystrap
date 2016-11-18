@@ -1,3 +1,30 @@
+/******************************************************************************
+ * x86_defs.h.c
+ * 
+ * Supporting definitions for
+ * generic x86 (32-bit and 64-bit) instruction decoder (NOT emulator).
+ * 
+ * Portions copyright 2016, Stephen Kell.
+ * Based on x86_emulate.h, which is
+ * Copyright (c) 2005-2007 Keir Fraser
+ * Copyright (c) 2005-2007 XenSource Inc.
+ * 
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ */
+
+
 #include <stdint.h>
 #include <err.h> /* for warnx() */
 #include <stdlib.h>
@@ -43,6 +70,10 @@ struct cpu_user_regs;
 #else
 /* Non-gcc sources must always use the proper 64-bit name (e.g., rax). */
 #define __DECL_REG(name) uint64_t r ## name
+#endif
+
+#ifndef offsetof
+#define offsetof(st, m) ((size_t)&(((st *)0)->m))
 #endif
 
 struct cpu_user_regs {
@@ -114,8 +145,38 @@ typedef struct cpu_user_regs cpu_user_regs_t;
 #define cpu_has_amd_erratum(nr)  0 
      // cpu_has_amd_erratum(&current_cpu_data, AMD_ERRATUM_##nr)
 
+/* Lifted from struct operand in the .c file */
+enum operand_type { OP_REG, OP_MEM, OP_IMM, OP_NONE };
+
+/* We define some decode ops. These are callbacks 
+ * which fire as the instruction is decoded.
+ * One is for opcode, another for arguments,
+ * a third for encoded instruction *end*.
+ * The callback returns a flag saying whether or not to bother
+ * continuing; */
+
+/* User asked to abort, via callback. */
+#define X86EMUL_USER_ABORT 4
+
+struct x86_decode_ops
+{
+	// int (*saw_prefix)(int prefix);
+	int (*saw_opcode)(int opcode);
+	int (*saw_operand)(enum operand_type type, unsigned int bytes,
+		uint32_t *val,
+		uint32_t *origval,
+		unsigned long *p_reg,
+		enum x86_segment *p_mem_seg,
+		unsigned long *p_mem_off,
+		unsigned long *p_mem_fromreg1,
+		unsigned long *p_mem_fromreg2);
+	int (*next_instr)(unsigned char *pos);
+	int (*finished_decode)(void);
+};
+
 int
 x86_decode(
     struct x86_emulate_ctxt *ctxt,
-    const struct x86_emulate_ops  *ops);
+    const struct x86_emulate_ops  *ops,
+    const struct x86_decode_ops *decode_ops);
 

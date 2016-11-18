@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+#include <ucontext.h>
 #include "instr.h" /* our API -- in C */
 #include <assert.h>
 #include <string.h>
@@ -136,16 +138,143 @@ static int insn_fetch(
 static struct x86_emulate_ops ops = {
 	.insn_fetch = insn_fetch
 };
+static int next_instr(unsigned char *pos)
+{
+	/* FIXME: use this instead of return value. */
+	return 0;
+}
+struct x86_decode_ops decode_ops = {
+	.next_instr = next_instr
+};
+
 static int instr_len_x86_decode(unsigned const char *ins, unsigned const char *end)
 {
 	limit = end;
 	if (!ctxt.regs) ctxt.regs = &regs;
 	ctxt.regs->rip = (uintptr_t) ins;
-	int x86_decode_len = x86_decode(&ctxt, &ops);
+	int x86_decode_len = x86_decode(&ctxt, &ops, &decode_ops);
 	// int x86_decode_err = (x86_decode_len > 0) ? 0 : -x86_decode_len;
 	if (x86_decode_len < 1) return -1;
 	return x86_decode_len;
 }
+
+typedef void saw_operand_client_cb(int /*type*/, unsigned int /*bytes*/, uint32_t */*val*/,
+		unsigned long */*p_reg*/, int */*p_mem_seg*/, unsigned long */*p_mem_off*/,
+		int */*p_fromreg1*/, int */*p_fromreg2*/, void */*arg*/);
+static __thread struct
+{
+	saw_operand_client_cb *client_cb;
+	void *arg;
+} active_cb_state;
+
+int convert_one_reg(unsigned regnum)
+{
+#define CASE(frag, FRAG) case (offsetof(struct cpu_user_regs, frag)): return DWARF_X86_64_ ## FRAG;
+	switch (regnum)
+	{
+		CASE(r15, R15)
+		CASE(r14, R14)
+		CASE(r13, R13)
+		CASE(r12, R12)
+		CASE(rbp, RBP)
+		CASE(rbx, RBX)
+		CASE(r11, R11)
+		CASE(r10, R10)
+		CASE(r9,  R9)
+		CASE(r8,  R8)
+		CASE(rax, RAX)
+		CASE(rcx, RCX)
+		CASE(rdx, RDX)
+		CASE(rsi, RSI)
+		CASE(rdi, RDI)
+		CASE(rip, RIP)
+		case (unsigned)-1:
+		default:
+			return -1;
+	}
+#undef CASE
+}
+int relay_operand(enum operand_type type, unsigned int bytes,
+		uint32_t *val,
+		uint32_t *origval,
+		unsigned long *p_reg,
+		enum x86_segment *p_mem_seg,
+		unsigned long *p_mem_off,
+		unsigned long *p_fromreg1,
+		unsigned long *p_fromreg2)
+{
+	/* We need to translate register numbers from x86_decode's internal numbering
+	 * into DWARF register numbers. */
+	int converted_reg;
+	int converted_fromreg1;
+	int converted_fromreg2;
+	active_cb_state.client_cb(type, bytes, origval, 
+		p_reg ? (converted_reg = convert_one_reg(*p_reg), &converted_reg) : NULL,
+		(int*) p_mem_seg, p_mem_off, 
+		p_fromreg1 ? (converted_fromreg1 = convert_one_reg(*p_fromreg1), &converted_fromreg1) : NULL,
+		p_fromreg2 ? (converted_fromreg2 = convert_one_reg(*p_fromreg2), &converted_fromreg2) : NULL, 
+		active_cb_state.arg);
+	return 0;
+}
+struct x86_decode_ops operand_decode_ops = {
+	.saw_operand = relay_operand
+};
+
+int enumerate_operands(unsigned const char *ins, unsigned const char *end,
+	void *mcontext_as_void,
+	void (*saw_operand)(int /*type*/, unsigned int /*bytes*/, uint32_t */*val*/,
+		unsigned long */*p_reg*/, int */*p_mem_seg*/, unsigned long */*p_mem_off*/,
+		int *p_fromreg1, int *p_fromreg2,
+		void */*arg*/),
+	void *arg
+	)
+{
+	mcontext_t *mcontext = (mcontext_t *) mcontext_as_void;
+	/* Call the decoder, passing our spiffy callback. 
+	 * When it hears about an operand, it will call the user's
+	 * callback. */
+	active_cb_state.client_cb = saw_operand;
+	active_cb_state.arg = arg;
+	limit = end;
+#define COPY_REG(rname, RNAME) .rname = mcontext->gregs[REG_ ## RNAME]
+	struct cpu_user_regs regs = {
+		COPY_REG(r15, R15),
+		COPY_REG(r14, R14),
+		COPY_REG(r13, R13),
+		COPY_REG(r12, R12),
+		COPY_REG(rbp, RBP),
+		COPY_REG(rbx, RBX),
+		COPY_REG(r11, R11),
+		COPY_REG(r10, R10),
+		COPY_REG(r9, R9),
+		COPY_REG(r8, R8),
+		COPY_REG(rax, RAX),
+		COPY_REG(rcx, RCX),
+		COPY_REG(rdx, RDX),
+		COPY_REG(rsi, RSI),
+		COPY_REG(rdi, RDI),
+		.rip = (uint64_t) ins,
+		COPY_REG(cs, CSGSFS) & 0xff,
+		COPY_REG(eflags, EFL),
+		COPY_REG(rsp, RSP),
+		//COPY_REG(ss, SS),
+		//COPY_REG(es, ES),
+		//COPY_REG(ds, DS),
+		.gs = (mcontext->gregs[REG_CSGSFS] & 0xff00) >> 16,
+		.fs = (mcontext->gregs[REG_CSGSFS] & 0xff0000) >> 8,
+	};
+	struct x86_emulate_ctxt ctxt = {
+		.addr_size = 64,
+		.sp_size = 64,
+		.regs = &regs
+	};
+	
+	int x86_decode_len = x86_decode(&ctxt, &ops, &operand_decode_ops);
+	// int x86_decode_err = (x86_decode_len > 0) ? 0 : -x86_decode_len;
+	if (x86_decode_len < 1) return -1;
+	return 0;
+}
+
 #endif
 #ifdef USE_OPDIS
 #define MAX_INSN_LENGTH 16

@@ -7,7 +7,7 @@
 
 #include "raw-syscalls.h"
 #define DO_EXIT_SYSCALL \
-	long retcode = 0; \
+	long retcode = status; \
 	op = SYS_exit; \
 	__asm__ volatile ("movq %0, %%rdi      # \n\
 			  "FIX_STACK_ALIGNMENT " \n\

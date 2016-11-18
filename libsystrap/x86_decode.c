@@ -22,7 +22,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
-
+ 
 /* Operand sizes: 8-bit operands or specified/overridden size. */
 #define ByteOp      (1<<0) /* 8-bit operands. */
 /* Destination operand type. */
@@ -329,7 +329,7 @@ union vex {
 
 /* Type, address-of, and value of an instruction's operand. */
 struct operand {
-    enum { OP_REG, OP_MEM, OP_IMM, OP_NONE } type;
+    enum operand_type type;
     unsigned int bytes;
 
     /* Up to 128-byte operand value, addressable as ulong or uint32_t[]. */
@@ -347,10 +347,11 @@ struct operand {
     /* OP_REG: Pointer to register field. */
     unsigned long *reg;
 
-    /* OP_MEM: Segment and offset. */
+    /* OP_MEM: Segment and offset. Also remember any register(s) it came from. */
     struct {
         enum x86_segment seg;
         unsigned long    off;
+        unsigned fromreg1, fromreg2;
     } mem;
 };
 #ifdef __x86_64__
@@ -599,7 +600,8 @@ in_realmode(
 int
 x86_decode(
     struct x86_emulate_ctxt *ctxt,
-    const struct x86_emulate_ops  *ops)
+    const struct x86_emulate_ops  *ops,
+    const struct x86_decode_ops *decode_ops)
 {
     /* Shadow copy of register state. Committed on successful emulation. */
     struct cpu_user_regs _regs = *ctxt->regs;
@@ -620,6 +622,8 @@ x86_decode(
      */
     struct operand ea = { .type = OP_MEM, .reg = REG_POISON };
     ea.mem.seg = x86_seg_ds; /* gcc may reject anon union initializer */
+    ea.mem.fromreg1 = (unsigned) -1;
+    ea.mem.fromreg2 = (unsigned) -1;
 
     ctxt->retire.byte = 0;
 
@@ -876,7 +880,7 @@ x86_decode(
                 modrm_mod = (modrm & 0xc0) >> 6;
 
                 break;
-            }
+            } /* end if b in {0xc4,0xc5} */
 
         modrm_reg = ((rex_prefix & 4) << 1) | ((modrm & 0x38) >> 3);
         modrm_rm  = modrm & 0x07;
@@ -895,32 +899,44 @@ x86_decode(
             {
             case 0:
                 ea.mem.off = _regs.ebx + _regs.esi;
+                ea.mem.fromreg1 = offsetof(struct cpu_user_regs, ebx);
+                ea.mem.fromreg2 = offsetof(struct cpu_user_regs, esi);
                 break;
             case 1:
                 ea.mem.off = _regs.ebx + _regs.edi;
+                ea.mem.fromreg1 = offsetof(struct cpu_user_regs, ebx);
+                ea.mem.fromreg2 = offsetof(struct cpu_user_regs, edi);
                 break;
             case 2:
                 ea.mem.seg = x86_seg_ss;
                 ea.mem.off = _regs.ebp + _regs.esi;
+                ea.mem.fromreg1 = offsetof(struct cpu_user_regs, ebp);
+                ea.mem.fromreg2 = offsetof(struct cpu_user_regs, ss);
                 break;
             case 3:
                 ea.mem.seg = x86_seg_ss;
                 ea.mem.off = _regs.ebp + _regs.edi;
+                ea.mem.fromreg1 = offsetof(struct cpu_user_regs, ebp);
+                ea.mem.fromreg2 = offsetof(struct cpu_user_regs, edi);
                 break;
             case 4:
                 ea.mem.off = _regs.esi;
+                ea.mem.fromreg1 = offsetof(struct cpu_user_regs, esi);
                 break;
             case 5:
                 ea.mem.off = _regs.edi;
+                ea.mem.fromreg1 = offsetof(struct cpu_user_regs, edi);
                 break;
             case 6:
                 if ( modrm_mod == 0 )
                     break;
                 ea.mem.seg = x86_seg_ss;
                 ea.mem.off = _regs.ebp;
+                ea.mem.fromreg1 = offsetof(struct cpu_user_regs, ebp);
                 break;
             case 7:
                 ea.mem.off = _regs.ebx;
+                ea.mem.fromreg1 = offsetof(struct cpu_user_regs, ebx);
                 break;
             }
             switch ( modrm_mod )
@@ -946,8 +962,11 @@ x86_decode(
                 sib = insn_fetch_type(uint8_t);
                 sib_index = ((sib >> 3) & 7) | ((rex_prefix << 2) & 8);
                 sib_base  = (sib & 7) | ((rex_prefix << 3) & 8);
-                if ( sib_index != 4 )
-                    ea.mem.off = *(long*)decode_register(sib_index, &_regs, 0);
+                if ( sib_index != 4 ) {
+                    long *ptr = (long*)decode_register(sib_index, &_regs, 0);
+                    ea.mem.off = *ptr;
+                    ea.mem.fromreg1 = (char*) ptr - (char*) &_regs;
+                }
                 ea.mem.off <<= (sib >> 6) & 3;
                 if ( (modrm_mod == 0) && ((sib_base & 7) == 5) )
                     ea.mem.off += insn_fetch_type(int32_t);
@@ -964,14 +983,21 @@ x86_decode(
                 {
                     ea.mem.seg  = x86_seg_ss;
                     ea.mem.off += _regs.ebp;
+                    ea.mem.fromreg2 = offsetof(struct cpu_user_regs, ebp);
                 }
                 else
-                    ea.mem.off += *(long*)decode_register(sib_base, &_regs, 0);
+                {
+                    long *ptr = (long*)decode_register(sib_base, &_regs, 0);
+                    ea.mem.off += *ptr;
+                    ea.mem.fromreg2 = (char*) ptr - (char*) &_regs;
+                }
             }
             else
             {
                 modrm_rm |= (rex_prefix & 1) << 3;
-                ea.mem.off = *(long *)decode_register(modrm_rm, &_regs, 0);
+                long *ptr = (long *)decode_register(modrm_rm, &_regs, 0);
+                ea.mem.off = *ptr;
+                ea.mem.fromreg1 = (char*) ptr - (char*) &_regs;
                 if ( (modrm_rm == 5) && (modrm_mod != 0) )
                     ea.mem.seg = x86_seg_ss;
             }
@@ -1007,7 +1033,15 @@ x86_decode(
                 break;
             }
             ea.mem.off = truncate_ea(ea.mem.off);
-        }
+        } /* end else 32/64-bit ModR/M decode */
+    } /* end if apparently ModRM */
+    
+    /* really finished opcode decode now, so ... */
+    if (decode_ops->saw_opcode)
+    {
+        if (threebyte) decode_ops->saw_opcode(0x0f << 8 | (threebyte << 8) | b);
+        else if (twobyte) decode_ops->saw_opcode((0x0f << 8) | b);
+        else decode_ops->saw_opcode(b);
     }
 
     if ( override_seg != -1 && ea.type == OP_MEM )
@@ -1481,6 +1515,44 @@ x86_decode(
  done:
     //printf("Op size %d bytes, ip %p, rc %d, len %d\n", op_bytes, (void*) _regs.eip, rc,
     //    (char*) _regs.eip - (char*) ctxt->regs->eip);
+
+#define ARGS(op) \
+                op.type, \
+                op.bytes, \
+                &op.bigval[0], \
+                &op.orig_bigval[0], \
+                (op.type == OP_REG) ? op.reg : NULL, \
+                (op.type == OP_MEM) ? &op.mem.seg : NULL, \
+                (op.type == OP_MEM) ? &op.mem.off : NULL, \
+                (op.type == OP_MEM) ? &op.mem.fromreg1 : NULL, \
+                (op.type == OP_MEM) ? &op.mem.fromreg2 : NULL \
+    
+    if (rc == 0)
+    {
+        if (decode_ops->saw_operand)
+        {
+            if (src.type != OP_NONE
+                && decode_ops->saw_operand(
+                        ARGS(src)
+                    )) return -X86EMUL_USER_ABORT;
+
+            if (dst.type != OP_NONE
+                &&  decode_ops->saw_operand(
+                        ARGS(dst)
+                    )) return -X86EMUL_USER_ABORT;
+
+            if ((ea.type = OP_REG /* make "sure" we really do have a memory addr operand */
+                    || (ea.type == OP_MEM && (d & ModRM)))
+                &&  decode_ops->saw_operand(
+                        ARGS(ea)
+                    )) return -X86EMUL_USER_ABORT;
+        }
+        if (decode_ops->next_instr && 
+                decode_ops->next_instr((unsigned char*) _regs.eip)) return -X86EMUL_USER_ABORT;
+    }
+    
+    if (decode_ops->finished_decode && decode_ops->finished_decode()) return -X86EMUL_USER_ABORT;
+    
     return (rc == 0) ? (char*) _regs.eip - (char*) ctxt->regs->eip : -rc;
 
  twobyte_insn:

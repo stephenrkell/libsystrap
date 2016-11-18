@@ -1,0 +1,22 @@
+Unless stated otherwise, the source code in this distribution is made
+available under the terms of the GNU Lesser General Public License
+version 3. See the files LICENSE.lgpl3 and LICENSE.gpl3.
+
+If you would like to discuss alternative licensing arrangements, please
+contact the principal author, Stephen Kell <srk31@cl.cam.ac.uk>.
+
+Note that a few specific files are under different licensing terms. This
+is clearly stated at the top of the file. Currently the paths of these
+files are as follows.
+
+src/x86_decode.c
+src/x86_emulate.h
+src/x86_defs.h
+
+Note also that building this software involves downloading and compiling
+source code from other projects (collected under the contrib/
+directory). Consequently, the output binaries (trap-syscalls.so,
+libsystrap.a, and others) are, in some cases, subject to licensing terms
+imposed by those projects. To determine the terms applying to a binary
+you have built, one reliable method is to use the debugging information
+in that binary to establish which source files it embodies.
