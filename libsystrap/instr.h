@@ -1,8 +1,7 @@
 #ifndef INSTR_H_
 #define INSTR_H_
 
-
-#define PACKAGE "The binutils maintainers suck"
+#define PACKAGE "NOT binutils"
 #define HAVE_STRINGSIZE
 
 #include <stdint.h>

@@ -1,3 +1,4 @@
+#include "raw-syscalls.h"
 #include "elfutil.h"
 #include <stddef.h>
 #include <string.h>
@@ -11,7 +12,6 @@
 #include <relf.h>
 
 #include "do-syscall.h"
-#include "raw-syscalls.h"
 
 uintptr_t our_load_address __attribute__((visibility("protected")));
 

@@ -5,7 +5,8 @@
 
 #include "do-syscall.h"
 #include "syscall-names.h"
-#include <string.h>
+#include <alloca.h>
+//#include <string.h>
 #include "elfutil.h"
 
 /* Dummy pre- and post-handling -- the client library 

@@ -18,13 +18,6 @@ struct generic_syscall {
 	long int args[6];
 };
 
-/* for accessing members of mcontext_t */
-#ifdef __FreeBSD__
-#define MC_REG(x) mc_ ## x
-#else
-#define MC_REG(x) x
-#endif
-
 typedef void post_handler(struct generic_syscall *s, long int ret);
 typedef void /*(__attribute__((noreturn))*/ syscall_replacement/*)*/(
 	struct generic_syscall *s, 
