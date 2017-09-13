@@ -33,16 +33,18 @@ OPDIS_REPO := https://github.com/mkfs/opdis.git
 UDIS86_REPO := https://github.com/vmt/udis86.git
 ZLIB_DIR := zlib-1.2.8
 ZLIB_TAR := zlib-1.2.8.tar.gz
-ZLIB_TAR_URL := http://zlib.net/zlib-1.2.8.tar.gz
+# ZLIB_TAR_URL := http://zlib.net/zlib-1.2.8.tar.gz
+# zlib.net removes non-current releases, so use Debian ftp
+ZLIB_TAR_URL := http://cdn-fastly.deb.debian.org/debian/pool/main/z/zlib/zlib_1.2.8.dfsg.orig.tar.gz
 BINUTILS_DIR := binutils-2.26
 BINUTILS_TAR := binutils-2.26.tar.bz2
 BINUTILS_TAR_URL := ftp://ftp.gnu.org/gnu/binutils/binutils-2.26.tar.bz2
-DOWNLOAD := wget
+WGET := wget
 
 # ----------------------------------------------
 
 $(EGLIBC_TAR):
-	$(DOWNLOAD) http://downloads.yoctoproject.org/releases/eglibc/$(EGLIBC_TAR)
+	$(WGET) http://downloads.yoctoproject.org/releases/eglibc/$(EGLIBC_TAR)
 $(EGLIBC_DIR)/libc/configure: $(EGLIBC_TAR)
 	tar -k -xvjf "$<"
 	touch "$@"
@@ -55,7 +57,7 @@ build-eglibc: $(EGLIBC_DIR)/libc/build/Makefile
 	CFLAGS="-g -O1 -fPIC -DPIC" CPPFLAGS="" $(MAKE) -C $(EGLIBC_DIR)/libc/build
 
 $(ZLIB_TAR):
-	$(DOWNLOAD) $(ZLIB_TAR_URL)
+	$(WGET) -O "$@" $(ZLIB_TAR_URL)
 $(ZLIB_DIR)/configure: $(ZLIB_TAR)
 	tar -k -xvzf "$<"
 	touch "$@"
@@ -87,7 +89,7 @@ udis86/Makefile: udis86/configure
 	cd udis86 && CFLAGS=-fPIC ./configure --enable-shared=no --enable-static=yes
 
 $(BINUTILS_TAR): 
-	$(DOWNLOAD) $(BINUTILS_TAR_URL)
+	$(WGET) $(BINUTILS_TAR_URL)
 $(BINUTILS_DIR)/configure: $(BINUTILS_TAR)
 	tar -k -xjf "$(BINUTILS_TAR)"
 	touch "$@"
