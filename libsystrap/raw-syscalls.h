@@ -39,6 +39,7 @@
 /* Before including stuff,
  * rename the kernel's distinct struct types,
  * to avoid conflict with glibc. */
+#define AVOID_LIBC_SIGNAL_H_
 #define timezone __asm_timezone
 #define timeval __asm_timeval
 #define itimerval __asm_itimerval
