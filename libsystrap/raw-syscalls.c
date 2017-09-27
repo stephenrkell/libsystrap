@@ -261,7 +261,9 @@ void (__attribute__((noreturn)) __assert_fail)(
 {
 	const char *msg_end = msg;
 	while (*msg_end++);
+	raw_write(2, "Assertion failed: ", sizeof "Assertion failed: " - 1);
 	raw_write(2, msg, msg_end - msg - 1);
+	raw_write(2, "\n", sizeof "\n" - 1);
 	raw_kill(raw_getpid(), SIGABRT);
 }
 
