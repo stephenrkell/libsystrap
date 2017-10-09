@@ -173,7 +173,7 @@ int __attribute__((noinline)) raw_mprotect(const void *addr, size_t len, int pro
 void *__attribute__((noinline)) raw_mmap(void *addr, size_t length, int prot, int flags,
                   int fd, off_t offset)
 {
-	long int ret;
+	void *ret;
 	long int op = SYS_mmap;
 	__asm__ volatile ("movq %[arg0], %%rdi \n\
 			   movq %[arg1], %%rsi \n\
@@ -215,8 +215,8 @@ int __attribute__((noinline)) raw_munmap(void *addr, size_t length)
 }
 
 
-int __attribute__((noinline)) raw_rt_sigaction(int signum, const struct sigaction *act,
-		     struct sigaction *oldact)
+int __attribute__((noinline)) raw_rt_sigaction(int signum, const struct __asm_sigaction *act,
+		     struct __asm_sigaction *oldact)
 {
 	long int ret;
 	long int op = SYS_sigaction;
@@ -243,7 +243,7 @@ static void handle_sigabrt(int num)
 static void install_sigabrt_handler(void) __attribute__((constructor));
 static void install_sigabrt_handler(void)
 {
-	struct sigaction action = {
+	struct __asm_sigaction action = {
 		.sa_handler = &handle_sigabrt,
 		.sa_mask = 0,
 		.sa_flags = /*SA_SIGINFO |*/ 0x04000000u /* SA_RESTORER */ | /*SA_RESTART |*/ SA_NODEFER
@@ -265,6 +265,8 @@ void (__attribute__((noreturn)) __assert_fail)(
 	raw_write(2, msg, msg_end - msg - 1);
 	raw_write(2, "\n", sizeof "\n" - 1);
 	raw_kill(raw_getpid(), SIGABRT);
+	/* hmm -- SIGABRT might be blocked? okay, try waiting indefinitely */
+	while (1) {}
 }
 
 ssize_t __attribute__((noinline)) raw_write(int fd, const void *buf, size_t count)

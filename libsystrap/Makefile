@@ -21,7 +21,7 @@ endif
 
 vpath %.c $(LIBALLOCS_DIR)/src
 
-CFLAGS += -g 
+CFLAGS += -g
 CFLAGS += -Wall -Wno-unused-label -Wno-comment
 CFLAGS += -O2
 CFLAGS += -fPIC
@@ -35,6 +35,8 @@ else
 instr.o: CFLAGS += -DUSE_OPDIS
 endif
 
+CFLAGS += -I/usr/include/$(shell $(CC) -dumpmachine)
+
 CFLAGS += -I $(UDIS86_DIR)
 CFLAGS += -I $(OPDIS_DIR)
 CFLAGS += -I $(LIBOPCODES_DIR)/include
@@ -45,7 +47,7 @@ CXXFLAGS := $(CXXFLAGS) $(CFLAGS) # eagerly latch CFLAGS now; don't want later a
 CFLAGS += -std=c99
 CXXFLAGS += -std=c++11 $(LLVM_CXXFLAGS)
 
-C_SRC := $(wildcard *.c) 
+C_SRC := $(wildcard *.c)
 S_SRC := $(wildcard *.s)
 CC_SRC := $(wildcard *.cc)
 
@@ -65,10 +67,8 @@ ifneq ($(MAKECMDGOALS),clean)
 -include $(DEPS)
 endif
 
-x86_decode.o: CFLAGS += -include x86_defs.h -include stdio.h 
+x86_decode.o: CFLAGS += -include x86_defs.h -include stdio.h
 x86_decode.o instr.o: CFLAGS += -std=gnu11
-
-#-DUSE_UDIS86 \
 
 ifneq ($(shell uname -s),FreeBSD)
 ARCHIVES := $(LIBUDIS86_A) $(LIBOPDIS_A) $(LIBOPCODES_A) $(LIBBFD_A) $(LIBIBERTY_A)

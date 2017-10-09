@@ -44,7 +44,7 @@
 #include "systrap_private.h"
 #include "do-syscall.h"
 #include "elfutil.h"
-#include <maps.h> /* from liballocs */
+#include <maps.h> /* from liballocs -- GAH, cyclic dependency */
 
 /* For clients building a standalone executable and wanting a simple test case, 
  * we allow them to set a test trap. */
@@ -52,7 +52,8 @@ void *__libsystrap_ignore_ud2_addr;
 
 extern int etext;
 
-static unsigned long read_hex_num(const char **p_c, const char *end)
+unsigned long read_hex_num(const char **p_c, const char *end) __attribute__((visibility("hidden")));
+unsigned long read_hex_num(const char **p_c, const char *end)
 {
 	unsigned long cur = 0;
 	while ((*p_c != end && (**p_c >= '0' && **p_c <= '9'))
@@ -272,7 +273,7 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 	}
 }
 
-static int process_mapping_cb(struct proc_entry *ent, char *linebuf, void *arg)
+static int process_mapping_cb(struct maps_entry *ent, char *linebuf, void *arg)
 {
 	/* Skip ourselves, but remember our load address. */
 	void *expected_mapping_end = (void*) page_boundary_up((uintptr_t) &etext);
@@ -354,7 +355,7 @@ void trap_all_mappings(void)
 		int n = 0;
 		ssize_t linesz;
 		char linebuf[8192];
-		while (-1 != (linesz = get_a_line(linebuf, sizeof linebuf, fd)))
+		while (-1 != (linesz = get_a_line_from_maps_fd(linebuf, sizeof linebuf, fd)))
 		{
 			lines[n] = alloca(linesz + 1);
 			if (!lines[n]) abort();
@@ -364,10 +365,11 @@ void trap_all_mappings(void)
 		}
 		
 		/* Now we have an array containing the lines. */
-		struct proc_entry entry;
+		struct maps_entry entry;
 		for (int i = 0; i < n; ++i)
 		{
 			int ret = process_one_maps_entry(lines[i], &entry, process_mapping_cb, NULL);
+			if (ret) break;
 		}
 
 		raw_close(fd);
@@ -378,36 +380,20 @@ void install_sigill_handler(void)
 {
 	/* Install our SIGILL (was SIGTRAP, but that interferes with gdb) handler.
 	 * Linux seems to require us to provide a restorer; the code is in restore_rt. */
-	struct sigaction action = {
-		//.sa_sigaction = &handle_sigtrap,
+#ifndef SA_RESTORER
+//#define SA_RESTORER 0x04000000u
+#error "NO SA_RESTORER set; are you including the asm signal.h?"
+#endif
+	struct __asm_sigaction action = {
 		.sa_handler = &handle_sigill,
-		.sa_flags = /*SA_SIGINFO |*/ 0x04000000u /* SA_RESTORER */ | /*SA_RESTART |*/ SA_NODEFER
+		.sa_flags = SA_RESTORER | SA_NODEFER
 		#ifndef __FreeBSD__
 		, .sa_restorer = restore_rt
 		#endif
 	};
-	struct sigaction oldaction;
-	raw_rt_sigaction(SIGILL, &action, &oldaction);
-
-	/* Un-executablize our own code, except for the signal handler and the remainder of
-	 * this function and those afterwards.
-	 *
-	 * For this, we need our load address. How can we get this? We've already seen it! */
-	// long int len = &&exit_and_return - our_text_begin_address;
-	// long int ret;
-	// long int longprot = PROT_NONE;
-	// long int op = SYS_mprotect;
-
-	//	__asm__ (".align 4096");
-exit_and_return:
-	//__asm__ volatile ("movq %0, %%rdi      # \n\
-	//		   movq %1, %%rsi      # \n\
-	//		   movq %2, %%rdx      # \n\
-	//		  "FIX_STACK_ALIGNMENT " \n\
-	//		   movq %3, %%rax      # \n\
-	//		   syscall	     # do the syscall \n\
-	//		  "UNFIX_STACK_ALIGNMENT " \n"
-	//  : /* no output*/ : "rm"(our_text_begin_address), "rm"(len), "rm"(longprot), "rm"(op) :  "%rax", "r12", SYSCALL_CLOBBER_LIST);
+	struct __asm_sigaction oldaction;
+	int ret = raw_rt_sigaction(SIGILL, &action, &oldaction);
+	if (ret != 0) abort();
 	return;
 }
 

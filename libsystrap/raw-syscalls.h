@@ -15,64 +15,83 @@
  * ... and struct sigaction
  * ... . */
 #define _GNU_SOURCE
-#define MC_REG(lower, upper) gregs[REG_ ## upper]
+/* This version works for the libc ucontext / mcontext struct defs,
+ * but we don't use those. */
+//#define MC_REG(lower, upper) gregs[REG_ ## upper]
+/* This version works for the asm/ ones. */
+#define MC_REG(lower, upper) lower
 #endif
 
 #include <sys/types.h>
 
-/* At some point this got saner in glibc. Or do I mean in Linux?
- * FIXME: test properly on some older versions. */
 #if defined(__linux__)
 #define SYS_sigaction SYS_rt_sigaction
-#if __GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ > 19)
-/* We don't have asm/ucontext.h, so have to live with libc versions. */
-#include <ucontext.h>
-#include <signal.h>
-#define __asm_sigaction sigaction
-#define __asm_sigset_t sigset_t
-
-#define __need_timespec 1 /* HACK */
-#include <time.h>
-#define __asm_timespec timespec
-
-#else
 /* Before including stuff,
  * rename the kernel's distinct struct types,
  * to avoid conflict with glibc. */
 #define AVOID_LIBC_SIGNAL_H_
+
 #define timezone __asm_timezone
+#define timespec __asm_timespec
 #define timeval __asm_timeval
 #define itimerval __asm_itimerval
 #define itimerspec __asm_itimerspec
+#define sigset_t __asm_sigset_t
+#define sigaction __asm_sigaction
+#define siginfo __asm_siginfo
+#define siginfo_t __asm_siginfo_t
+#define sigval __asm_sigval
+#define sigval_t __asm_sigval_t
+#define siginfo __asm_siginfo
+#define ucontext __asm_ucontext
 #define pid_t __kernel_pid_t
-#include <asm/sigcontext.h>
-#include <asm/siginfo.h>
-#include <asm/ucontext.h>
 /* sys/time.h (which later code wants to include)
  * conflicts with linux/time.h, which asm/signal.h includes :-( */
 #undef ITIMER_REAL
 #undef ITIMER_VIRTUAL
 #undef ITIMER_PROF
 #include <asm/signal.h>
-#endif
+#include <asm/sigcontext.h>
+#include <asm/siginfo.h>
+#include <asm/ucontext.h>
 #include <asm/types.h>
 #include <asm/posix_types.h>
 #include <asm-generic/stat.h>
 #include <asm/fcntl.h>
+#include <asm/ucontext.h>
+#undef timezone
+#undef timespec
+#undef timeval
+#undef itimerval
+#undef itimerspec
+#undef sigset_t
+#undef sigaction
+#undef siginfo
+#undef siginfo_t
+#undef sigval
+#undef sigval_t
+#undef siginfo
+#undef pid_t
+
 #elif defined(__FreeBSD__)
 #include <sys/signal.h>
-#include <sys/ucontext.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-/* FreeBSD doesn't have separate definitions of these, 
- * so just alias the __asm_* ones to the vanilla ones. */
+/* FreeBSD doesn't have separate definitions of these,
+ * so just alias the __asm_* ones to the vanilla ones.
+ * Unlike above, where we want to avoid collisions,
+ * we only need to do this for the ones we use. */
 #define __asm_timezone timezone
 #define __asm_timespec timespec
 #define __asm_timeval timeval
 #define __asm_itimerval itimerval
 #define __asm_itimerspec itimerspec
 #define __asm_sigset_t sigset_t
+#define __asm_sigaction sigaction
+#define __asm_siginfo siginfo
+#define __asm_ucontext ucontext
 #define __kernel_pid_t pid_t
+#include <sys/ucontext.h>
 #else
 #error "Unrecognised platform."
 #endif
@@ -117,8 +136,8 @@
 struct ibcs_sigframe
 {
 	char *pretcode;
-	ucontext_t uc;
-	siginfo_t info;
+	struct __asm_ucontext uc;
+	struct __asm_siginfo info;
 };
 
 void restore_rt(void); /* in restorer.s */
@@ -144,15 +163,8 @@ int raw_rt_sigaction(int signum, const struct __asm_sigaction *act,
 		     struct __asm_sigaction *oldact) __attribute__((noinline));
 void __assert_fail(const char *assertion, const char *file,
                    unsigned int line, const char *function) __attribute__((noreturn));
+// FIXME: utility code: prototypes belong here?
 const char *fmt_hex_num(unsigned long n);
+unsigned long read_hex_num(const char **p_c, const char *end);
 
-#ifdef __linux__
-#undef timezone
-#undef timespec
-#undef timeval
-#undef itimerval
-#undef itimerspec
-#undef sigset_t
-#undef pid_t
-#endif
 #endif // __RAW_SYSCALLS_H__
