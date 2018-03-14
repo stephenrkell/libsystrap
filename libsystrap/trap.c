@@ -44,7 +44,6 @@
 #include "systrap_private.h"
 #include "do-syscall.h"
 #include "elfutil.h"
-#include <maps.h> /* from liballocs -- GAH, cyclic dependency */
 
 /* For clients building a standalone executable and wanting a simple test case, 
  * we allow them to set a test trap. */
@@ -273,38 +272,6 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 	}
 }
 
-static int process_mapping_cb(struct maps_entry *ent, char *linebuf, void *arg)
-{
-	/* Skip ourselves, but remember our load address. */
-	void *expected_mapping_end = (void*) page_boundary_up((uintptr_t) &etext);
-	if ((const unsigned char *) ent->second >= (const unsigned char *) expected_mapping_end
-		 && (const unsigned char *) ent->first < (const unsigned char *) expected_mapping_end)
-	{
-		our_text_begin_address = (const void *) ent->first;
-		our_text_end_address = (const void *) ent->second;
-		
-		/* Compute our load address from the phdr p_vaddr of this segment.
-		 * But how do we get at our phdrs?
-		 * In general I think we need to hack the linker script to define a new symbol.
-		 * But for now, just use the fact that it's very likely to be the lowest text addr. */
-		our_load_address = (uintptr_t) our_text_begin_address;
-
-		debug_printf(1, "Skipping our own text mapping: %p-%p\n", 
-			(void*) ent->first, (void*) ent->second);
-		
-		return 0; // keep going
-	}
-
-	if (ent->x == 'x')
-	{
-		trap_one_executable_region((unsigned char *) ent->first, (unsigned char *) ent->second,
-			 ent->rest[0] ? ent->rest : NULL,
-			ent->w == 'w', ent->r == 'r');
-	}
-	
-	return 0; // keep going
-}
-
 static void handle_sigill(int num);
 
 int debug_level __attribute__((visibility("hidden")));
@@ -339,41 +306,6 @@ static void __attribute__((constructor)) startup(void)
 
 	//trap_all_mappings();
 	// install_sigill_handler();
-}
-
-void trap_all_mappings(void)
-{
-	/* When we process mappings, we do mprotect()s, which can change the memory map, 
-	 * including removing/adding lines. So there's a race condition unless we eagerly
-	 * snapshot the map. Do that here. */
-	int fd = raw_open("/proc/self/maps", O_RDONLY);
-	if (fd != -1)
-	{
-		/* We run during startup, so the number of distinct /proc lines should be small. */
-	#define MAX_LINES 1024
-		char *lines[MAX_LINES];
-		int n = 0;
-		ssize_t linesz;
-		char linebuf[8192];
-		while (-1 != (linesz = get_a_line_from_maps_fd(linebuf, sizeof linebuf, fd)))
-		{
-			lines[n] = alloca(linesz + 1);
-			if (!lines[n]) abort();
-			strncpy(lines[n], linebuf, linesz);
-			lines[n][linesz] = '\0';
-			++n;
-		}
-		
-		/* Now we have an array containing the lines. */
-		struct maps_entry entry;
-		for (int i = 0; i < n; ++i)
-		{
-			int ret = process_one_maps_entry(lines[i], &entry, process_mapping_cb, NULL);
-			if (ret) break;
-		}
-
-		raw_close(fd);
-	}
 }
 
 void install_sigill_handler(void)
