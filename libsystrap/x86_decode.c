@@ -272,6 +272,9 @@ static uint8_t threebyte_table_3a[256] = {
     [0x63] = DstReg|ModRM|SrcImmByte
 };
 
+/* HACK: must be same definition as in x86_emulate.c, for compatibility. */
+enum { OP_REG, OP_MEM, OP_IMM, OP_NONE } dummy;
+
 #define REX_PREFIX 0x40
 #define REX_B 0x01
 #define REX_X 0x02
@@ -329,7 +332,7 @@ union vex {
 
 /* Type, address-of, and value of an instruction's operand. */
 struct operand {
-    enum operand_type type;
+    operand_type_t type;
     unsigned int bytes;
 
     /* Up to 128-byte operand value, addressable as ulong or uint32_t[]. */

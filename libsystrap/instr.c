@@ -194,7 +194,7 @@ int convert_one_reg(unsigned regnum)
 	}
 #undef CASE
 }
-int relay_operand(enum operand_type type, unsigned int bytes,
+int relay_operand(operand_type_t type, unsigned int bytes,
 		uint32_t *val,
 		uint32_t *origval,
 		unsigned long *p_reg,
