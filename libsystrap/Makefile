@@ -15,12 +15,6 @@ include $(CONFIG)
 CFLAGS += -DRELF_DEFINE_STRUCTURES
 CFLAGS += -DSYSTRAP_DEFINE_FILE
 
-ifeq ($(LIBALLOCS_DIR),)
-$(error Please install the liballocs source tree and set LIBALLOCS_DIR)
-endif
-
-vpath %.c $(LIBALLOCS_DIR)/src
-
 CFLAGS += -g
 CFLAGS += -Wall -Wno-unused-label -Wno-comment
 CFLAGS += -O2
@@ -41,7 +35,7 @@ CFLAGS += -I $(UDIS86_DIR)
 CFLAGS += -I $(OPDIS_DIR)
 CFLAGS += -I $(LIBOPCODES_DIR)/include
 CFLAGS += -I $(BFD_DIR)
-CFLAGS += -I $(LIBALLOCS_DIR)/include
+CFLAGS += -I $(LIBRUNT_DIR)/include
 
 CXXFLAGS := $(CXXFLAGS) $(CFLAGS) # eagerly latch CFLAGS now; don't want later additions
 CFLAGS += -std=c99
