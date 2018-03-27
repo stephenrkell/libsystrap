@@ -15,6 +15,13 @@
 #include <opdis/opdis.h>
 #include <opdis/x86_decoder.h>
 #endif
+
+#ifndef NO_TLS
+#define THREAD __thread
+#else
+#define THREAD
+#endif
+
 /* 
 #include <memory>
 
@@ -117,10 +124,10 @@ static int instr_len_udis86(unsigned char *ins, unsigned char *end)
 }
 #endif
 #ifdef USE_X86_DECODE
-static __thread unsigned const char *limit;
-static __thread struct cpu_user_regs regs = {
+static THREAD unsigned const char *limit;
+static THREAD struct cpu_user_regs regs = {
 };
-static __thread struct x86_emulate_ctxt ctxt = {
+static THREAD struct x86_emulate_ctxt ctxt = {
 	.addr_size = 64,
 	.sp_size = 64
 };
@@ -161,7 +168,7 @@ static int instr_len_x86_decode(unsigned const char *ins, unsigned const char *e
 typedef void saw_operand_client_cb(int /*type*/, unsigned int /*bytes*/, uint32_t */*val*/,
 		unsigned long */*p_reg*/, int */*p_mem_seg*/, unsigned long */*p_mem_off*/,
 		int */*p_fromreg1*/, int */*p_fromreg2*/, void */*arg*/);
-static __thread struct
+static THREAD struct
 {
 	saw_operand_client_cb *client_cb;
 	void *arg;
@@ -284,8 +291,8 @@ int enumerate_operands(unsigned const char *ins, unsigned const char *end,
 #define OPDIS_MNEMONIC_SZ 12 /* ? */
 #define OPDIS_OP_ASCII_SZ 8 /* ? */
 static opdis_t o;
-static __thread opdis_insn_t *cur_insn;
-static __thread opdis_off_t  cur_insn_len;
+static THREAD opdis_insn_t *cur_insn;
+static THREAD opdis_off_t  cur_insn_len;
 static int decode_cb(const opdis_insn_buf_t in, opdis_insn_t * out,
 	   const opdis_byte_t * buf, opdis_off_t offset,
 	   opdis_vma_t vma, opdis_off_t length, void * arg)
