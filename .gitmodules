@@ -1,0 +1,3 @@
+[submodule "contrib/librunt"]
+	path = contrib/librunt
+	url = https://github.com/stephenrkell/librunt.git
