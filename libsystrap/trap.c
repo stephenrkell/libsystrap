@@ -69,26 +69,32 @@ unsigned long read_hex_num(const char **p_c, const char *end)
 static const void *our_text_begin_address;
 static const void *our_text_end_address;
 
-static void replace_syscall(unsigned char *pos, unsigned len)
+void replace_instruction_with(unsigned char *pos, unsigned len,
+		unsigned char *replacement, unsigned replacement_len)
 {
-	debug_printf(1, "Replacing syscall at %p with trap\n", pos);
-	
-	assert(len >= 2);
+	assert(len >= replacement_len);
 	unsigned char *end = pos + len;
 	while (pos != end)
 	{
-		switch (end - pos)
+		assert(end - pos > 0);
+		if (end - pos > replacement_len) *pos++ = 0x90 /* nop */;
+		else
 		{
-			/* ud2 is 0x0f 0x0b */
-			case 2: *pos++ = 0x0f; break;
-			case 1: *pos++ = 0x0b; break;
-			case 0: assert(0);
-			default: *pos++ = 0x90; /* nop */ break;
+			unsigned char repl = replacement[end - pos];
+			*pos++ = repl;
 		}
 	}
 }
 
-static void walk_instructions(unsigned char *pos, unsigned char *end,
+void replace_syscall_with_ud2(unsigned char *pos, unsigned len)
+{
+	assert(len >= 2);
+	unsigned char replacement[] = { (unsigned char) 0x0f, (unsigned char) 0x0b }; // ud2
+	debug_printf(1, "Replacing syscall at %p with trap\n", pos);
+	replace_instruction_with(pos, len, replacement, sizeof replacement);
+}
+
+void walk_instructions(unsigned char *pos, unsigned char *end,
 	void (*cb)(unsigned char *pos, unsigned len, void *arg), void *arg)
 {
 	unsigned char *cur = pos;
@@ -107,7 +113,7 @@ static void walk_instructions(unsigned char *pos, unsigned char *end,
 
 static void instruction_cb(unsigned char *pos, unsigned len, void *arg)
 {
-	if (is_syscall_instr(pos, pos + len)) replace_syscall(pos, len);
+	if (is_syscall_instr(pos, pos + len)) replace_syscall_with_ud2(pos, len);
 }
 
 #define ROUND_DOWN_PTR_TO_PAGE(p) ROUND_DOWN_PTR((p), guess_page_size_unsafe())
@@ -273,12 +279,14 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 }
 
 static void handle_sigill(int num);
+struct FILE;
 
-int debug_level __attribute__((visibility("hidden")));
-int sleep_for_seconds __attribute__((visibility("hidden")));
-int stop_self __attribute__((visibility("hidden")));
-int self_pid __attribute__((visibility("hidden")));
-FILE **p_err_stream __attribute__((visibility("hidden")));
+int debug_level __attribute__((visibility("hidden"))) = 0;
+int sleep_for_seconds __attribute__((visibility("hidden"))) = 0;
+int stop_self __attribute__((visibility("hidden"))) = 0;
+int self_pid __attribute__((visibility("hidden"))) = 0;
+FILE **p_err_stream __attribute__((visibility("hidden"))) = NULL;
+FILE *our_fake_stderr __attribute__((visibility("hidden"))) = NULL;
 
 /* We initialize our error-reporting stuff, but don't actually 
  * set up any traps. That's left to the client. */
@@ -306,6 +314,11 @@ static void __attribute__((constructor)) startup(void)
 
 	//trap_all_mappings();
 	// install_sigill_handler();
+}
+
+void __libsystrap_force_init(void)
+{
+	startup();
 }
 
 void install_sigill_handler(void)

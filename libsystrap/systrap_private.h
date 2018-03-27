@@ -13,6 +13,7 @@ typedef struct _IO_FILE FILE;
 /* Don't declare stderr ourselves; e.g. in FreeBSD it's really called __stderrp. */
 /* extern FILE *stderr; */
 extern FILE **p_err_stream;
+extern FILE *our_fake_stderr;
 
 extern char *getenv (const char *__name);
 extern int atoi (const char *__nptr);
@@ -27,7 +28,10 @@ int fflush(FILE *stream);
 
 #define debug_printf(lvl, fmt, ...) do { \
     if ((lvl) <= debug_level) { \
-      if (!p_err_stream) *p_err_stream = fdopen(2, "w"); \
+      if (!p_err_stream || !*p_err_stream) { \
+          p_err_stream = &our_fake_stderr; \
+          *p_err_stream = fdopen(2, "w"); \
+      } \
       fprintf(*p_err_stream, fmt, ## __VA_ARGS__ ); \
       fflush(*p_err_stream); \
     } \
