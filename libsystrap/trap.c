@@ -73,14 +73,15 @@ void replace_instruction_with(unsigned char *pos, unsigned len,
 		unsigned char *replacement, unsigned replacement_len)
 {
 	assert(len >= replacement_len);
+	unsigned char *begin = pos;
 	unsigned char *end = pos + len;
 	while (pos != end)
 	{
 		assert(end - pos > 0);
-		if (end - pos > replacement_len) *pos++ = 0x90 /* nop */;
+		if (pos - begin >= replacement_len) *pos++ = 0x90 /* nop */;
 		else
 		{
-			unsigned char repl = replacement[end - pos];
+			unsigned char repl = replacement[pos - begin];
 			*pos++ = repl;
 		}
 	}
@@ -216,6 +217,7 @@ void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *e
 void trap_one_executable_region(unsigned char *begin, unsigned char *end, const char *filename,
 	_Bool is_writable, _Bool is_readable)
 {
+	assert(end >= begin);
 	// it's executable; scan for syscall instructions
 	unsigned char *begin_instr_pos;
 	unsigned char *end_instr_pos;
@@ -241,7 +243,7 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 	 * "no instructions" case for the second one. Note that we will do a 
 	 * "paranoid scan" anyway. */
 
-	if (first_section_start)
+	if (first_section_start && (unsigned char *) first_section_start <= end)
 	{
 		begin_instr_pos = (unsigned char *) first_section_start;
 	}
@@ -252,8 +254,11 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 		begin_instr_pos = (unsigned char *) end;
 	}
 
-	if (last_section_end)
+	if (last_section_end && last_section_end != (void*) -1
+			&& (unsigned char *) last_section_end >= begin)
 	{
+		debug_printf(0, "in executable mapping %p-%p, we think the last section ends at %p\n",
+			begin, end, last_section_end);
 		end_instr_pos = (unsigned char *) last_section_end;
 	}
 	else
@@ -262,6 +267,7 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 			begin, end, end, filename);
 		end_instr_pos = (unsigned char *) begin;
 	}
+	assert(end_instr_pos >= begin_instr_pos);
 	
 	if ((unsigned char *) end_instr_pos > (unsigned char *) begin_instr_pos)
 	{
