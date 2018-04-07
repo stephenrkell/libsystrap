@@ -247,9 +247,9 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 	}
 	else
 	{
-		debug_printf(0, "in executable mapping %p-%p, could not use shdrs to locate first instruction after %p (file %s); being conservative", 
+		debug_printf(0, "in executable mapping %p-%p, could not use shdrs to locate first instruction after %p (file %s)\n", 
 			begin, end, begin, filename);
-		begin_instr_pos = (unsigned char *) begin;
+		begin_instr_pos = (unsigned char *) end;
 	}
 
 	if (last_section_end)
@@ -258,23 +258,26 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 	}
 	else
 	{
-		debug_printf(0, "in executable mapping %p-%p, could not use shdrs to locate previous instruction before %p (file %s); being conservative",
+		debug_printf(0, "in executable mapping %p-%p, could not use shdrs to locate previous instruction before %p (file %s)\n",
 			begin, end, end, filename);
-		end_instr_pos = (unsigned char *) end;
+		end_instr_pos = (unsigned char *) begin;
 	}
 	
-	if (is_writable && 0 == strcmp(filename, "[stack]")) // FIXME: sysdep
+	if ((unsigned char *) end_instr_pos > (unsigned char *) begin_instr_pos)
 	{
-		/* We've found an executable stack region. These are generally 
-		 * bad for security. HACK: let's try just de-executabling it. */
-		debug_printf(0, "removing execute permission from stack region %p-%p", begin, end);
-		int ret = raw_mprotect(begin, (char*) end - (char*) begin, 
-			PROT_READ | PROT_WRITE);
-		if (ret != 0) debug_printf(0, "failed to remove execute permission from stack region %p-%p", begin, end);
-	}
-	else
-	{
-		trap_one_instruction_range(begin_instr_pos, end_instr_pos, is_writable, is_readable);
+		if (is_writable && 0 == strcmp(filename, "[stack]")) // FIXME: sysdep
+		{
+			/* We've found an executable stack region. These are generally 
+			 * bad for security. HACK: let's try just de-executabling it. */
+			debug_printf(0, "removing execute permission from stack region %p-%p", begin, end);
+			int ret = raw_mprotect(begin, (char*) end - (char*) begin, 
+				PROT_READ | PROT_WRITE);
+			if (ret != 0) debug_printf(0, "failed to remove execute permission from stack region %p-%p", begin, end);
+		}
+		else
+		{
+			trap_one_instruction_range(begin_instr_pos, end_instr_pos, is_writable, is_readable);
+		}
 	}
 }
 
