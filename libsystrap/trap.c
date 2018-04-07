@@ -267,7 +267,6 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 			begin, end, end, filename);
 		end_instr_pos = (unsigned char *) begin;
 	}
-	assert(end_instr_pos >= begin_instr_pos);
 	
 	if ((unsigned char *) end_instr_pos > (unsigned char *) begin_instr_pos)
 	{
