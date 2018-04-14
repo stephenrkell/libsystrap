@@ -9,6 +9,14 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 	_Bool is_writable, _Bool is_readable);
 void trap_one_instruction_range(unsigned char *begin, unsigned char *end, 
 	_Bool is_writable, _Bool is_readable);
+void walk_instructions(unsigned char *pos, unsigned char *end,
+	void (*cb)(unsigned char *pos, unsigned len, void *arg), void *arg);
+void replace_instruction_with(unsigned char *pos, unsigned len,
+		unsigned char *replacement, unsigned replacement_len);
+void replace_syscall_with_ud2(unsigned char *pos, unsigned len);
+
+/* really funky clients, e.g. a ld.so, might not run their own constructor, so ... */
+void __libsystrap_force_init(void) __attribute__((visibility("hidden")));
 
 struct ibcs_sigframe; /* opaque */
 
