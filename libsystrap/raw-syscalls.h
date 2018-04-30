@@ -161,6 +161,10 @@ void *raw_mmap(void *addr, size_t length, int prot, int flags,
 int raw_munmap(void *addr, size_t length);
 int raw_rt_sigaction(int signum, const struct __asm_sigaction *act,
 		     struct __asm_sigaction *oldact) __attribute__((noinline));
+struct user_desc;
+int __attribute__((noinline)) raw_set_thread_area(struct user_desc *u_info);
+int __attribute__((noinline)) raw_arch_prctl(int code, unsigned long addr);
+
 void __assert_fail(const char *assertion, const char *file,
                    unsigned int line, const char *function) __attribute__((noreturn));
 // FIXME: utility code: prototypes belong here?
