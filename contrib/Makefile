@@ -3,13 +3,12 @@ CONTRIB := $(realpath $(dir $(THIS_MAKEFILE)))
 
 KERNEL ?= $(shell uname -s)
 
-default: all
-all: build config.mk
-.PHONY: default all build independent
+.PHONY: default build
+default: build config.mk
 
 ifeq ($(KERNEL),Linux)
-build: build-udis86 build-opdis build-binutils build-zlib build-eglibc \
-#build-liballocs build-dwarfidl build-libfootprints
+build: build-udis86 \
+#build-liballocs build-dwarfidl build-libfootprints build-opdis build-binutils build-zlib build-eglibc
 else
 ifeq ($(KERNEL),FreeBSD)
 build: build-udis86
@@ -24,8 +23,7 @@ endif
 # libiberty, libopcodes, bfd
 # zlib
 # eglibc
-# liballocs (headers only), dwarfidl (tools only) => libsrk31c++, libc++fileno, libdwarfpp   but not PIC builds of these
-
+# librunt (headers only), dwarfidl (tools only) => libsrk31c++, libc++fileno, libdwarfpp   but not PIC builds of these
 EGLIBC_DIR := eglibc-2.19
 EGLIBC_TAR := eglibc-2.19-svnr25243.tar.bz2
 EGLIBC_TAR_URL := http://downloads.yoctoproject.org/releases/eglibc/eglibc-2.19-svnr25243.tar.bz2
@@ -88,7 +86,7 @@ udis86/configure: udis86/autogen.sh
 udis86/Makefile: udis86/configure
 	cd udis86 && CFLAGS=-fPIC ./configure --enable-shared=no --enable-static=yes
 
-$(BINUTILS_TAR): 
+$(BINUTILS_TAR):
 	$(WGET) $(BINUTILS_TAR_URL)
 $(BINUTILS_DIR)/configure: $(BINUTILS_TAR)
 	tar -k -xjf "$(BINUTILS_TAR)"
@@ -118,24 +116,6 @@ build-binutils: binutils-build/Makefile
 install-binutils: build-binutils
 	$(MAKE) -C binutils-build install MAKEINFO=/bin/true
 
-#.PHONY: build-dwarfidl
-#build-dwarfidl: dwarfidl/Makefile
-#	$(MAKE) -C dwarfidl
-#
-#.PHONY: build-liballocs
-#build-liballocs: build-dwarfidl liballocs/Makefile
-#	$(MAKE) -C liballocs
-#
-#.PHONY: build-libfootprints
-#build-libfootprints: build-liballocs build-dwarfidl build-antlr libfootprints/Makefile
-#	$(MAKE) -C libfootprints
-#
-#.PHONY: build-antlr
-#build-antlr:
-#	$(MAKE) -C libantlr3c-3.4
-
-independent: $(EGLIBC_TAR) $(ZLIB_TAR) $(BINUTILS_TAR) opdis/configure
-
 config.mk:
 	printf 'CONTRIB := $(realpath $(dir $@)) \n\
 LIBC_DIR ?= $(wildcard $(CONTRIB)/eglibc-*/libc/build) \n\
@@ -151,7 +131,6 @@ LIBOPCODES_A ?= $$(CONTRIB)/binutils-build/opcodes/libopcodes.a \n\
 LIBBFD_A ?= $$(CONTRIB)/binutils-build/bfd/libbfd.a \n\
 LIBIBERTY_A ?= $$(CONTRIB)/binutils-build/libiberty/libiberty.a \n\
 LIBRUNT_DIR ?= $$(CONTRIB)/librunt \n\
-LIBFOOTPRINTS_DIR ?= $$(CONTRIB)/libfootprints \n\
 ANTLR3C_DIR ?= $$(CONTRIB)/libantlr3c-3.4 \n\
 DWARFIDL_DIR ?= $$(CONTRIB)/dwarfidl \n\
 OPDIS_DIR ?= $$(CONTRIB)/opdis \n\
