@@ -286,6 +286,36 @@ ssize_t __attribute__((noinline)) raw_write(int fd, const void *buf, size_t coun
 	return ret;
 }
 
+int __attribute__((noinline)) raw_set_thread_area(struct user_desc *u_info)
+{
+	long ret;
+	long op = SYS_set_thread_area;
+	__asm__ volatile ("movq %1, %%rdi      # \n\
+			  "FIX_STACK_ALIGNMENT " \n\
+			   movq %2, %%rax      # \n\
+			   syscall	     # do the syscall \n\
+			  "UNFIX_STACK_ALIGNMENT " \n" \
+			  "movq %%rax, %0\n"
+	  : "=r"(ret) : "r"(u_info), "rm"(op) : "r12", SYSCALL_CLOBBER_LIST);
+	return ret;
+}
+
+int __attribute__((noinline)) raw_arch_prctl(int code, unsigned long addr)
+{
+	long int ret;
+	long int op = SYS_arch_prctl;
+	__asm__ volatile ("movq %1, %%rdi      # \n\
+			   movq %2, %%rsi      # \n\
+			  "FIX_STACK_ALIGNMENT " \n\
+			   movq %3, %%rax      # \n\
+			   syscall	     # do the syscall \n\
+			  "UNFIX_STACK_ALIGNMENT " \n\
+			   movq %%rax, %0\n"
+	  : "=r"(ret) : "rm"((long) code), "rm"(addr), "rm"(op) : "r12", SYSCALL_CLOBBER_LIST);
+	return ret;
+}
+
+
 const char *fmt_hex_num(unsigned long n)
 {
 	static char buf[19];
