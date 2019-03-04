@@ -70,6 +70,19 @@ static int dl_fileoff_cb(struct dl_phdr_info *info, size_t size, void *dummy_arg
 	return 0; /* keep going */
 }
 
+const void *fileoff_to_vaddr(unsigned char *addr_in_file, unsigned long offset, unsigned long filesz_min, void **out_load_addr)
+{
+	struct dl_fileoff_cb_arg arg = { addr_in_file, offset, filesz_min, NULL, NULL };
+	int ret = dl_iterate_phdr(dl_fileoff_cb, &arg);
+	if (ret)
+	{
+		assert(arg.info_out);
+		if (out_load_addr) *out_load_addr = (void*) arg.load_addr_out;
+		return arg.vaddr_out; /* might be 0 */
+	}
+	return NULL;
+}
+
 struct dl_load_phdr_cb_arg
 {
 	unsigned char *begin_addr_in;
@@ -98,19 +111,6 @@ static int dl_load_phdr_cb(struct dl_phdr_info *info, size_t size, void *dummy_a
 	return 0; /* keep going */
 }
 
-const void *fileoff_to_vaddr(unsigned char *addr_in_file, unsigned long offset, unsigned long filesz_min, void **out_load_addr)
-{
-	struct dl_fileoff_cb_arg arg = { addr_in_file, offset, filesz_min, NULL, NULL };
-	int ret = dl_iterate_phdr(dl_fileoff_cb, &arg);
-	if (ret)
-	{
-		assert(arg.info_out);
-		if (out_load_addr) *out_load_addr = (void*) arg.load_addr_out;
-		return arg.vaddr_out; /* might be 0 */
-	}
-	return NULL;
-}
-
 const ElfW(Phdr) *vaddr_to_load_phdr(unsigned char *begin_addr, const char *fname, void **out_base_addr)
 {
 	struct dl_load_phdr_cb_arg arg = { begin_addr, NULL };
@@ -125,15 +125,6 @@ const ElfW(Phdr) *vaddr_to_load_phdr(unsigned char *begin_addr, const char *fnam
 	return NULL;
 }
 
-ElfW(Dyn) *dyn_lookup(ElfW(Dyn) *p_dyn, ElfW(Sword) tag)
-{
-	for (ElfW(Sword) i = 0; p_dyn[i].d_tag != DT_NULL; ++i)
-	{
-		if (p_dyn[i].d_tag == tag) return p_dyn;
-	}
-	return NULL;
-}
-
 const ElfW(Ehdr) *vaddr_to_ehdr(unsigned char *begin_addr, const char *fname, void **out_base_addr)
 {
 	return (const ElfW(Ehdr) *) fileoff_to_vaddr(begin_addr, 0, sizeof (ElfW(Ehdr)), out_base_addr);
@@ -143,8 +134,22 @@ const void *vaddr_to_nearest_instruction(unsigned char *search_addr, const char 
 {
 	void *base_addr = NULL;
 	const ElfW(Ehdr) *ehdr = vaddr_to_ehdr(backwards ? search_addr - 1 : search_addr, fname, &base_addr);
+	_Bool mapped_ehdr = 0;
+	if (!ehdr)
+	{
+		/* Okay, try to open the file on disk. */
+		int fd = raw_open(fname, O_RDONLY);
+		if (fd != -1)
+		{
+			ehdr = raw_mmap(NULL, PAGE_SIZE, PROT_READ, MAP_PRIVATE, fd, 0);
+			if (MMAP_RETURN_IS_ERROR(ehdr)) ehdr = NULL;
+			else mapped_ehdr = 1;
+			close(fd);
+		}
+	}
 	if (ehdr)
 	{
+		void *retval;
 		if (out_base_addr) *out_base_addr = base_addr;
 		// is the SHT mapped?
 		const ElfW(Shdr) *sht = fileoff_to_vaddr(search_addr, ehdr->e_shoff, ehdr->e_shnum * ehdr->e_shentsize, NULL);
@@ -158,14 +163,14 @@ const void *vaddr_to_nearest_instruction(unsigned char *search_addr, const char 
 				int fd = raw_open(fname, O_RDONLY);
 				assert(fd >= 0);
 				m = raw_mmap(NULL, off_end - off_start, PROT_READ, MAP_PRIVATE, fd, page_boundary_down(ehdr->e_shoff));
-				if (m == MAP_FAILED) abort();
+				if (MMAP_RETURN_IS_ERROR(m)) abort();
 				close(fd);
 				sht = (ElfW(Shdr) *)((unsigned char *) m + (ehdr->e_shoff - page_boundary_down(ehdr->e_shoff)));
 			}
 			else warnx("can't mmap the section headers for instruction %s %p, filename %s, load addr %p", 
 				backwards ? "before" : "at", search_addr, fname ? fname : "(none)", base_addr);
 		}
-		if (!sht) return NULL;
+		if (!sht) { retval = NULL; goto out; }
 		
 		/* walk the SHT */
 		uintptr_t current_nearest = backwards ? (uintptr_t) 0 : (uintptr_t) -1;
@@ -193,12 +198,46 @@ const void *vaddr_to_nearest_instruction(unsigned char *search_addr, const char 
 
 		if (m) raw_munmap(m, off_end - off_start);
 
-		if (current_nearest_i != -1) return (void*) current_nearest;
+		if (current_nearest_i != -1) { retval = (void*) current_nearest; goto out; }
 		
 		//warnx("no section header matched when searching for instruction %s %p, filename %s, load addr %p", 
 		//		backwards ? "before" : "at", search_addr, fname ? fname : "(none)", base_addr);
-		return backwards ? 0 : (void*) -1;
-	} else warnx("could not map ELF header for %s", fname);
+		retval = backwards ? 0 : (void*) -1;
+	out:
+		if (mapped_ehdr) raw_munmap((void*) ehdr, PAGE_SIZE);
+		return retval;
+	} else { warnx("could not map ELF header for %s", fname); return NULL; }
 	
-	return NULL;
+	assert(0);
+}
+
+void *map_whole_file(const char *filename, int flags)
+{
+	int fd = raw_open(filename, flags);
+	if (fd != -1)
+	{
+		void *m = map_whole_file_from_fd(fd, (flags == O_RDWR) ? PROT_READ|PROT_WRITE
+			:   (flags == O_RDONLY) ? PROT_READ
+			:   (flags == O_WRONLY) ? PROT_WRITE
+			: PROT_READ);
+		raw_close(fd);
+		return m;
+	}
+	return (void*)-1;
+}
+void *map_whole_file_from_fd(int fd, int prot)
+{
+	struct stat s;
+	int ret = raw_fstat(fd, &s);
+	void *m = (void*) -1;
+	if (ret == 0)
+	{
+		m = raw_mmap(NULL,
+			page_boundary_up(s.st_size),
+			prot,
+			MAP_PRIVATE,
+			fd,
+			0);
+	}
+	return MMAP_RETURN_IS_ERROR(m) ? MAP_FAILED : m;
 }
