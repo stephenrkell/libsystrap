@@ -249,8 +249,9 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 	}
 	else
 	{
-		debug_printf(0, "in executable mapping %p-%p, could not use shdrs to locate first instruction after %p (file %s)\n", 
-			begin, end, begin, filename);
+		debug_printf(0, "in executable mapping %p-%p, could not use shdrs"
+				" to locate first instruction after %p (file %s, first section %p)\n",
+			begin, end, begin, filename, first_section_start);
 		begin_instr_pos = (unsigned char *) end;
 	}
 
@@ -263,8 +264,9 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 	}
 	else
 	{
-		debug_printf(0, "in executable mapping %p-%p, could not use shdrs to locate previous instruction before %p (file %s)\n",
-			begin, end, end, filename);
+		debug_printf(0, "in executable mapping %p-%p, could not use shdrs"
+				" to locate previous instruction before %p (file %s, last section %p)\n",
+			begin, end, end, filename, last_section_end);
 		end_instr_pos = (unsigned char *) begin;
 	}
 	

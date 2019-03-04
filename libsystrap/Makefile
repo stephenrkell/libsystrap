@@ -5,7 +5,7 @@ THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 SRCROOT := $(realpath $(dir $(THIS_MAKEFILE)))/..
 
 CONTRIB := $(SRCROOT)/contrib
-CONFIG := $(CONTRIB)/config.mk
+CONFIG ?= $(CONTRIB)/config.mk
 
 $(CONTRIB)/config.mk:
 	$(MAKE) -C $(CONTRIB)
