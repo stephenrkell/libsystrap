@@ -50,6 +50,8 @@
 #undef ITIMER_REAL
 #undef ITIMER_VIRTUAL
 #undef ITIMER_PROF
+#undef _STRUCT_TIMESPEC
+#include <linux/time.h>
 #include <asm/signal.h>
 #include <asm/sigcontext.h>
 #include <asm/siginfo.h>
@@ -156,6 +158,12 @@ ssize_t raw_write(int fd, const void *buf,
 int raw_close(int fd) __attribute__((noinline));
 int raw_mprotect(const void *addr, size_t len,
 		int prot) __attribute__((noinline));
+
+#ifndef MMAP_RETURN_IS_ERROR
+#define MMAP_RETURN_IS_ERROR(p) \
+        (((unsigned long long)(void*)-1 - (unsigned long long)(p)) < PAGE_SIZE)
+#endif
+
 void *raw_mmap(void *addr, size_t length, int prot, int flags,
                   int fd, off_t offset);
 int raw_munmap(void *addr, size_t length);
