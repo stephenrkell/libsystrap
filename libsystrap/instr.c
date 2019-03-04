@@ -131,6 +131,18 @@ static THREAD struct x86_emulate_ctxt ctxt = {
 	.addr_size = 64,
 	.sp_size = 64
 };
+static void *my_memcpy(void *dest, const void *src, size_t n)
+{
+	unsigned char *dpos = dest;
+	const unsigned char *spos = src;
+	while (n > 0)
+	{
+		*dpos++ = *spos++;
+		--n;
+	}
+	return dest;
+}
+
 static int insn_fetch(
         enum x86_segment seg,
         unsigned long offset,
@@ -139,7 +151,7 @@ static int insn_fetch(
         struct x86_emulate_ctxt *ctxt)
 {
 	if ((unsigned const char *) offset + bytes > limit) return X86EMUL_EXCEPTION;
-	memcpy(p_data, (void*) offset, bytes);
+	my_memcpy(p_data, (void*) offset, bytes);
 	return X86EMUL_OKAY;
 }
 static struct x86_emulate_ops ops = {
@@ -373,7 +385,9 @@ instr_len(unsigned const char *ins, unsigned const char *end)
 	
 	int len = 1;
 	_Bool got_len = 0;
-	
+	/* Calling warnx won't work if we're trapping our libc's instructions.
+	 * But it's up to the caller to worry about that; or, more likely,
+	 * for the client codebase to be built such that it is self-contained. */
 #define TRY_DECODER(fragment) \
 	int fragment ## _len = instr_len_ ## fragment((unsigned char *)ins, (unsigned char*) end); \
 	do { if (fragment ## _len > 0) \
