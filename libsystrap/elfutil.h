@@ -5,7 +5,7 @@
 #include <elf.h>
 
 #ifndef assert
-#define elf_h_defined_assert
+#define elfutil_h_defined_assert
 void __assert_fail(const char * assertion, const char * file, unsigned int line, const char * function);
 #define assert(cond) if (!(cond)) __assert_fail(#cond, __FILE__, __LINE__, __func__)
 #endif
@@ -13,6 +13,7 @@ void __assert_fail(const char * assertion, const char * file, unsigned int line,
 /* relf needs assert() to be defined */
 #include <relf.h>
 
+// HACK
 #ifndef PAGE_SIZE
 #define PAGE_SIZE 4096
 #endif
@@ -85,7 +86,10 @@ page_boundary_down(uintptr_t addr)
 	return (addr / PAGE_SIZE) * PAGE_SIZE;
 }
 
-#ifdef elf_h_defined_assert
+void *map_whole_file(const char *filename, int flags);
+void *map_whole_file_from_fd(int fd, int prot);
+
+#ifdef elfutil_h_defined_assert
 #undef assert
 #endif
 
