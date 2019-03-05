@@ -7,8 +7,8 @@ KERNEL ?= $(shell uname -s)
 default: build config.mk
 
 ifeq ($(KERNEL),Linux)
-build: build-udis86 \
-#build-liballocs build-dwarfidl build-libfootprints build-opdis build-binutils build-zlib build-eglibc
+build: build-xed \
+#build-liballocs build-dwarfidl build-libfootprints build-opdis build-binutils build-zlib build-eglibc build-udis86
 else
 ifeq ($(KERNEL),FreeBSD)
 build: build-udis86
@@ -24,6 +24,7 @@ endif
 # zlib
 # eglibc
 # librunt (headers only), dwarfidl (tools only) => libsrk31c++, libc++fileno, libdwarfpp   but not PIC builds of these
+# xed
 EGLIBC_DIR := eglibc-2.19
 EGLIBC_TAR := eglibc-2.19-svnr25243.tar.bz2
 EGLIBC_TAR_URL := http://downloads.yoctoproject.org/releases/eglibc/eglibc-2.19-svnr25243.tar.bz2
@@ -37,6 +38,10 @@ ZLIB_TAR_URL := http://cdn-fastly.deb.debian.org/debian/pool/main/z/zlib/zlib_1.
 BINUTILS_DIR := binutils-2.26
 BINUTILS_TAR := binutils-2.26.tar.bz2
 BINUTILS_TAR_URL := ftp://ftp.gnu.org/gnu/binutils/binutils-2.26.tar.bz2
+XED_DIR := xed
+XED_REPO := https://github.com/intelxed/xed.git
+MBUILD_DIR := mbuild
+MBUILD_REPO := https://github.com/intelxed/mbuild.git
 WGET := wget
 
 # ----------------------------------------------
@@ -116,6 +121,15 @@ build-binutils: binutils-build/Makefile
 install-binutils: build-binutils
 	$(MAKE) -C binutils-build install MAKEINFO=/bin/true
 
+
+.PHONY: build-xed
+build-xed: $(XED_DIR) $(MBUILD_DIR)
+	cd $(XED_DIR) && ./mfile.py install --install-dir=build --no-encoder --extra-flags='-fPIC'
+$(XED_DIR):
+	git clone $(XED_REPO) $@
+$(MBUILD_DIR):
+	git clone $(MBUILD_REPO) $@
+
 config.mk:
 	printf 'CONTRIB := $(realpath $(dir $@)) \n\
 LIBC_DIR ?= $(wildcard $(CONTRIB)/eglibc-*/libc/build) \n\
@@ -135,4 +149,6 @@ ANTLR3C_DIR ?= $$(CONTRIB)/libantlr3c-3.4 \n\
 DWARFIDL_DIR ?= $$(CONTRIB)/dwarfidl \n\
 OPDIS_DIR ?= $$(CONTRIB)/opdis \n\
 UDIS86_DIR ?= $$(CONTRIB)/udis86 \n\
-ZLIB_A ?= $$(CONTRIB)/zlib-1.2.8/libz.a' | sed '/^\\$$/ d' | sed 's/ *$$//' > "$@"
+ZLIB_A ?= $$(CONTRIB)/zlib-1.2.8/libz.a \n\
+XED_DIR ?= $$(CONTRIB)/$(XED_DIR)/build \n\
+XED_A ?= $$(CONTRIB)/$(XED_DIR)/build/lib/libxed.a' | sed '/^\\$$/ d' | sed 's/ *$$//' > "$@"

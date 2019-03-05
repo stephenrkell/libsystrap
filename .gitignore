@@ -26,6 +26,9 @@
 /contrib/opdis/
 /contrib/opdis-build/
 
+/contrib/xed/
+/contrib/mbuild/
+
 /src/linux-syscall-macros.h
 
 .gdb_history
