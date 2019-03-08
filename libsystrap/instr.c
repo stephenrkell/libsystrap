@@ -1,6 +1,6 @@
 #define _GNU_SOURCE
-#include <ucontext.h>
 #include "instr.h" /* our API -- in C */
+#include "raw-syscalls.h"
 #include <assert.h>
 #include <string.h>
 #include <stdio.h>
@@ -393,14 +393,19 @@ static int instr_len_opdis(unsigned char *ins, unsigned char *end)
 }
 #endif /* opdis */
 
-static void print_hex_bytes(FILE *stream, unsigned char *start, unsigned char *end)
+static void print_hex_bytes(int fd, unsigned char *start, unsigned char *end)
 {
 	for (unsigned char *pos = start; pos != end; ++pos)
 	{
-		if (pos != start) fprintf(stream, " ");
-		fprintf(stream, "%02x", *pos);
+        unsigned char high = *pos >> 4;
+        unsigned char low = *pos & 0xf;
+
+        char hex_byte[3];
+        hex_byte[0] = (high > 9) ? ('a' + high - 10) : ('0' + high);
+        hex_byte[1] = (low > 9) ? ('a' + low - 10) : ('0' + low);
+        hex_byte[2] = (pos == end - 1) ? '\n' : ' ';
+		raw_write(fd, hex_byte, 3);
 	}
-	fprintf(stream, "\n");
 }
 
 unsigned long
@@ -413,18 +418,18 @@ instr_len(unsigned const char *ins, unsigned const char *end)
 	int len = 1;
 	_Bool got_len = 0;
 	/* Calling warnx won't work if we're trapping our libc's instructions.
-	 * But it's up to the caller to worry about that; or, more likely,
-	 * for the client codebase to be built such that it is self-contained. */
+     * To avoid problems, we use raw write syscalls instead. */
 #define TRY_DECODER(fragment) \
 	int fragment ## _len = instr_len_ ## fragment((unsigned char *)ins, (unsigned char*) end); \
 	do { if (fragment ## _len > 0) \
 	{ \
 		if (got_len && len != fragment ## _len) \
 		{ \
-			warnx(#fragment " disagreed with earlier decode about instruction length" \
-				" at %p (gave %d, vs %d)", \
-				ins, (int) fragment ## _len, len); \
-			print_hex_bytes(stderr, (unsigned char *)ins, (unsigned char*) ins + \
+            write_string(#fragment " disagreed with earlier decode about" \
+                "instruction length at "); \
+            write_ulong((unsigned long) ins); \
+            write_string("\n"); \
+			print_hex_bytes(2, (unsigned char *)ins, (unsigned char*) ins + \
 				(((int) fragment ## _len > len) ? (int) fragment ## _len : len)); \
 		} \
 		got_len = 1; \
@@ -432,7 +437,9 @@ instr_len(unsigned const char *ins, unsigned const char *end)
 	} \
 	else \
 	{ \
-		warnx(#fragment " could not decode instruction at %p", ins); \
+		write_string(#fragment " could not decode instruction at "); \
+        write_ulong((unsigned long) ins); \
+        write_string("\n"); \
 	} } while (0)
 	
 #ifdef USE_X86_DECODE
