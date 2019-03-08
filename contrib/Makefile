@@ -39,9 +39,7 @@ BINUTILS_DIR := binutils-2.26
 BINUTILS_TAR := binutils-2.26.tar.bz2
 BINUTILS_TAR_URL := ftp://ftp.gnu.org/gnu/binutils/binutils-2.26.tar.bz2
 XED_DIR := xed
-XED_REPO := https://github.com/intelxed/xed.git
 MBUILD_DIR := mbuild
-MBUILD_REPO := https://github.com/intelxed/mbuild.git
 WGET := wget
 
 # ----------------------------------------------
@@ -125,10 +123,6 @@ install-binutils: build-binutils
 .PHONY: build-xed
 build-xed: $(XED_DIR) $(MBUILD_DIR)
 	cd $(XED_DIR) && ./mfile.py install --install-dir=build --no-encoder --extra-flags='-fPIC'
-$(XED_DIR):
-	git clone $(XED_REPO) $@
-$(MBUILD_DIR):
-	git clone $(MBUILD_REPO) $@
 
 config.mk:
 	printf 'CONTRIB := $(realpath $(dir $@)) \n\
