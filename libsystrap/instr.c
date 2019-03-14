@@ -5,16 +5,6 @@
 #include <string.h>
 #include <stdio.h>
 #include <err.h>
-#ifdef USE_UDIS86
-#include <udis86.h>
-#endif
-#ifdef USE_X86_DECODE
-#include "x86_defs.h"
-#endif
-#ifdef USE_OPDIS
-#include <opdis/opdis.h>
-#include <opdis/x86_decoder.h>
-#endif
 
 #ifndef NO_TLS
 #define THREAD __thread
@@ -89,18 +79,32 @@ static _Bool is_ud2(const unsigned char *ins)
 {
 	return ins[0] == 0x0f && ins[1] == 0x0b;
 }
-/* We have three different ways of calculating the instruction length: 
- * x86-decode (preferred), libudis86, and opdis (slowest).
+/* We have four different ways of calculating the instruction length:
+ * x86-decode (preferred), libudis86, opdis (slowest) and xed (not evaluated).
  * We want to allow configuration to select any one or more of these.
  * If none is defined, we select one or two based on NDEBUG. */
 
-#if !defined(USE_X86_DECODE) && !defined(USE_UDIS86) && !defined(USE_OPDIS)
+#if !defined(USE_X86_DECODE) && !defined(USE_UDIS86) && !defined(USE_OPDIS) && !defined(USE_XED)
 #ifdef NDEBUG
 #define USE_X86_DECODE
 #else
 #define USE_X86_DECODE
 #define USE_OPDIS
 #endif
+#endif
+
+#ifdef USE_XED
+#include <xed/xed-interface.h>
+#endif
+#ifdef USE_UDIS86
+#include <udis86.h>
+#endif
+#ifdef USE_X86_DECODE
+#include "x86_defs.h"
+#endif
+#ifdef USE_OPDIS
+#include <opdis/opdis.h>
+#include <opdis/x86_decoder.h>
 #endif
 
 #ifdef USE_UDIS86
@@ -121,6 +125,29 @@ static int instr_len_udis86(unsigned char *ins, unsigned char *end)
 		return ud_len;
 	}
 	else return -1;
+}
+#endif
+#ifdef USE_XED
+static int instr_len_xed(unsigned char *ins, unsigned char *end)
+{
+    static _Bool xed_init = 0;
+    if (!xed_init)
+    {
+        xed_tables_init();
+        xed_init = 1;
+    }
+
+    xed_decoded_inst_t xedd;
+    xed_decoded_inst_zero(&xedd);
+    xed_decoded_inst_set_mode(&xedd, XED_MACHINE_MODE_LONG_64,
+            XED_ADDRESS_WIDTH_64b); // FIXME: Not portable
+
+    xed_error_enum_t xed_error = xed_decode(&xedd, ins, end-ins);
+    if (xed_error == XED_ERROR_NONE)
+    {
+        return xed_decoded_inst_get_length(&xedd);
+    }
+    else return -1;
 }
 #endif
 #ifdef USE_X86_DECODE
@@ -410,6 +437,9 @@ instr_len(unsigned const char *ins, unsigned const char *end)
 	
 #ifdef USE_X86_DECODE
 	TRY_DECODER(x86_decode);
+#endif
+#ifdef USE_XED
+	TRY_DECODER(xed);
 #endif
 #ifdef USE_UDIS86
 	TRY_DECODER(udis86);

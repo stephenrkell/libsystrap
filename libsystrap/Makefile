@@ -21,7 +21,7 @@ CFLAGS += -O2
 CFLAGS += -fPIC
 CFLAGS += -ffreestanding -fno-omit-frame-pointer
 
-instr.o: CFLAGS += -DUSE_X86_DECODE
+instr.o: CFLAGS += -DUSE_XED
 
 ifeq ($(DEBUG),)
 CFLAGS += -DNDEBUG
@@ -36,6 +36,7 @@ CFLAGS += -I $(OPDIS_DIR)
 CFLAGS += -I $(LIBOPCODES_DIR)/include
 CFLAGS += -I $(BFD_DIR)
 CFLAGS += -I $(LIBRUNT_DIR)/include
+CFLAGS += -I $(XED_DIR)/include
 
 CXXFLAGS := $(CXXFLAGS) $(CFLAGS) # eagerly latch CFLAGS now; don't want later additions
 CFLAGS += -std=c99
@@ -65,9 +66,9 @@ x86_decode.o: CFLAGS += -include x86_defs.h -include stdio.h
 x86_decode.o instr.o: CFLAGS += -std=gnu11
 
 ifneq ($(shell uname -s),FreeBSD)
-ARCHIVES := $(LIBUDIS86_A) $(LIBOPDIS_A) $(LIBOPCODES_A) $(LIBBFD_A) $(LIBIBERTY_A)
+ARCHIVES := $(LIBUDIS86_A) $(LIBOPDIS_A) $(LIBOPCODES_A) $(LIBBFD_A) $(LIBIBERTY_A) $(XED_A)
 else
-ARCHIVES :=
+ARCHIVES := $(XED_A)
 endif
 
 # Also extract 	$(LIBOPDIS_A), $(LIBOPCODES_A), $(LIBBFD_A) and $(LIBIBERTY_A),

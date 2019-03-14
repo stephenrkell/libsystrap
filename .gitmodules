@@ -1,3 +1,9 @@
 [submodule "contrib/librunt"]
 	path = contrib/librunt
 	url = https://github.com/stephenrkell/librunt.git
+[submodule "contrib/xed"]
+	path = contrib/xed
+	url = https://github.com/intelxed/xed.git
+[submodule "contrib/mbuild"]
+	path = contrib/mbuild
+	url = https://github.com/intelxed/mbuild.git
