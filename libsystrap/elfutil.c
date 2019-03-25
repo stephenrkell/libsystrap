@@ -158,10 +158,9 @@ const void *vaddr_to_nearest_instruction(unsigned char *search_addr, const char 
 		uintptr_t off_end = page_boundary_up(ehdr->e_shoff + ehdr->e_shnum * ehdr->e_shentsize);
 		if (!sht)
 		{
-			if (fname)
+			int fd = raw_open(fname, O_RDONLY);
+			if (fd >= 0)
 			{
-				int fd = raw_open(fname, O_RDONLY);
-				assert(fd >= 0);
 				m = raw_mmap(NULL, off_end - off_start, PROT_READ, MAP_PRIVATE, fd, page_boundary_down(ehdr->e_shoff));
 				if (MMAP_RETURN_IS_ERROR(m)) abort();
 				close(fd);
