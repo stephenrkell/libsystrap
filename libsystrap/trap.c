@@ -112,9 +112,27 @@ void walk_instructions(unsigned char *pos, unsigned char *end,
 	}
 }
 
+static unsigned char X86_64_MOV_0xF_RAX[] = {0x48, 0xc7, 0xc0, 0x0f, 0, 0, 0};
 static void instruction_cb(unsigned char *pos, unsigned len, void *arg)
 {
-	if (is_syscall_instr(pos, pos + len)) replace_syscall_with_ud2(pos, len);
+	if (is_syscall_instr(pos, pos + len))
+	{
+		/* FIXME HACK: Syscall 15 (sigreturn) must never be instrumented
+		 * because it would create another signal frame.
+		 * For now, just check that the previous instruction is not
+		 * "mov $0xf,%rax".
+		 * This hack is a bit unsafe and not portable at all !!!
+		 * A better way to do this would be to do a simple analysis of constant
+		 * values for each function and to only instrument syscalls if needed */
+		for (int i = 1; i <= 7; i++)
+		{
+			if (pos[-i] != X86_64_MOV_0xF_RAX[7-i])
+			{
+				replace_syscall_with_ud2(pos, len);
+				break;
+			}
+		}
+	}
 }
 
 #define ROUND_DOWN_PTR_TO_PAGE(p) ROUND_DOWN_PTR((p), guess_page_size_unsafe())
