@@ -142,7 +142,7 @@ struct ibcs_sigframe
 	struct __asm_siginfo info;
 };
 
-void restore_rt(void); /* in restorer.s */
+extern void restore_rt(void) __asm__("__restore_rt"); /* in restorer.c */
 
 void raw_exit(int status) __attribute__((noreturn));
 int raw_open(const char *pathname, int flags) __attribute__((noinline));
