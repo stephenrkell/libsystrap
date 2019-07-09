@@ -43,6 +43,7 @@
 #define sigval __asm_sigval
 #define sigval_t __asm_sigval_t
 #define siginfo __asm_siginfo
+#define stack_t __asm_stack_t
 #define ucontext __asm_ucontext
 #define pid_t __kernel_pid_t
 /* sys/time.h (which later code wants to include)
@@ -73,6 +74,7 @@
 #undef sigval
 #undef sigval_t
 #undef siginfo
+#undef stack_t
 #undef pid_t
 
 #elif defined(__FreeBSD__)
