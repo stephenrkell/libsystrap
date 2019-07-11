@@ -19,8 +19,8 @@ include $(CONFIG)
 
 CFLAGS += -DRELF_DEFINE_STRUCTURES -DSYSTRAP_DEFINE_FILE
 
-ifeq ($(LIBALLOCS_DIR),)
-$(error Please install the liballocs source tree and set LIBALLOCS_DIR)
+ifeq ($(LIBALLOCS),)
+$(error Please install the liballocs source tree and set LIBALLOCS to point to it)
 endif
 
 # don't insist on libfootprints
