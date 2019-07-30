@@ -71,7 +71,7 @@ standalone (does not rely on external libraries) and must run before any
 other code. It replaces system calls in the original code with traps and
 installs handling mechanisms.
 
-`instr.c' actually does the instrumentation, using opdis to disassemble.
+`instr.c' actually does the instrumentation.
 
 `do-syscall.c` is the interface between the previously mentioned trapping
 mechanism and the user-provided handling tools.
@@ -80,5 +80,6 @@ mechanism and the user-provided handling tools.
 sytem calls required in the library itself, since it cannot rely on the C
 library.
 
-`restorer.s` is a small assembly snippet required by the signal handler.
+`restorer.c` is a copy of glibc's signal restorer needed to return into user
+code.
 

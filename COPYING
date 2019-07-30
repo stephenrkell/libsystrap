@@ -12,6 +12,7 @@ files are as follows.
 src/x86_decode.c
 src/x86_emulate.h
 src/x86_defs.h
+libsystrap/restorer.c
 
 Note also that building this software involves downloading and compiling
 source code from other projects (collected under the contrib/
