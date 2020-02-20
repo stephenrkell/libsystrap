@@ -35,15 +35,14 @@ CFLAGS += -I$(SRCROOT)/include
 CFLAGS += -I $(LIBRUNT_DIR)/include
 CFLAGS += -std=c99
 
+syscall-names.o: $(SYS)-syscall-macros.h
 
 C_SRC := $(wildcard *.c)
 C_DEPS := $(patsubst %.c,.%.d,$(C_SRC))
-DEPS := $(C_DEPS) $(CC_DEPS)
+DEPS := $(C_DEPS)
 OBJS := $(patsubst %.c,%.o,$(C_SRC))
 
-$(CC_DEPS): .%.d: %.cc
-	$(CXX) -MG -MM $(CXXFLAGS) $+ > "$@" || rm -f "$@"
-$(C_DEPS): .%.d: %.c
+$(DEPS): .%.d: %.c
 	$(CC) -MG -MM $(CFLAGS) $+ > "$@" || rm -f "$@"
 
 ifneq ($(MAKECMDGOALS),clean)
