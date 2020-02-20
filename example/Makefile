@@ -36,7 +36,7 @@ endif
 #$(error Please install the libantlr3c source tree and set ANTLR3C_DIR)
 #endif
 
-ifeq ($(realpath $(SRCROOT)/libsystrap/libsystrap.a),)
+ifeq ($(realpath $(SRCROOT)/src/libsystrap.a),)
 $(error Please build libsystrap first)
 endif
 
@@ -79,7 +79,7 @@ ifneq ($(ANTLR3C_DIR),)
 CFLAGS += -I $(ANTLR3C_DIR)
 CFLAGS += -I $(ANTLR3C_DIR)/include
 endif
-CFLAGS += -I $(SRCROOT)/libsystrap
+CFLAGS += -I $(SRCROOT)/src # FIXME: should be an include dir
 ifneq ($(SYSCALL_INTROSPECT_TOOLS),)
 CFLAGS += -I $(SYSCALL_INTROSPECT_TOOLS)/scripts
 endif
@@ -92,7 +92,7 @@ CXXFLAGS += -std=c++11 $(LLVM_CXXFLAGS)
 
 $(SYS)-syscall-ifacetypes.c:
 
-# This is a quick but incomplete way to build 
+# This is a quick but incomplete way to build a number->name mapping
 linux-syscall-macros.h:
 	( /usr/bin/cpp -E -D"__SYSCALL(num,decl)=decl" - </dev/null | \
            sed -r '/^(#.*)?$$/ d' | sort | uniq | sed 's/^\(.*\)/SYSCALL(\1)/') > "$@" || (rm -f "$@"; false)
@@ -146,11 +146,11 @@ comma := ,
 # FIXME: make our dynamic symbols hidden! 
 # We don't want user code calling into our exit(), hence having us make its syscalls.
 trace-syscalls.so: LDLIBS := -Bstatic \
-	$(SRCROOT)/libsystrap/libsystrap.a \
+	$(SRCROOT)/src/libsystrap.a \
 	$(LIBRUNT_DIR)/lib/librunt_preload.a
 
 trace-sysfoot.so: LDLIBS := -Bstatic \
-	$(SRCROOT)/libsystrap/libsystrap.a \
+	$(SRCROOT)/src/libsystrap.a \
 	$(LIBC_A) \
 	$(FOOTPRINTS_A) \
 	$(DWARFIDL_DIR)/parser/dwarfidlSimpleCLexer.o \
@@ -183,14 +183,14 @@ trace-syscalls.so: LDFLAGS += -Wl,--defsym,__GI___assert_fail=__assert_fail \
 # __assert_fail, and some libc symbols refer to it using this alias. Otherwise
 # the libc archive's __assert_fail gets pulled in because it's the only definition
 # of __GI____assert_fail, and we have to use its __assert_fail too.
-trace-syscalls.so: $(SRCROOT)/libsystrap/libsystrap.a
+trace-syscalls.so: $(SRCROOT)/src/libsystrap.a
 	$(CC) -shared -Bsymbolic \
 		-fuse-ld=gold \
 		-Wl,-h,$@ \
 		-o "$@" $(filter-out %.a,$+) \
 		$(LDFLAGS) $(LDLIBS)
 
-trace-sysfoot.so: dynamic-list $(SRCROOT)/libsystrap/libsystrap.a
+trace-sysfoot.so: dynamic-list $(SRCROOT)/src/libsystrap.a
 	$(CC) -shared -Bsymbolic \
 		-fuse-ld=gold \
 		-Wl,--dynamic-list,dynamic-list \
