@@ -53,19 +53,6 @@ void __assert_fail(const char * assertion, const char * file, unsigned int line,
 // 	return highest_seen;
 // }
 
-// another non-portable thingy... FIXME: replace dl_iterate_phdr with 
-// walking the link_map, *or* implement our own dl_iterate_phdr for portability
-struct dl_phdr_info 
-{
-	ElfW(Addr) dlpi_addr;
-	const char *dlpi_name;
-	const ElfW(Phdr) *dlpi_phdr;
-	ElfW(Half) dlpi_phnum;
-};
-
-typedef int dl_cb_fn(struct dl_phdr_info *info, size_t size, void *data);
-int dl_iterate_phdr(dl_cb_fn *callback, void *data);
-
 const ElfW(Phdr) *vaddr_to_load_phdr(unsigned char *begin_addr, const char *fname, void **out_base_addr)
 		__attribute__((visibility("protected")));
 const ElfW(Ehdr) *vaddr_to_ehdr(unsigned char *begin_addr, const char *fname, void **out_base_addr)

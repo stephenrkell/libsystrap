@@ -8,10 +8,29 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <link.h>
-#include <maps.h> /* from liballocs (or librunt?) */
+#include <alloca.h>
+#ifndef assert
+// HACK to avoid including assert.h
+extern void 
+__assert_fail (const char *assertion, const char *file,
+        unsigned int line, const char *function) __attribute__((__noreturn__));
+#define stringify(cond) #cond
+#define assert(cond) \
+        do { ((cond) ? ((void) 0) : (__assert_fail("Assertion failed: \"" stringify((cond)) "\"", __FILE__, __LINE__, __func__ ))); }  while (0)
+#endif
+#include <librunt.h> /* from librunt */
+#include <dso-meta.h> /* from librunt */
+#include <vas.h> /* from librunt */
+#include <maps.h> /* from librunt */
 #include "systrap.h"
 #include "systrap_private.h"
 #include "syscall-names.h"
+
+int raw_open(const char *pathname, int flags);
+int raw_close(int fd);
+extern int etext;
+
+
 /* #include <footprints.h> */
 
 /* We are a preloaded library whose constructor
@@ -26,19 +45,10 @@ int trace_fd __attribute__((visibility("hidden")));
 static int process_mapping_cb(struct maps_entry *ent, char *linebuf, void *arg)
 {
 	/* Skip ourselves, but remember our load address. */
-	void *expected_mapping_end = (void*) page_boundary_up((uintptr_t) &etext);
+	void *expected_mapping_end = ROUND_UP_PTR_TO_PAGE((uintptr_t) &etext);
 	if ((const unsigned char *) ent->second >= (const unsigned char *) expected_mapping_end
 		 && (const unsigned char *) ent->first < (const unsigned char *) expected_mapping_end)
 	{
-		our_text_begin_address = (const void *) ent->first;
-		our_text_end_address = (const void *) ent->second;
-		
-		/* Compute our load address from the phdr p_vaddr of this segment.
-		 * But how do we get at our phdrs?
-		 * In general I think we need to hack the linker script to define a new symbol.
-		 * But for now, just use the fact that it's very likely to be the lowest text addr. */
-		our_load_address = (uintptr_t) our_text_begin_address;
-
 		debug_printf(1, "Skipping our own text mapping: %p-%p\n", 
 			(void*) ent->first, (void*) ent->second);
 		
@@ -89,10 +99,19 @@ void trap_all_mappings(void)
 		raw_close(fd);
 	}
 }
-
+void __init_libc(char **envp, char *pn); // musl-internal API
 static void startup(void) __attribute__((constructor(101)));
 static void startup(void)
 {
+	/* We use musl as our libc. That means there are (up to) two libc instances
+	 * in the process! Before we do any libc calls, make sure musl's state
+	 * is initialized. We use librunt to get the env/arg values. */
+	const char **p_argv_0 = NULL, **p_argv_end = NULL;
+	const char **p_envv_0 = NULL, **p_envv_end = NULL;
+	__runt_auxv_init();
+	__runt_auxv_get_argv(&p_argv_0, &p_argv_end);
+	__runt_auxv_get_env(&p_envv_0, &p_envv_end);
+	__init_libc((char**) p_envv_0, (char*) *p_argv_0);
 	if (getenv("TRAP_SYSCALLS_DELAY_STARTUP"))
 	{
 		sleep(atoi(getenv("TRAP_SYSCALLS_DELAY_STARTUP")));

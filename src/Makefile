@@ -12,15 +12,14 @@ $(CONTRIB)/config.mk:
 	$(MAKE) -C $(CONTRIB)
 
 ifeq ($(SYS),freebsd)
-LIBC_DIR ?= /usr/lib
 LIBC_A ?= /usr/lib/libc_pic.a
 endif
 include $(CONFIG)
 
-CFLAGS += -DRELF_DEFINE_STRUCTURES -DSYSTRAP_DEFINE_FILE
+CFLAGS += -DSYSTRAP_DEFINE_FILE
 
-ifeq ($(LIBALLOCS),)
-$(error Please install the liballocs source tree and set LIBALLOCS to point to it)
+ifeq ($(LIBRUNT_DIR),)
+$(error Please install the librunt source tree and set LIBRUNT_DIR to point to it)
 endif
 
 # don't insist on libfootprints
@@ -33,9 +32,9 @@ endif
 # $(error Please install the syscall-introspect-tools source tree and set SYSCALL_INTROSPECT_TOOLS_DIR)
 # endif
 
-ifeq ($(ANTLR3C_DIR),)
-$(error Please install the libantlr3c source tree and set ANTLR3C_DIR)
-endif
+#ifeq ($(ANTLR3C_DIR),)
+#$(error Please install the libantlr3c source tree and set ANTLR3C_DIR)
+#endif
 
 ifeq ($(realpath $(SRCROOT)/libsystrap/libsystrap.a),)
 $(error Please build libsystrap first)
@@ -68,15 +67,22 @@ CFLAGS += -O2
 CFLAGS += -fPIC
 CFLAGS += -ffreestanding -fno-omit-frame-pointer
 
-# HACK: circular referential structure between us and liballocs
-CFLAGS += -I $(LIBALLOCS_DIR)/include
+CFLAGS += -I $(LIBRUNT_DIR)/include
+ifneq ($(LIBFOOTPRINTS_DIR),)
 CFLAGS += -I $(LIBFOOTPRINTS_DIR)/include
+endif
+ifneq ($(DWARFIDL_DIR),)
 CFLAGS += -I $(DWARFIDL_DIR)/include
+CFLAGS += -I $(DWARFIDL_DIR)/parser
+endif
+ifneq ($(ANTLR3C_DIR),)
 CFLAGS += -I $(ANTLR3C_DIR)
 CFLAGS += -I $(ANTLR3C_DIR)/include
-CFLAGS += -I $(DWARFIDL_DIR)/parser
+endif
 CFLAGS += -I $(SRCROOT)/libsystrap
+ifneq ($(SYSCALL_INTROSPECT_TOOLS),)
 CFLAGS += -I $(SYSCALL_INTROSPECT_TOOLS)/scripts
+endif
 
 CXXFLAGS := $(CXXFLAGS) $(CFLAGS) # eagerly latch CFLAGS now; don't want later additions
 
@@ -105,7 +111,6 @@ syscall-macros.h: $(SYS)-syscall-macros.h
 
 syscall-names.o: $(SYS)-syscall-macros.h
 
-# HACK: more liballocs dependency -- split off a librefl or librunt to isolate these?
 C_SRC := $(wildcard *.c) uniqtype-bfs.c # $(SYSCALL_IFACE_SRC)
 S_SRC := $(wildcard *.s)
 CC_SRC := $(wildcard *.cc)
@@ -142,40 +147,54 @@ comma := ,
 # We don't want user code calling into our exit(), hence having us make its syscalls.
 trace-syscalls.so: LDLIBS := -Bstatic \
 	$(SRCROOT)/libsystrap/libsystrap.a \
-
-ifneq ($(SYS),freebsd)
-trace-syscalls.so: LDLIBS += \
-	$(ZLIB_A)
-endif
-
-trace-syscalls.so: LDLIBS += \
-	dlmalloc.a \
-	$(LIBC_A) 
+	$(LIBRUNT_DIR)/lib/librunt_preload.a
 
 trace-sysfoot.so: LDLIBS := -Bstatic \
 	$(SRCROOT)/libsystrap/libsystrap.a \
-	$(ZLIB_A) \
-	dlmalloc.a \
 	$(LIBC_A) \
 	$(FOOTPRINTS_A) \
 	$(DWARFIDL_DIR)/parser/dwarfidlSimpleCLexer.o \
 	$(DWARFIDL_DIR)/parser/dwarfidlSimpleCParser.o \
 	$(ANTLR3C_A)
+# HACK
+#ZLIB_A := /usr/lib/x86_64-linux-gnu/libz.a
+#ifneq ($(SYS),freebsd)
+#trace-syscalls.so trace-sysfoot.so: LDLIBS += \
+#	$(ZLIB_A)
+#endif
 
-trace-syscalls.so trace-sysfoot.so: LDFLAGS += -nostdlib -Wl,--hash-style=sysv -Wl,--no-as-needed
+trace-syscalls.so: LDLIBS += \
+	dlmalloc.a \
+	$(LIBC_A) -lunwind-x86_64 -lunwind -lgcc_s -lpthread
+
+# we used to insist -Wl,--hash-style=sysv here, but relf.h now groks GNU-style
+trace-syscalls.so trace-sysfoot.so: LDFLAGS += \
+-fno-lto -nostdlib -Wl,--no-as-needed \
+-Wl,--defsym,__private_strdup=strdup -Wl,--defsym,__private_malloc=malloc \
+-Wl,--defsym,__private_free=free
 
 trace-syscalls.so trace-sysfoot.so: trap-syscalls.o syscall-names.o handle-syscall.o dlmalloc.a
 trace-sysfoot.so: $(filter-out dlmalloc.o,$(OBJS)) libantlr3c_pic.a
 
+# FIXME: check whether these are really necessary in the librunt world
+trace-syscalls.so: LDFLAGS += -Wl,--defsym,__GI___assert_fail=__assert_fail \
+  -Wl,--defsym,stat=raw_stat
 # We have to defsym __GI____assert_fail because it's defined in the same file as 
 # __assert_fail, and some libc symbols refer to it using this alias. Otherwise
 # the libc archive's __assert_fail gets pulled in because it's the only definition
 # of __GI____assert_fail, and we have to use its __assert_fail too.
-trace-syscalls.so trace-sysfoot.so: dynamic-list $(SRCROOT)/libsystrap/libsystrap.a
+trace-syscalls.so: $(SRCROOT)/libsystrap/libsystrap.a
+	$(CC) -shared -Bsymbolic \
+		-fuse-ld=gold \
+		-Wl,-h,$@ \
+		-o "$@" $(filter-out %.a,$+) \
+		$(LDFLAGS) $(LDLIBS)
+
+trace-sysfoot.so: dynamic-list $(SRCROOT)/libsystrap/libsystrap.a
 	$(CC) -shared -Bsymbolic \
 		-fuse-ld=gold \
 		-Wl,--dynamic-list,dynamic-list \
-		-Wl,-h,trace-syscalls.so \
+		-Wl,-h,trace-sysfoot.so \
 		-Wl,--version-script,version-script \
 		-o "$@" $(filter-out dynamic-list,$(filter-out %.a,$+)) \
 		$(LDFLAGS) -Wl,-z,muldefs \

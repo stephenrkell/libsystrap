@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "instr.h" /* our API -- in C */
-#include "raw-syscalls.h"
+#include <sys/types.h>
+#include "raw-syscalls-defs.h"
 #include <assert.h>
 #include <string.h>
 #include <stdio.h>

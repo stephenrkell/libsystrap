@@ -25,10 +25,6 @@
  * with some libc headers, particularly typedefs related to signal
  * handling. We use inline assembly to make the few system calls
  * that we need. */
-#include "raw-syscalls.h"
-#ifdef __linux__
-#define sigset_t __asm_sigset_t
-#endif
 #include <sys/mman.h>
 #include <stdint.h>
 #include <string.h>
@@ -41,9 +37,14 @@
 #include <fcntl.h>
 #endif
 #include <err.h>
+#include <link.h>
+#include <assert.h>
+#include <relf.h>
+#include <vas.h>
+#include <librunt.h>
+#include <dso-meta.h>
 #include "systrap_private.h"
 #include "do-syscall.h"
-#include "elfutil.h"
 
 /* For clients building a standalone executable and wanting a simple test case, 
  * we allow them to set a test trap. */
@@ -147,9 +148,6 @@ static void instruction_cb(unsigned char *pos, unsigned len, void *arg)
 		replace_syscall_with_ud2(pos, len);
 	}
 }
-
-#define ROUND_DOWN_PTR_TO_PAGE(p) ROUND_DOWN_PTR((p), guess_page_size_unsafe())
-#define ROUND_UP_PTR_TO_PAGE(p) ROUND_UP_PTR((p), guess_page_size_unsafe())
 
 void *__tls_get_addr(); // in ld.so
 
@@ -259,10 +257,12 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 	 * header table. PROBLEM: we can't re-open a file that is
 	 * guaranteed to be the same. */
 	void *base_addr = NULL;
-	const void *first_section_start = vaddr_to_nearest_instruction(
-		begin, filename, 0, &base_addr);
-	const void *last_section_end = vaddr_to_nearest_instruction(
-		end, filename, 1, &base_addr);
+	const void *first_section_start = __runt_find_section_boundary(
+		begin, SHF_EXECINSTR, 0, NULL, NULL);
+	assert(first_section_start == vaddr_to_nearest_instruction(begin, filename, 0, NULL));
+	const void *last_section_end = __runt_find_section_boundary(
+		end, SHF_EXECINSTR, 1, NULL, NULL);
+	assert(last_section_end == vaddr_to_nearest_instruction(end, filename, 1, NULL));
 	/* These might return respectively (void*)-1 and (void*)0, to signify
 	 * "no instructions in that range, according to section headers".
 	 * The section headers are pretty reliable, so we choose not to
@@ -319,7 +319,7 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 	}
 }
 
-static void handle_sigill(int num);
+void handle_sigill(int n) __attribute__((visibility("hidden")));
 struct FILE;
 
 int debug_level __attribute__((visibility("hidden"))) = 0;
@@ -383,59 +383,3 @@ void install_sigill_handler(void)
 	return;
 }
 
-// For debug printing inside handle_sigill we have to know
-// that it's our own debug printing in order to filter it
-// out of the footprints, hence this noinline function
-// rather than using the normal macro
-__attribute__ ((noinline)) static void _handle_sigill_debug_printf(int level, const char *fmt, ...) {
-	 va_list vl;
-	 va_start(vl, fmt);
-	 if ((level) <= debug_level) {
-		  vfprintf(*p_err_stream, fmt, vl);
-		  fflush(*p_err_stream);
-	 }
-	 va_end(vl);
-}
-
-/* We may or may not have syscall names linked in.
- * This is just to avoid a dependency on our syscall interface spec.  */
-extern const char *syscall_names[SYSCALL_MAX + 1] __attribute__((weak));
-static void handle_sigill(int n)
-{
-	unsigned long *frame_base = __builtin_frame_address(0);
-	struct ibcs_sigframe *p_frame = (struct ibcs_sigframe *) (frame_base + 1);
-
-	/* Decode the syscall using sigcontext. */
-	_handle_sigill_debug_printf(1, "Took a trap from instruction at %p", p_frame->uc.uc_mcontext.MC_REG(rip, RIP));
-#ifdef EXECUTABLE
-	if (p_frame->uc.uc_mcontext.MC_REG(rip, RIP) == (uintptr_t) ignore_ud2_addr)
-	{
-		_handle_sigill_debug_printf(1, " which is our test trap address; continuing.\n");
-		resume_from_sigframe(0, p_frame, 2);
-		return;
-	}
-#endif
-	unsigned long syscall_num = (unsigned long) p_frame->uc.uc_mcontext.MC_REG(rax, RAX);
-	assert(syscall_num >= 0);
-	assert(syscall_num < SYSCALL_MAX);
-	_handle_sigill_debug_printf(1, " which we think is syscall %s/%d\n",
-		&syscall_names[0] ? syscall_names[syscall_num] : "(names not linked in)", syscall_num);
-
-	/* FIXME: check whether this syscall creates executable mappings; if so,
-	 * we make them nx, do the rewrite, then make them x. */
-
-	struct generic_syscall gsp = {
-		.saved_context = p_frame,
-		.syscall_number = syscall_num,
-		.args = {
-			p_frame->uc.uc_mcontext.MC_REG(rdi, RDI),
-			p_frame->uc.uc_mcontext.MC_REG(rsi, RSI),
-			p_frame->uc.uc_mcontext.MC_REG(rdx, RDX),
-			p_frame->uc.uc_mcontext.MC_REG(r10, R10),
-			p_frame->uc.uc_mcontext.MC_REG(r8, R8),
-			p_frame->uc.uc_mcontext.MC_REG(r9, R9)
-		}
-	};
-
-	do_syscall_and_resume(&gsp); // inline
-}

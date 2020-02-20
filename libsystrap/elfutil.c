@@ -1,5 +1,4 @@
-#include "raw-syscalls.h"
-#include "elfutil.h"
+#define _GNU_SOURCE
 #include <stddef.h>
 #include <string.h>
 #ifdef __linux__
@@ -8,10 +7,16 @@
 #include <sys/mman.h>
 #include <stdlib.h>
 #include <err.h>
-
+#include <assert.h>
+#include <sys/types.h>
+#include <dlfcn.h>
+#include <link.h>
 #include <relf.h>
+#include <sys/stat.h>
 
-#include "do-syscall.h"
+#include "raw-syscalls-defs.h"
+#include "elfutil.h"
+// #include "do-syscall.h"
 
 uintptr_t our_load_address __attribute__((visibility("protected")));
 

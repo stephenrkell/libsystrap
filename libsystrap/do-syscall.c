@@ -2,12 +2,10 @@
  * Implementations of various substitution functions and helper functions
  * called during syscall emulation.
  */
-
+#define RELF_DEFINE_STRUCTURES
 #include "do-syscall.h"
 #include "syscall-names.h"
 #include <alloca.h>
-//#include <string.h>
-#include "elfutil.h"
 
 /* Dummy pre- and post-handling -- the client library 
  * will override us (we're in an archive, remember). */

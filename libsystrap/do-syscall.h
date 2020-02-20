@@ -1,7 +1,7 @@
 #ifndef DO_SYSCALL_H_
 #define DO_SYSCALL_H_
 
-#include "raw-syscalls.h" /* always include raw-syscalls first, and let it do the asm includes */
+#include "raw-syscalls-impl.h" /* always include raw-syscalls first, and let it do the asm includes */
 
 #include <stddef.h>
 #include <unistd.h>

@@ -5,7 +5,7 @@
  * trap-syscall library.
  */
 
-#include "raw-syscalls.h"
+#include "raw-syscalls-impl.h"
 #define DO_EXIT_SYSCALL \
 	long retcode = status; \
 	op = SYS_exit; \
