@@ -94,8 +94,8 @@ $(SYS)-syscall-ifacetypes.c:
 
 # This is a quick but incomplete way to build a number->name mapping
 linux-syscall-macros.h:
-	( /usr/bin/cpp -E -D"__SYSCALL(num,decl)=decl" - </dev/null | \
-           sed -r '/^(#.*)?$$/ d' | sort | uniq | sed 's/^\(.*\)/SYSCALL(\1)/') > "$@" || (rm -f "$@"; false)
+	( /usr/bin/cpp -E -D"__SYSCALL(num,decl)=decl" -o - /usr/include/asm-generic/unistd.h </dev/null | \
+           sed -r '/^(#.*)?$$/ d' | sort | uniq | sed -r 's/^(sys_)?(.*)/#ifdef SYS_\2\nSYSCALL(\2)\n#endif/') > "$@" || (rm -f "$@"; false)
 
 freebsd-syscall-macros.h:
 	cat /usr/include/sys/syscall.h | grep 'SYS_[a-z][A-Za-z0-9_]*' | cut -f2 | \
@@ -172,6 +172,10 @@ trace-syscalls.so trace-sysfoot.so: LDFLAGS += \
 -fno-lto -nostdlib -Wl,--no-as-needed \
 -Wl,--defsym,__private_strdup=strdup -Wl,--defsym,__private_malloc=malloc \
 -Wl,--defsym,__private_free=free
+
+# don't use lazy binding -- it's bad if we've removed exec permission
+trace-syscalls.so trace-sysfoot.so: LDFLAGS += \
+	-Wl,-z,now -fno-lto
 
 trace-syscalls.so trace-sysfoot.so: trap-syscalls.o syscall-names.o handle-syscall.o dlmalloc.a
 trace-sysfoot.so: $(filter-out dlmalloc.o,$(OBJS)) libantlr3c_pic.a
