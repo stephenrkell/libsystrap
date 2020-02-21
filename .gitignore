@@ -106,3 +106,6 @@ Makefile.in
 .fuse_hidden*
 .nfs*
 .dropbox*
+
+example/linux-syscall-macros.h
+example/syscall-macros.h
