@@ -3,7 +3,8 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdarg.h>
-// #include <stdlib.h>
+#include <stdlib.h>
+#include <stdio.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -22,8 +23,8 @@ __assert_fail (const char *assertion, const char *file,
 #include <dso-meta.h> /* from librunt */
 #include <vas.h> /* from librunt */
 #include <maps.h> /* from librunt */
+#include <relf.h> /* from librunt */
 #include "systrap.h"
-#include "systrap_private.h"
 #include "syscall-names.h"
 #include "raw-syscalls-defs.h"
 
@@ -36,10 +37,10 @@ extern int etext;
  * into the generic syscall emulation path; we provide
  * pre_handler and post_handler to print stuff. */
 
-_Bool __write_traces;
 void *traces_out __attribute__((visibility("hidden"))) /* really FILE* */;
 int trace_fd __attribute__((visibility("hidden")));
 
+/* FIXME: use a librunt API for doing this. */
 static int process_mapping_cb(struct maps_entry *ent, char *linebuf, void *arg)
 {
 	/* Skip ourselves, but remember our load address. */
@@ -47,10 +48,8 @@ static int process_mapping_cb(struct maps_entry *ent, char *linebuf, void *arg)
 	if ((const unsigned char *) ent->second >= (const unsigned char *) expected_mapping_end
 		 && (const unsigned char *) ent->first < (const unsigned char *) expected_mapping_end)
 	{
-		debug_printf(1, "Skipping our own text mapping: %p-%p\n", 
-			(void*) ent->first, (void*) ent->second);
-		
-		return 0; // keep going
+		// it's our own mapping; skip and keep going
+		return 0;
 	}
 
 	if (ent->x == 'x')
@@ -98,11 +97,51 @@ void trap_all_mappings(void)
 	}
 }
 
-void __init_tls(size_t *auxv) /* HACK borrowed from musl's own dynlink.c */
+static int debug_level;
+static FILE **p_err_stream;
+static FILE *our_fake_stderr; // will fdopen stderr if necessary
+#define debug_printf(lvl, fmt, ...) do { \
+    if ((lvl) <= debug_level) { \
+      if (!p_err_stream || !*p_err_stream) { \
+          p_err_stream = &our_fake_stderr; \
+          *p_err_stream = fdopen(2, "w"); \
+      } \
+      fprintf(*p_err_stream, fmt, ## __VA_ARGS__ ); \
+      fflush(*p_err_stream); \
+    } \
+  } while (0)
+
+/* FIXME: if we do dynamic loading, we don't currently trap those segments.
+ * This should be fixable with the help of librunt. */
+void trap_all_sections_startup(void)
 {
+	/* NOTE: this is racy, but we should be running before
+	 * other threads are started. */
+	for (struct link_map *lm = _r_debug.r_map; lm; lm = lm->l_next)
+	{
+		struct file_metadata *fm = __runt_files_metadata_by_addr(lm->l_ld);
+		if (!fm)
+		{
+			debug_printf(0, "bad file: %s\n", lm->l_name);
+		}
+		for (ElfW(Shdr) *shdr = fm->shdrs; shdr != fm->shdrs + fm->ehdr->e_shnum; ++shdr)
+		{
+			if (shdr->sh_flags & SHF_EXECINSTR)
+			{
+				trap_one_instruction_range(
+					(void*)(lm->l_addr + shdr->sh_addr),
+					(void*)(lm->l_addr + shdr->sh_addr + shdr->sh_size),
+					(shdr->sh_flags & SHF_WRITE),
+					1
+				);
+			}
+		}
+	}
 }
 
+void __init_tls(size_t *auxv) {} /* HACK borrowed from musl's own dynlink.c */
 void __init_libc(char **envp, char *pn); // musl-internal API
+
 static void startup(void) __attribute__((constructor(101)));
 static void startup(void)
 {
@@ -115,27 +154,26 @@ static void startup(void)
 	__runt_auxv_get_argv(&p_argv_0, &p_argv_end);
 	__runt_auxv_get_env(&p_envv_0, &p_envv_end);
 	__init_libc((char**) p_envv_0, (char*) *p_argv_0);
-	if (getenv("TRAP_SYSCALLS_DELAY_STARTUP"))
+	if (getenv("TRACE_SYSCALLS_DELAY_STARTUP"))
 	{
-		sleep(atoi(getenv("TRAP_SYSCALLS_DELAY_STARTUP")));
+		sleep(atoi(getenv("TRACE_SYSCALLS_DELAY_STARTUP")));
 	}
 	
-	char *trace_fd_str = getenv("TRAP_SYSCALLS_TRACE_FD");
+	char *trace_fd_str = getenv("TRACE_SYSCALLS_TRACE_FD");
 	if (trace_fd_str) trace_fd = atoi(trace_fd_str);
-
-	debug_printf(0, "TRAP_SYSCALLS_TRACE_FD is %s, ", trace_fd_str);
+	debug_printf(0, "TRACE_SYSCALLS_TRACE_FD is %s, ", trace_fd_str);
 	if (!trace_fd_str || trace_fd == 2)
 	{
 		debug_printf(0, "dup'ing stderr, ");
 		trace_fd = dup(2);
 	}
-	
+	/* The user is allowed to ask for traces on a particular fd, which must
+	 * be open at process start. We fdopen it to get a FILE object. */
 	if (trace_fd >= 0)
 	{
 		if (fcntl(F_GETFD, trace_fd) != -1)
 		{
 			debug_printf(0, "fd %d is open; outputting traces there.\n", trace_fd);
-			__write_traces = 1;
 			traces_out = fdopen(trace_fd, "a");
 			if (!traces_out)
 			{
@@ -190,4 +228,20 @@ void print_post_syscall(void *stream, struct generic_syscall *gsp, void *calling
 		ret
 	);
 	fflush(stream);
+}
+
+void __attribute__((visibility("protected")))
+systrap_pre_handling(struct generic_syscall *gsp)
+{
+	void *calling_addr = generic_syscall_get_ip(gsp);
+	struct link_map *calling_object = get_highest_loaded_object_below(calling_addr);
+	print_pre_syscall(traces_out, gsp, calling_addr, calling_object, NULL);
+}
+
+void __attribute__((visibility("protected")))
+systrap_post_handling(struct generic_syscall *gsp)
+{
+	void *calling_addr = generic_syscall_get_ip(gsp);
+	struct link_map *calling_object = get_highest_loaded_object_below(calling_addr);
+	print_post_syscall(traces_out, gsp, calling_addr, calling_object, NULL);
 }

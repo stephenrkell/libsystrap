@@ -50,6 +50,10 @@
  * we allow them to set a test trap. */
 void *__libsystrap_ignore_ud2_addr;
 
+static int sleep_for_seconds;
+static int stop_self;
+static int self_pid;
+
 extern int etext;
 
 unsigned long read_hex_num(const char **p_c, const char *end) __attribute__((visibility("hidden")));
@@ -321,11 +325,7 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 
 void handle_sigill(int n) __attribute__((visibility("hidden")));
 struct FILE;
-
 int debug_level __attribute__((visibility("hidden"))) = 0;
-int sleep_for_seconds __attribute__((visibility("hidden"))) = 0;
-int stop_self __attribute__((visibility("hidden"))) = 0;
-int self_pid __attribute__((visibility("hidden"))) = 0;
 FILE **p_err_stream __attribute__((visibility("hidden"))) = NULL;
 FILE *our_fake_stderr __attribute__((visibility("hidden"))) = NULL;
 

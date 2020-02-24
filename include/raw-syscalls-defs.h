@@ -21,7 +21,7 @@ int raw_mprotect(const void *addr, size_t len,
 
 #ifndef MMAP_RETURN_IS_ERROR
 #define MMAP_RETURN_IS_ERROR(p) \
-        (((unsigned long long)(void*)-1 - (unsigned long long)(p)) < PAGE_SIZE)
+        (((unsigned long long)(void*)-1 - (unsigned long long)(p)) < MIN_PAGE_SIZE)
 #endif
 
 void *raw_mmap(void *addr, size_t length, int prot, int flags,
@@ -29,12 +29,18 @@ void *raw_mmap(void *addr, size_t length, int prot, int flags,
 int raw_munmap(void *addr, size_t length);
 int raw_rt_sigaction(int signum, const struct __asm_sigaction *act,
 		     struct __asm_sigaction *oldact) __attribute__((noinline));
+
 struct user_desc;
 int __attribute__((noinline)) raw_set_thread_area(struct user_desc *u_info);
 int __attribute__((noinline)) raw_arch_prctl(int code, unsigned long addr);
 
+/* Some utilities for our clients. */
 #define write_string(s) raw_write(2, (s), sizeof (s) - 1)
 #define write_chars(s, t)  raw_write(2, s, t - s)
 #define write_ulong(a)   raw_write(2, fmt_hex_num((a)), 18)
 const char *fmt_hex_num(unsigned long n);
 int sleep_quick(int n);
+
+/* This is defined in do-syscall.c, but do-syscall.h is not a public header. */
+struct generic_syscall;
+void *generic_syscall_get_ip(struct generic_syscall *gsp);

@@ -13,7 +13,7 @@ $(CONTRIB)/config.mk:
 include $(CONFIG)
 
 CFLAGS += -DSYSTRAP_DEFINE_FILE
-
+CFLAGS += -I$(SRCROOT)/include
 CFLAGS += -g
 CFLAGS += -Wall -Wno-unused-label -Wno-comment
 CFLAGS += -O2

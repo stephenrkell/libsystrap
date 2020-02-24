@@ -4,7 +4,6 @@
  */
 #define RELF_DEFINE_STRUCTURES
 #include "do-syscall.h"
-#include "syscall-names.h"
 #include <alloca.h>
 
 /* Dummy pre- and post-handling -- the client library 
@@ -24,17 +23,12 @@ systrap_post_handling(struct generic_syscall *gsp, long int ret)
 		gsp->saved_context, \
 		instr_len((unsigned char *) gsp->saved_context->uc.uc_mcontext.rip, (unsigned char *) -1) \
 	)
-
-/*
-#define DECL_SYSCALL(x) [SYS_ ## x ] = do_ ## x ,
-syscall_replacement *replaced_syscalls[SYSCALL_MAX] = {
-	DECL_SYSCALL(read)
-	DECL_SYSCALL(write)
-	DECL_SYSCALL(open)
-	DECL_SYSCALL(getpid)
-	DECL_SYSCALL(exit)
-	DECL_SYSCALL(time)
-};
-#undef DECL_SYSCALL
-*/
+#ifndef SYSCALL_MAX
+#define SYSCALL_MAX 1023
+#endif
 syscall_replacement *replaced_syscalls[SYSCALL_MAX] = { NULL };
+
+void *generic_syscall_get_ip(struct generic_syscall *gsp)
+{
+	return (void*) gsp->saved_context->uc.uc_mcontext.MC_REG(rip, RIP);
+}

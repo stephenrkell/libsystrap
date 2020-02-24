@@ -7,7 +7,7 @@ void install_sigill_handler(void);
 void trap_all_mappings(void);
 void trap_one_executable_region(unsigned char *begin, unsigned char *end, const char *filename,
 	_Bool is_writable, _Bool is_readable);
-void trap_one_instruction_range(unsigned char *begin, unsigned char *end, 
+void trap_one_instruction_range(unsigned char *begin, unsigned char *end,
 	_Bool is_writable, _Bool is_readable);
 void walk_instructions(unsigned char *pos, unsigned char *end,
 	void (*cb)(unsigned char *pos, unsigned len, void *arg), void *arg);
@@ -28,7 +28,7 @@ struct generic_syscall {
 
 typedef void post_handler(struct generic_syscall *s, long int ret);
 typedef void /*(__attribute__((noreturn))*/ syscall_replacement/*)*/(
-	struct generic_syscall *s, 
+	struct generic_syscall *s,
 	post_handler *post
 );
 

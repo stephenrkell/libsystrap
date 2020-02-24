@@ -2,9 +2,6 @@
 #define SYSTRAP_PRIVATE_H_
 
 extern int debug_level __attribute__((visibility("hidden")));
-extern int sleep_for_seconds __attribute__((visibility("hidden")));
-extern int stop_self __attribute__((visibility("hidden")));
-extern int self_pid __attribute__((visibility("hidden")));
 
 #ifdef SYSTRAP_DEFINE_FILE
 struct _IO_FILE;
