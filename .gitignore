@@ -109,3 +109,4 @@ Makefile.in
 
 example/linux-syscall-macros.h
 example/syscall-macros.h
+example/trace-syscalls.map
