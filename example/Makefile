@@ -145,9 +145,11 @@ space := $(null) #
 comma := ,
 # FIXME: make our dynamic symbols hidden! 
 # We don't want user code calling into our exit(), hence having us make its syscalls.
+# NOTE: the --whole-archive is only necessary for debugging, to ensure that
+# functions we might want to call from the debugger are actually linked in
 trace-syscalls.so: LDLIBS := -Bstatic \
 	$(SRCROOT)/src/libsystrap.a \
-	$(LIBRUNT_DIR)/lib/librunt_preload.a
+	-Wl,--whole-archive $(LIBRUNT_DIR)/lib/librunt_preload.a -Wl,--no-whole-archive
 
 trace-sysfoot.so: LDLIBS := -Bstatic \
 	$(SRCROOT)/src/libsystrap.a \
@@ -163,8 +165,10 @@ trace-sysfoot.so: LDLIBS := -Bstatic \
 #	$(ZLIB_A)
 #endif
 
+LD_SO ?= /lib64/ld-linux-x86-64.so.2  # HACK: sysdep
 trace-syscalls.so: LDLIBS += \
 	dlmalloc.a \
+	$(LD_SO) \
 	$(LIBC_A) -lunwind-x86_64 -lunwind -lgcc_s -lpthread
 
 # we used to insist -Wl,--hash-style=sysv here, but relf.h now groks GNU-style
@@ -175,7 +179,7 @@ trace-syscalls.so trace-sysfoot.so: LDFLAGS += \
 
 # don't use lazy binding -- it's bad if we've removed exec permission
 trace-syscalls.so trace-sysfoot.so: LDFLAGS += \
-	-Wl,-z,now -fno-lto
+	-Wl,-z,now -fno-lto -Wl,--exclude-libs=ALL
 
 trace-syscalls.so trace-sysfoot.so: trap-syscalls.o syscall-names.o handle-syscall.o dlmalloc.a
 trace-sysfoot.so: $(filter-out dlmalloc.o,$(OBJS)) libantlr3c_pic.a
@@ -183,6 +187,8 @@ trace-sysfoot.so: $(filter-out dlmalloc.o,$(OBJS)) libantlr3c_pic.a
 # FIXME: check whether these are really necessary in the librunt world
 trace-syscalls.so: LDFLAGS += -Wl,--defsym,__GI___assert_fail=__assert_fail \
   -Wl,--defsym,stat=raw_stat
+trace-syscalls.so: LDFLAGS += -Wl,-Map,trace-syscalls.map
+
 # We have to defsym __GI____assert_fail because it's defined in the same file as 
 # __assert_fail, and some libc symbols refer to it using this alias. Otherwise
 # the libc archive's __assert_fail gets pulled in because it's the only definition
