@@ -25,13 +25,11 @@ __assert_fail (const char *assertion, const char *file,
 #include "systrap.h"
 #include "systrap_private.h"
 #include "syscall-names.h"
+#include "raw-syscalls-defs.h"
 
 int raw_open(const char *pathname, int flags);
 int raw_close(int fd);
 extern int etext;
-
-
-/* #include <footprints.h> */
 
 /* We are a preloaded library whose constructor
  * calls libsystrap to divert all syscalls
@@ -99,6 +97,11 @@ void trap_all_mappings(void)
 		raw_close(fd);
 	}
 }
+
+void __init_tls(size_t *auxv) /* HACK borrowed from musl's own dynlink.c */
+{
+}
+
 void __init_libc(char **envp, char *pn); // musl-internal API
 static void startup(void) __attribute__((constructor(101)));
 static void startup(void)
