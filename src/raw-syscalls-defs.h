@@ -37,3 +37,4 @@ int __attribute__((noinline)) raw_arch_prctl(int code, unsigned long addr);
 #define write_chars(s, t)  raw_write(2, s, t - s)
 #define write_ulong(a)   raw_write(2, fmt_hex_num((a)), 18)
 const char *fmt_hex_num(unsigned long n);
+int sleep_quick(int n);

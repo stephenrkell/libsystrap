@@ -331,3 +331,10 @@ const char *fmt_hex_num(unsigned long n)
 	buf[18] = '\0';
 	return buf;
 }
+
+int sleep_quick(int n)
+{
+	struct __asm_timespec req = (struct __asm_timespec) { .tv_sec = n };
+	int ret = raw_nanosleep(&req, NULL);
+	return ret;
+}
