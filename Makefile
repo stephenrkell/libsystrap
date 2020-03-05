@@ -1,12 +1,11 @@
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 TOPDIR := $(dir $(THIS_MAKEFILE))
-TESTDIR := $(TOPDIR)/test
 
 .PHONY: default
 default: all
 
 .PHONY: all
-all: src
+all: src example
 
 .PHONY: run-tests 
 run-tests: test
@@ -19,3 +18,7 @@ test: src
 .PHONY: src
 src:
 	$(MAKE) -C src
+
+.PHONY: example
+example:
+	$(MAKE) -C example

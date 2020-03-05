@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "instr.h" /* our API -- in C */
-#include "raw-syscalls.h"
+#include <sys/types.h>
+#include "raw-syscalls-defs.h"
 #include <assert.h>
 #include <string.h>
 #include <stdio.h>
@@ -12,69 +13,6 @@
 #define THREAD
 #endif
 
-/* 
-#include <memory>
-
-#include <llvm/Config/llvm-config.h>
-#include <llvm/Config/config.h>
-#include <llvm/Support/MemoryObject.h>
-#include <llvm/Support/TargetSelect.h>
-#include <llvm/Support/TargetRegistry.h>
-#include <llvm/Support/raw_ostream.h>
-#include <llvm/Target/TargetOptions.h>
-#include <llvm/MC/MCInst.h>
-#include <llvm/MC/MCDisassembler.h>
-#include <llvm/MC/MCRegisterInfo.h>
-#include <llvm/MC/MCAsmInfo.h>
-#include <llvm/MC/MCContext.h>
-
-class WholeVASMemoryObject : public llvm::MemoryObject 
-{
-public:
-	uint64_t getBase() const { return 0; }
-	uint64_t getExtent() const { return (uintptr_t) -1; }
-	int readByte(uint64_t addr, uint8_t *byte) const 
-	{
-		*byte = *(char*) addr;
-		return 0;
-	}
-};
-
-static WholeVASMemoryObject whole_vas;
-
-static const llvm::MCDisassembler& disas()
-{
-	static bool fail = llvm::InitializeNativeTarget() || llvm::InitializeNativeTargetDisassembler();
-	static std::string triple = llvm::sys::getDefaultTargetTriple();
-	static std::string error;
-	static const llvm::Target *target = llvm::TargetRegistry::lookupTarget(triple, error);
-	static llvm::MCSubtargetInfo *sub_target
-	 = target->createMCSubtargetInfo(triple, llvm::sys::getHostCPUName(), "");
-	static llvm::MCRegisterInfo *reg_info
-	 = target->createMCRegInfo(triple);
-	static llvm::MCAsmInfo *asm_info
-	 = reg_info ? target->createMCAsmInfo(*reg_info, triple) : nullptr;
-	static llvm::MCContext *context 
-	 = (asm_info && reg_info) ? new llvm::MCContext(asm_info, reg_info, 0) : nullptr;
-	static llvm::MCDisassembler *disassembler
-	 = asm_info ? target->createMCDisassembler(*sub_target, *context) : nullptr;
-	
-	assert(!fail);
-	assert(disassembler);
-	return *disassembler;
-}
-
-unsigned long
-__attribute__((visibility("protected")))
-instr_len(unsigned char *ins)
-{
-	llvm::MCInst i;
-	uint64_t sz;
-	disas().getInstruction(i, sz, whole_vas, (uintptr_t) ins, llvm::nulls(), llvm::nulls());
-	return sz;
-}
-
-*/
 static _Bool is_ud2(const unsigned char *ins)
 {
 	return ins[0] == 0x0f && ins[1] == 0x0b;
@@ -478,13 +416,11 @@ int is_syscall_instr(unsigned const char *ins, unsigned const char *end)
 	// 		|| 0 == strcmp(insn->mnemonic, "sysenter")
 	// 		|| (0 == strcmp(insn->mnemonic, "int"
 	// 			/*&& (insn->operands[0] == 0x80 || insn->operands[0] == 0x81)*/));
-	
-	/* syscall */
-	if ((end >= ins + 2) && *ins == 0x0f && *(ins+1) == 0x05) return 2;
-	/* sysenter */
-	if ((end >= ins + 2) && *ins == 0x0f && *(ins+1) == 0x34) return 2;
-	/* int 80 */
-	if ((end >= ins + 2) && *ins == 0xcd && *(ins+1) == 0x80) return 2;
-	
+	if (((end >= ins + 2) && *ins == 0x0f && *(ins+1) == 0x05) /* syscall */
+	 || ((end >= ins + 2) && *ins == 0x0f && *(ins+1) == 0x34) /* sysenter */
+	 || ((end >= ins + 2) && *ins == 0xcd && *(ins+1) == 0x80)) /* int 80 */
+	{
+		return 2;
+	}
 	return 0;
 }

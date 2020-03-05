@@ -7,7 +7,7 @@ KERNEL ?= $(shell uname -s)
 default: build config.mk
 
 ifeq ($(KERNEL),Linux)
-build: build-xed \
+build: build-xed build-musl \
 #build-liballocs build-dwarfidl build-libfootprints build-opdis build-binutils build-zlib build-eglibc build-udis86
 else
 ifeq ($(KERNEL),FreeBSD)
@@ -25,9 +25,6 @@ endif
 # eglibc
 # librunt (headers only), dwarfidl (tools only) => libsrk31c++, libc++fileno, libdwarfpp   but not PIC builds of these
 # xed
-EGLIBC_DIR := eglibc-2.19
-EGLIBC_TAR := eglibc-2.19-svnr25243.tar.bz2
-EGLIBC_TAR_URL := http://downloads.yoctoproject.org/releases/eglibc/eglibc-2.19-svnr25243.tar.bz2
 OPDIS_REPO := https://github.com/mkfs/opdis.git
 UDIS86_REPO := https://github.com/vmt/udis86.git
 ZLIB_DIR := zlib-1.2.8
@@ -56,6 +53,14 @@ $(EGLIBC_DIR)/libc/build/Makefile: $(EGLIBC_DIR)/libc/configure | install-binuti
 .PHONY: build-eglibc
 build-eglibc: $(EGLIBC_DIR)/libc/build/Makefile
 	CFLAGS="-g -O1 -fPIC -DPIC" CPPFLAGS="" $(MAKE) -C $(EGLIBC_DIR)/libc/build
+
+.PHONY: build-musl
+build-musl: musl/libc/libc.a
+musl/config.mak:
+	cd musl && ./configure
+
+musl/libc/libc.a: musl/config.mak
+	$(MAKE) -C musl
 
 $(ZLIB_TAR):
 	$(WGET) -O "$@" $(ZLIB_TAR_URL)
@@ -126,6 +131,8 @@ build-xed: $(XED_DIR) $(MBUILD_DIR)
 
 config.mk:
 	printf 'CONTRIB := $(realpath $(dir $@)) \n\
+LIBC_CFLAGS := -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/obj/include -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/arch/x86_64 -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/include \n\
+LIBC_A := $(realpath $(dir $(THIS_MAKEFILE)))/musl/lib/libc.a \n\
 LIBC_DIR ?= $(wildcard $(CONTRIB)/eglibc-*/libc/build) \n\
 LIBC_A ?= $$(LIBC_DIR)/libc_pic.a $$(LIBC_DIR)/libc_nonshared.a \n\
 RTLD_OBJ_DIR ?= $$(LIBC_DIR)/elf\n\

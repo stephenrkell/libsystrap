@@ -5,7 +5,7 @@
  * trap-syscall library.
  */
 
-#include "raw-syscalls.h"
+#include "raw-syscalls-impl.h"
 #define DO_EXIT_SYSCALL \
 	long retcode = status; \
 	op = SYS_exit; \
@@ -330,4 +330,11 @@ const char *fmt_hex_num(unsigned long n)
 	} while (i_dig >= 0);
 	buf[18] = '\0';
 	return buf;
+}
+
+int sleep_quick(int n)
+{
+	struct __asm_timespec req = (struct __asm_timespec) { .tv_sec = n };
+	int ret = raw_nanosleep(&req, NULL);
+	return ret;
 }

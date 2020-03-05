@@ -7,3 +7,6 @@
 [submodule "contrib/mbuild"]
 	path = contrib/mbuild
 	url = https://github.com/intelxed/mbuild.git
+[submodule "contrib/musl"]
+	path = contrib/musl
+	url = git://git.musl-libc.org/musl

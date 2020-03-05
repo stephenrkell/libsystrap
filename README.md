@@ -1,9 +1,10 @@
-# libsystrap and trap-syscalls
+# libsystrap and trace-syscalls
 
 Interposing on system calls is useful for instrumentation or
 "virtualisation"-like tools. The code in this repository lets you build
 programs that can trap, reflect on and modify system calls as they
-happen within a running program.
+happen within a running program. It consists of a library (libsystrap)
+and an example tool (trace-syscalls.so, a preloadable tracing library).
 
 # Background
 
@@ -32,39 +33,38 @@ dynamically generated instructions.
 This is a simple library to do the breakpointing and install a SIGILL
 handler (which, unlike handling SIGTRAP, doesn't break debugging).
 
-# trap-syscalls
+# trace-syscalls.so
 
-This is a strace-like tool. It uses dwarfidl for scraping and
-postprocessing the kernel DWARF, to get the system call names and type
-signatures. It also uses libfootprints to walk the memory foorprints of
-each call. This is overkill (and you'll have to build those repositories
-to use it) but it serves as a useful example program. I should really
-provide a "minimal dependencies" build mode for trap-syscalls, that
-removes the need for libfootprints and DWARFy things, but it's not done
-yet -- contributions welcome.
+This is a strace-like tool.
+
+# trace-sysfoot.so
+
+This is an extension of trace-syscalls that also collects further
+semantic information about syscalls, including (thanks to dwarfidl) for
+system call names and type signatures scraped from the kernel DWARF. It
+also uses libfootprints to walk the memory foorprints of each call. This
+will soon be split into its own repository, since it has many more
+dependencies and is very fragile/experimental at present.
 
 # Building
 
 Unless you really know what you're doing, do `make' contrib/ first, and
 cross your fingers.
 
-Then do `make' in libsystrap, and then go on to use trap-syscalls as the
-template for whatever you want to build.
+Then do `make' in src/, and then in example/. You can use trace-syscalls
+as a starting point for whatever you want to build.
 
 The contrib/ directory's Makefile builds a big pile of dependencies. You
 must use this! You can't just use stock libraries on your system,
 because to pull the code into a preloadable libsystrap-enabled library,
-it needs to be built as PIC archives. Usually, a stock build (of
-binutils, glibc, opdis etc.) will build PIC shared objects and non-PIC
-archives, so doesn't generate the right putputs. Anyway, the
+it needs to be built as PIC archives. Usually, a Debian-style stock
+packaging (of glibc, say) will build PIC shared objects and non-PIC
+archives -- i.e. not the PIC achive we need. Anyway, the
 contrib/Makefile should take care of all this.
-
-At this stage I can't promise you won't have to hack the Makefiles
-yourself....
 
 # More detail
 
-The logic in libsystrap is organised this way:
+Some notes on the contents of libsystrap:
 
 `trap.c` contains the logic of the trapping mechanism, its code is
 standalone (does not rely on external libraries) and must run before any
