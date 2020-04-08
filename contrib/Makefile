@@ -151,5 +151,6 @@ DWARFIDL_DIR ?= $$(CONTRIB)/dwarfidl \n\
 OPDIS_DIR ?= $$(CONTRIB)/opdis \n\
 UDIS86_DIR ?= $$(CONTRIB)/udis86 \n\
 ZLIB_A ?= $$(CONTRIB)/zlib-1.2.8/libz.a \n\
+LIBX86EMULATE_DIR ?= $$(CONTRIB)/libx86emulate \n\
 XED_DIR ?= $$(CONTRIB)/$(XED_DIR)/build \n\
 XED_A ?= $$(CONTRIB)/$(XED_DIR)/build/lib/libxed.a' | sed '/^\\$$/ d' | sed 's/ *$$//' > "$@"

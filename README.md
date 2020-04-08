@@ -83,3 +83,26 @@ library.
 `restorer.c` is a copy of glibc's signal restorer needed to return into user
 code.
 
+# Licence
+
+Unless stated otherwise, the source code in this distribution is made
+available under the terms of the GNU Lesser General Public License
+version 3. See the files LICENSE.lgpl3 and LICENSE.gpl3.
+
+would like to discuss alternative licensing arrangements, please
+contact the principal author, Stephen Kell <s.r.kell@kent.ac.uk>.
+
+Note that a few specific files are under different licensing terms. This
+is clearly stated at the top of the file. Currently the paths of these
+files are as follows.
+
+src/restorer.c
+
+Note also that building this software involves downloading and compiling
+source code from other projects (collected under the contrib/ directory).
+Consequently, the output binaries (libsystrap.a, and others) are, in some
+cases, subject to licensing terms imposed by those projects. To determine the
+terms applying to a binary you have built, one reliable method is to use the
+debugging information in that binary to establish which source files it
+embodies. In particular, x86_decode.c from libx86decode originates in the Xen
+project and is licensed as "GPLv2 or later".

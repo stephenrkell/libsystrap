@@ -30,17 +30,6 @@ endif
 
 CFLAGS += -I/usr/include/$(shell $(CC) -dumpmachine)
 
-CFLAGS += -I $(UDIS86_DIR)
-CFLAGS += -I $(OPDIS_DIR)
-CFLAGS += -I $(LIBOPCODES_DIR)/include
-CFLAGS += -I $(BFD_DIR)
-CFLAGS += -I $(LIBRUNT_DIR)/include
-CFLAGS += -I $(XED_DIR)/include
-
-CXXFLAGS := $(CXXFLAGS) $(CFLAGS) # eagerly latch CFLAGS now; don't want later additions
-CFLAGS += -std=c99
-CXXFLAGS += -std=c++11 $(LLVM_CXXFLAGS)
-
 C_SRC := $(wildcard *.c)
 S_SRC := $(wildcard *.s)
 CC_SRC := $(wildcard *.cc)
@@ -61,7 +50,33 @@ ifneq ($(MAKECMDGOALS),clean)
 -include $(DEPS)
 endif
 
-x86_decode.o: CFLAGS += -include x86_defs.h -include stdio.h
+ifneq ($(realpath $(UDIS86_DIR)),)
+CFLAGS += -I $(UDIS86_DIR)
+endif
+ifneq ($(realpath $(OPDIS_DIR)),)
+CFLAGS += -I $(OPDIS_DIR)
+endif
+ifneq ($(realpath $(LIBOPCODES_DIR)),)
+CFLAGS += -I $(LIBOPCODES_DIR)/include
+endif
+ifneq ($(realpath $(BFD_DIR)),)
+CFLAGS += -I $(BFD_DIR)
+endif
+CFLAGS += -I $(LIBRUNT_DIR)/include
+ifneq ($(realpath $(XED_DIR)),)
+CFLAGS += -I $(XED_DIR)/include
+endif
+ifneq ($(realpath $(LIBX86EMULATE_DIR)),)
+CFLAGS += -I $(LIBX86EMULATE_DIR)/src
+OBJS += x86_decode.o
+endif
+
+CXXFLAGS := $(CXXFLAGS) $(CFLAGS) # eagerly latch CFLAGS now; don't want later additions
+CFLAGS += -std=c99
+CXXFLAGS += -std=c++11 $(LLVM_CXXFLAGS)
+
+vpath x86_decode.c $(LIBX86EMULATE_DIR)/src
+x86_decode.o: CFLAGS += -include $(LIBX86EMULATE_DIR)/src/x86_defs.h -include stdio.h
 x86_decode.o instr.o: CFLAGS += -std=gnu11
 
 ifneq ($(shell uname -s),FreeBSD)

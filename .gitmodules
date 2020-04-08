@@ -10,3 +10,7 @@
 [submodule "contrib/musl"]
 	path = contrib/musl
 	url = git://git.musl-libc.org/musl
+[submodule "contrib/libx86emulate"]
+        path = contrib/libx86emulate
+        url = https://github.com/stephenrkell/libx86emulate.git
+
