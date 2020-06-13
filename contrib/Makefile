@@ -7,7 +7,7 @@ KERNEL ?= $(shell uname -s)
 default: build config.mk
 
 ifeq ($(KERNEL),Linux)
-build: build-xed build-musl \
+build: build-xed build-musl build-librunt \
 #build-liballocs build-dwarfidl build-libfootprints build-opdis build-binutils build-zlib build-eglibc build-udis86
 else
 ifeq ($(KERNEL),FreeBSD)
@@ -128,6 +128,16 @@ install-binutils: build-binutils
 .PHONY: build-xed
 build-xed: $(XED_DIR) $(MBUILD_DIR)
 	cd $(XED_DIR) && ./mfile.py install --install-dir=build --no-encoder --extra-flags='-fPIC'
+
+.PHONY: build-librunt
+build-librunt: librunt/lib/librunt_preload.a
+librunt/lib/librunt_preload.a: librunt/Makefile
+	cd librunt && $(MAKE)
+# librunt is not yet autotools'd
+#librunt/Makefile: librunt/configure
+#	cd librunt && ./configure
+#librunt/configure: librunt/configure.ac
+#	cd librunt && ./autogen.sh
 
 config.mk:
 	printf 'CONTRIB := $(realpath $(dir $@)) \n\
