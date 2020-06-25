@@ -2,9 +2,9 @@
 default: libsystrap.a
 
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
-SRCROOT := $(realpath $(dir $(THIS_MAKEFILE)))/..
+srcroot := $(realpath $(dir $(THIS_MAKEFILE)))/..
 
-CONTRIB := $(SRCROOT)/contrib
+CONTRIB := $(srcroot)/contrib
 CONFIG ?= $(CONTRIB)/config.mk
 
 $(CONTRIB)/config.mk:
@@ -13,7 +13,7 @@ $(CONTRIB)/config.mk:
 include $(CONFIG)
 
 CFLAGS += -DSYSTRAP_DEFINE_FILE
-CFLAGS += -I$(SRCROOT)/include
+CFLAGS += -I$(srcroot)/include
 CFLAGS += -g
 CFLAGS += -Wall -Wno-unused-label -Wno-comment
 CFLAGS += -O2
@@ -25,7 +25,9 @@ instr.o: CFLAGS += -DUSE_XED
 ifeq ($(DEBUG),)
 CFLAGS += -DNDEBUG
 else
-instr.o: CFLAGS += -DUSE_OPDIS
+# HMM... we have temporarily disabled opdis. But good to get a second
+# opinion beside xed... maybe use udis86 instead? FIXME
+#instr.o: CFLAGS += -DUSE_OPDIS
 endif
 
 CFLAGS += -I/usr/include/$(shell $(CC) -dumpmachine)
@@ -51,25 +53,26 @@ ifneq ($(MAKECMDGOALS),clean)
 endif
 
 ifneq ($(realpath $(UDIS86_DIR)),)
-CFLAGS += -I $(UDIS86_DIR)
+CFLAGS += -I$(UDIS86_DIR)
 endif
 ifneq ($(realpath $(OPDIS_DIR)),)
-CFLAGS += -I $(OPDIS_DIR)
+CFLAGS += -I$(OPDIS_DIR)
 endif
 ifneq ($(realpath $(LIBOPCODES_DIR)),)
-CFLAGS += -I $(LIBOPCODES_DIR)/include
+CFLAGS += -I$(LIBOPCODES_DIR)/include
 endif
 ifneq ($(realpath $(BFD_DIR)),)
-CFLAGS += -I $(BFD_DIR)
+CFLAGS += -I$(BFD_DIR)
 endif
-CFLAGS += -I $(LIBRUNT_DIR)/include
 ifneq ($(realpath $(XED_DIR)),)
-CFLAGS += -I $(XED_DIR)/include
+CFLAGS += -I$(XED_DIR)/include
 endif
 ifneq ($(realpath $(LIBX86EMULATE_DIR)),)
-CFLAGS += -I $(LIBX86EMULATE_DIR)/src
+CFLAGS += -I$(LIBX86EMULATE_DIR)/src
 OBJS += x86_decode.o
 endif
+# always add librunt
+CFLAGS += -I$(LIBRUNT_DIR)/include
 
 CXXFLAGS := $(CXXFLAGS) $(CFLAGS) # eagerly latch CFLAGS now; don't want later additions
 CFLAGS += -std=c99

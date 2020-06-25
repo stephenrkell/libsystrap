@@ -4,7 +4,9 @@ CONTRIB := $(realpath $(dir $(THIS_MAKEFILE)))
 KERNEL ?= $(shell uname -s)
 
 .PHONY: default build
-default: build config.mk
+default: build config.mk $(CONTRIB)/env.sh
+
+include config.mk
 
 ifeq ($(KERNEL),Linux)
 build: build-xed build-musl build-librunt \
@@ -18,13 +20,15 @@ endif
 # don't remove intermediates
 .SECONDARY:
 
-# Things we need to build
+# Things we may need to build
+# libudis86
 # opdis
-# libiberty, libopcodes, bfd
-# zlib
-# eglibc
-# librunt (headers only), dwarfidl (tools only) => libsrk31c++, libc++fileno, libdwarfpp   but not PIC builds of these
+# binutils: libiberty, libopcodes, bfd  (for opdis)
+# zlib  (for bfd)
+# eglibc or musl
 # xed
+# mbuild (for xed)
+# librunt
 OPDIS_REPO := https://github.com/mkfs/opdis.git
 UDIS86_REPO := https://github.com/vmt/udis86.git
 ZLIB_DIR := zlib-1.2.8
@@ -35,11 +39,10 @@ ZLIB_TAR_URL := http://cdn-fastly.deb.debian.org/debian/pool/main/z/zlib/zlib_1.
 BINUTILS_DIR := binutils-2.26
 BINUTILS_TAR := binutils-2.26.tar.bz2
 BINUTILS_TAR_URL := ftp://ftp.gnu.org/gnu/binutils/binutils-2.26.tar.bz2
-XED_DIR := xed
 MBUILD_DIR := mbuild
 WGET := wget
 
-# ----------------------------------------------
+# ----------------------------we need some libc or other, to be self-contained
 
 $(EGLIBC_TAR):
 	$(WGET) http://downloads.yoctoproject.org/releases/eglibc/$(EGLIBC_TAR)
@@ -61,6 +64,17 @@ musl/config.mak:
 
 musl/libc/libc.a: musl/config.mak
 	$(MAKE) -C musl
+
+ifeq ($(KERNEL),Linux)
+CONFIG_MK += \nLIBC_A := $(realpath $(dir $(THIS_MAKEFILE)))/musl/lib/libc.a\n
+else
+ifeq ($(KERNEL),FreeBSD) # FIXME: check this
+CONFIG_MK += \nLIBC_A := /usr/lib/libc_pic.a\n
+endif
+endif
+varlist += LIBC_A
+
+# ----------------------------we need some instruction decoder or other
 
 $(ZLIB_TAR):
 	$(WGET) -O "$@" $(ZLIB_TAR_URL)
@@ -104,10 +118,6 @@ $(BINUTILS_DIR)/configure: $(BINUTILS_TAR)
 #	mkdir -p binutils-build
 #	cd binutils-build && CFLAGS="-g -O2 -fPIC -DPIC" ../$(BINUTILS_DIR)/configure --prefix=$(CONTRIB) --enable-ld --disable-gold --disable-multilib --disable-bootstrap --without-x --without-system-zlib
 
-.PHONY: FORCE
-FORCE: ;
-
-
 # NOT -DPIC because that breaks libintl
 # and don't bother to build the docs
 # yes, MAKEINFO=true actually accomplishes that ¬_¬
@@ -124,10 +134,17 @@ build-binutils: binutils-build/Makefile
 install-binutils: build-binutils
 	$(MAKE) -C binutils-build install MAKEINFO=/bin/true
 
+# ----------------------------xed
 
 .PHONY: build-xed
-build-xed: $(XED_DIR) $(MBUILD_DIR)
-	cd $(XED_DIR) && ./mfile.py install --install-dir=build --no-encoder --extra-flags='-fPIC'
+build-xed: $(MBUILD_DIR)
+	cd xed && ./mfile.py install --install-dir=build --no-encoder --extra-flags='-fPIC'
+
+CONFIG_MK +=\nXED_DIR ?= $(CONTRIB)/xed/build\n
+CONFIG_MK +=\nXED_A ?= $(CONTRIB)/xed/build/lib/libxed.a\n
+varlist += XED_DIR XED_A
+
+# ----------------------------librunt
 
 .PHONY: build-librunt
 build-librunt: librunt/lib/librunt_preload.a
@@ -139,28 +156,29 @@ librunt/lib/librunt_preload.a: librunt/Makefile
 #librunt/configure: librunt/configure.ac
 #	cd librunt && ./autogen.sh
 
-config.mk:
-	printf 'CONTRIB := $(realpath $(dir $@)) \n\
-LIBC_CFLAGS := -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/obj/include -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/arch/x86_64 -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/include \n\
-LIBC_A := $(realpath $(dir $(THIS_MAKEFILE)))/musl/lib/libc.a \n\
-LIBC_DIR ?= $(wildcard $(CONTRIB)/eglibc-*/libc/build) \n\
-LIBC_A ?= $$(LIBC_DIR)/libc_pic.a $$(LIBC_DIR)/libc_nonshared.a \n\
-RTLD_OBJ_DIR ?= $$(LIBC_DIR)/elf\n\
-RTLD_SO ?= $$(RTLD_OBJ_DIR)/ld.so\n\
-RTLD_LIBC_A ?= $$(RTLD_OBJ_DIR)/rtld-libc.a\n\
-LIBUDIS86_A ?= $$(CONTRIB)/udis86/libudis86/.libs/libudis86.a \n\
-LIBOPDIS_A ?= $$(CONTRIB)/opdis-build/dist/.libs/libopdis.a \n\
-LIBOPCODES_DIR ?= $$(CONTRIB)/binutils-2.26 \n\
-BFD_DIR ?= $$(CONTRIB)/binutils-build/bfd \n\
-LIBOPCODES_A ?= $$(CONTRIB)/binutils-build/opcodes/libopcodes.a \n\
-LIBBFD_A ?= $$(CONTRIB)/binutils-build/bfd/libbfd.a \n\
-LIBIBERTY_A ?= $$(CONTRIB)/binutils-build/libiberty/libiberty.a \n\
-LIBRUNT_DIR ?= $$(CONTRIB)/librunt \n\
-ANTLR3C_DIR ?= $$(CONTRIB)/libantlr3c-3.4 \n\
-DWARFIDL_DIR ?= $$(CONTRIB)/dwarfidl \n\
-OPDIS_DIR ?= $$(CONTRIB)/opdis \n\
-UDIS86_DIR ?= $$(CONTRIB)/udis86 \n\
-ZLIB_A ?= $$(CONTRIB)/zlib-1.2.8/libz.a \n\
-LIBX86EMULATE_DIR ?= $$(CONTRIB)/libx86emulate \n\
-XED_DIR ?= $$(CONTRIB)/$(XED_DIR)/build \n\
-XED_A ?= $$(CONTRIB)/$(XED_DIR)/build/lib/libxed.a' | sed '/^\\$$/ d' | sed 's/ *$$//' > "$@"
+CONFIG_MK +=\nLIBRUNT_DIR ?= $(realpath $(CONTRIB)/librunt)\n
+CONFIG_MK +=\nLIBRUNT_CFLAGS ?= -I$(CONTRIB)/librunt/include\n
+CONFIG_MK +=\nLIBRUNT_LDFLAGS ?= -L$(CONTRIB)/librunt/lib -Wl,-rpath,$(CONTRIB)/librunt/lib
+# non-autoconf'd stuff (liballocs, libsystrap) may expect LIBRUNT_DIR
+varlist += LIBRUNT_CFLAGS LIBRUNT_LDFLAGS LIBRUNT_DIR
+
+# ----------------------------config.mk
+
+# If the user nukes a sub-config.mk that our config.mk depends on,
+# we'd like to be able to rebuild it. So we include a generic rule
+# for rebuilding config.mks.
+config.mk: $(subconfigs)
+	(printf '%%/config.mk:\n\t$$(MAKE) -C $$* config.mk\n\n'; \
+	printf "$(foreach cfg,$(subconfigs),\ninclude $(CONTRIB)/$(cfg))"; \
+	printf '$(CONFIG_MK)'; echo) > "$@" || (rm -f "$@"; false)
+# env.sh exports some vars
+env.sh $(CONTRIB)/env.sh: $(foreach cfg,$(subconfigs),$(dir $(CONTRIB)/$(cfg))env.sh)
+	(printf "$(foreach cfg,$(subconfigs),\n. $$(dirname $(CONTRIB)/$(cfg))/env.sh)"; \
+	printf '$(foreach var,$(varlist),\nexport $(var)="$($(var))")'; echo )>"$@" || (rm -f "$@"; false)
+# Similarly when we make an env.sh, have Make ensure existence of
+# its depended-on env.sh too, so that we don't get 'source'-time
+# failures of sub-env.sh.
+$(foreach cfg,$(subconfigs),$(dir $(CONTRIB)/$(cfg))env.sh): %/env.sh:
+	$(MAKE) -C $* env.sh
+clean::
+	rm -f config.mk env.sh

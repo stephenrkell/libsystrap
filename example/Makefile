@@ -1,9 +1,11 @@
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
-SRCROOT := $(realpath $(dir $(THIS_MAKEFILE)))/..
+srcroot := $(realpath $(dir $(THIS_MAKEFILE)))/..
 
 SYS := $(shell uname -s | tr A-Z a-z )
 
-CONTRIB := $(SRCROOT)/contrib
+LD_SO ?= /lib64/ld-linux-x86-64.so.2  # HACK: sysdep
+
+CONTRIB := $(srcroot)/contrib
 CONFIG ?= $(CONTRIB)/config.mk
 
 default: trace-syscalls.so
@@ -22,7 +24,7 @@ ifeq ($(LIBRUNT_DIR),)
 $(error Please install the librunt source tree and set LIBRUNT_DIR to point to it)
 endif
 
-ifeq ($(realpath $(SRCROOT)/src/libsystrap.a),)
+ifeq ($(realpath $(srcroot)/src/libsystrap.a),)
 $(error Please build libsystrap first)
 endif
 
@@ -31,7 +33,7 @@ CFLAGS += -Wall -Wno-unused-label -Wno-comment
 CFLAGS += -O2
 CFLAGS += -fPIC
 CFLAGS += -ffreestanding -fno-omit-frame-pointer
-CFLAGS += -I$(SRCROOT)/include
+CFLAGS += -I$(srcroot)/include
 CFLAGS += -I $(LIBRUNT_DIR)/include
 CFLAGS += -std=c99
 
@@ -71,10 +73,9 @@ syscall-macros.h: $(SYS)-syscall-macros.h
 # NOTE: the --whole-archive is only necessary for debugging, to ensure that
 # functions we might want to call from the debugger are actually linked in
 trace-syscalls.so: LDLIBS := -Bstatic \
-	$(SRCROOT)/src/libsystrap.a \
+	$(srcroot)/src/libsystrap.a \
 	-Wl,--whole-archive $(LIBRUNT_DIR)/lib/librunt_preload.a -Wl,--no-whole-archive
 
-LD_SO ?= /lib64/ld-linux-x86-64.so.2  # HACK: sysdep
 trace-syscalls.so: LDLIBS += \
 	dlmalloc.a \
 	$(LD_SO) \
@@ -97,7 +98,7 @@ trace-syscalls.so: LDFLAGS += \
 
 trace-syscalls.so: trap-syscalls.o syscall-names.o dlmalloc.a
 
-trace-syscalls.so: $(SRCROOT)/src/libsystrap.a
+trace-syscalls.so: $(srcroot)/src/libsystrap.a
 	$(CC) -shared -Bsymbolic \
 		-fuse-ld=gold \
 		-Wl,-h,$@ \
