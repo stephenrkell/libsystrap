@@ -48,6 +48,19 @@ void systrap_post_handling(struct generic_syscall *gsp, long int ret);
  * R8:  ARG4
  * R9:  ARG5
  */
+
+/* I wrote this using old-style initializers because we don't want to
+ * zero-clobber registers that are unrelated to the call. But those
+ * struct fields are ignored by the corresponding do_syscallN calls,
+ * so that wouldn't happen anyway. Oh well... it's briefer too. */
+#define MKGS0(op)                         { NULL, op }
+#define MKGS1(op, a1)                     { NULL, op, { (long) a1 } }
+#define MKGS2(op, a1, a2)                 { NULL, op, { (long) a1, (long) a2 } }
+#define MKGS3(op, a1, a2, a3)             { NULL, op, { (long) a1, (long) a2, (long) a3 } }
+#define MKGS4(op, a1, a2, a3, a4)         { NULL, op, { (long) a1, (long) a2, (long) a3, (long) a4 } }
+#define MKGS5(op, a1, a2, a3, a4, a5)     { NULL, op, { (long) a1, (long) a2, (long) a3, (long) a4, (long) a5 } }
+#define MKGS6(op, a1, a2, a3, a4, a5, a6) { NULL, op, { (long) a1, (long) a2, (long) a3, (long) a4, (long) a5, (long) a6 } }
+
 extern inline long int 
 __attribute__((always_inline,gnu_inline))
 do_syscall0(struct generic_syscall *gsp)

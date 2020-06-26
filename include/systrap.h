@@ -1,7 +1,7 @@
 #ifndef SYSTRAP_H_
 #define SYSTRAP_H_
 
-#define SYSCALL_MAX 543 /* FIXME: where does this come from? */
+#define SYSCALL_MAX 1023 /* A safe-ish overapproximation for now... */
 
 void install_sigill_handler(void);
 void trap_all_mappings(void);

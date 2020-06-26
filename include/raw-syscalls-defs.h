@@ -1,3 +1,6 @@
+#ifndef RAW_SYSCALL_DEFS_H_
+#define RAW_SYSCALL_DEFS_H_
+
 struct __asm_sigaction;
 struct user_desc;
 struct __asm_timespec;
@@ -18,7 +21,6 @@ ssize_t raw_write(int fd, const void *buf,
 int raw_close(int fd) __attribute__((noinline));
 int raw_mprotect(const void *addr, size_t len,
 		int prot) __attribute__((noinline));
-
 #ifndef MMAP_RETURN_IS_ERROR
 #define MMAP_RETURN_IS_ERROR(p) \
         (((unsigned long long)(void*)-1 - (unsigned long long)(p)) < MIN_PAGE_SIZE)
@@ -27,8 +29,13 @@ int raw_mprotect(const void *addr, size_t len,
 void *raw_mmap(void *addr, size_t length, int prot, int flags,
                   int fd, off_t offset);
 int raw_munmap(void *addr, size_t length);
+void *__attribute__((noinline)) raw_mremap(void *old_address, size_t old_size,
+                    size_t new_size, int flags, void *new_address);
 int raw_rt_sigaction(int signum, const struct __asm_sigaction *act,
 		     struct __asm_sigaction *oldact) __attribute__((noinline));
+void *raw_mremap(void *old_address, size_t old_size,
+    size_t new_size, int flags, void *new_address);
+int raw_brk(void *addr);
 
 struct user_desc;
 int __attribute__((noinline)) raw_set_thread_area(struct user_desc *u_info);
@@ -41,6 +48,8 @@ int __attribute__((noinline)) raw_arch_prctl(int code, unsigned long addr);
 const char *fmt_hex_num(unsigned long n);
 int sleep_quick(int n);
 
-/* This is defined in do-syscall.c, but do-syscall.h is not a public header. */
 struct generic_syscall;
+/* This is defined in do-syscall.c, but do-syscall.h is not a public header. */
 void *generic_syscall_get_ip(struct generic_syscall *gsp);
+
+#endif

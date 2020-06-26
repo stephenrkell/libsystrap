@@ -5,7 +5,7 @@
  * trap-syscall library.
  */
 
-#include "raw-syscalls-impl.h"
+#include "do-syscall.h"
 #define DO_EXIT_SYSCALL \
 	long retcode = status; \
 	op = SYS_exit; \
@@ -28,213 +28,112 @@ void (__attribute__((noreturn)) raw_exit)(int status)
 
 int __attribute__((noinline)) raw_open(const char *pathname, int flags)
 {
-	long int ret;
-	long int op = SYS_open;
-
-	/* We have to do it all in one big asm statement, since the compiler
-	 * can change what's in registers in between asm statements. */
-	__asm__ volatile ("movq %1, %%rdi      # \n\
-			   movq %2, %%rsi      # \n\
-			  "FIX_STACK_ALIGNMENT " \n\
-			   movq %3, %%rax      # \n\
-			   syscall	     # do the syscall \n\
-			  "UNFIX_STACK_ALIGNMENT " \n\
-			   movq %%rax, %0\n"
-	  : "=r"(ret) : "rm"(pathname), "rm"((long) flags), "rm"(op) : "r12", SYSCALL_CLOBBER_LIST);
-	return ret;
+	struct generic_syscall gs = MKGS2(SYS_open, pathname, flags);
+	return do_syscall2(&gs);
 }
 
 int __attribute__((noinline)) raw_fstat(int fd, struct stat *buf)
 {
-	long int ret;
-	long int op = SYS_fstat;
-
-	/* We have to do it all in one big asm statement, since the compiler
-	 * can change what's in registers in between asm statements. */
-	__asm__ volatile ("movq %1, %%rdi      # \n\
-			   movq %2, %%rsi      # \n\
-			  "FIX_STACK_ALIGNMENT " \n\
-			   movq %3, %%rax      # \n\
-			   syscall	     # do the syscall \n\
-			  "UNFIX_STACK_ALIGNMENT " \n\
-			   movq %%rax, %0\n"
-	  : "=r"(ret) : "rm"((long) fd), "rm"(buf), "rm"(op) : "r12", SYSCALL_CLOBBER_LIST);
-	return ret;
+	struct generic_syscall gs = MKGS2(SYS_fstat, fd, buf);
+	return do_syscall2(&gs);
 }
 
-int __attribute__((noinline)) raw_stat(char *filename, struct stat *buf) {
-	 int fd = raw_open(filename, O_RDONLY);
-	 int ret = raw_fstat(fd, buf);
-	 raw_close(fd);
-	 return ret;
+int __attribute__((noinline)) raw_stat(char *filename, struct stat *buf)
+{
+	struct generic_syscall gs = MKGS2(SYS_stat, filename, buf);
+	return do_syscall2(&gs);
 }
 
 int __attribute__((noinline)) raw_nanosleep(struct __asm_timespec *req,
 			struct __asm_timespec *rem)
 {
-	long int ret;
-	long int op = SYS_nanosleep;
-
-	/* We have to do it all in one big asm statement, since the compiler
-	 * can change what's in registers in between asm statements. */
-	__asm__ volatile ("movq %1, %%rdi      # \n\
-			   movq %2, %%rsi      # \n\
-			  "FIX_STACK_ALIGNMENT " \n\
-			   movq %3, %%rax      # \n\
-			   syscall	     # do the syscall \n\
-			  "UNFIX_STACK_ALIGNMENT " \n\
-			   movq %%rax, %0\n"
-	  : "=r"(ret) : "rm"(req), "rm"(rem), "rm"(op) : "r12", SYSCALL_CLOBBER_LIST);
-	return ret;
+	struct generic_syscall gs = MKGS2(SYS_nanosleep, req, rem);
+	return do_syscall2(&gs);
 }
 
 int __attribute__((noinline)) raw_getpid(void)
 {
-	long int ret;
-	long int op = SYS_getpid;
-
-	/* We have to do it all in one big asm statement, since the compiler
-	 * can change what's in registers in between asm statements. */
-	__asm__ volatile (FIX_STACK_ALIGNMENT " \n\
-			   movq %1, %%rax      # \n\
-			   syscall	     # do the syscall \n\
-			  "UNFIX_STACK_ALIGNMENT " \n\
-			   movq %%rax, %0\n"
-	  : "=r"(ret) : "rm"(op) : "r12", SYSCALL_CLOBBER_LIST);
-	return ret;
+	struct generic_syscall gs = MKGS0(SYS_getpid);
+	return do_syscall0(&gs);
 }
 
 int __attribute__((noinline)) raw_kill(__kernel_pid_t pid, int sig)
 {
-	long int ret;
-	long int op = SYS_kill;
-
-	/* We have to do it all in one big asm statement, since the compiler
-	 * can change what's in registers in between asm statements. */
-	__asm__ volatile ("movq %1, %%rdi      # \n\
-			   movq %2, %%rsi      # \n\
-			  "FIX_STACK_ALIGNMENT " \n\
-			   movq %3, %%rax      # \n\
-			   syscall	     # do the syscall \n\
-			  "UNFIX_STACK_ALIGNMENT " \n\
-			   movq %%rax, %0\n"
-	  : "=r"(ret) : "rm"((long) pid), "rm"((long) sig), "rm"(op) : "r12", SYSCALL_CLOBBER_LIST);
-	return ret;
+	struct generic_syscall gs = MKGS2(SYS_kill, pid, sig);
+	return do_syscall2(&gs);
 }
 
 int __attribute__((noinline)) raw_read(int fd, void *buf, size_t count)
 {
-	long int ret;
-	long int op = SYS_read;
-	__asm__ volatile ("movq %1, %%rdi      # \n\
-			   movq %2, %%rsi      # \n\
-			   movq %3, %%rdx      # \n\
-			  "FIX_STACK_ALIGNMENT " \n\
-			   movq %4, %%rax      # \n\
-			   syscall	     # do the syscall \n\
-			  "UNFIX_STACK_ALIGNMENT " \n\
-			   movq %%rax, %0\n"
-	  : "=r"(ret) : "rm"((long) fd), "rm"(buf), "rm"(count), "rm"(op) : "r12",  SYSCALL_CLOBBER_LIST);
-
-	return ret;
+	struct generic_syscall gs = MKGS3(SYS_read, fd, buf, count);
+	return do_syscall3(&gs);
 }
 
 int __attribute__((noinline)) raw_close(int fd)
 {
-	long int ret;
-	long int op = SYS_close;
-	long int longfd = fd;
-	__asm__ volatile ("movq %1, %%rdi      # \n\
-			  "FIX_STACK_ALIGNMENT " \n\
-			   movq %2, %%rax      # \n\
-			   syscall	     # do the syscall \n\
-			  "UNFIX_STACK_ALIGNMENT " \n\
-			   movq %%rax, %0\n"
-	  : "=r"(ret) : "rm"(longfd), "rm"(op) : "%r12", SYSCALL_CLOBBER_LIST);
-	return ret;
+	struct generic_syscall gs = MKGS1(SYS_close, fd);
+	return do_syscall1(&gs);
 }
 
 int __attribute__((noinline)) raw_mprotect(const void *addr, size_t len, int prot)
 {
-	long int ret;
-	long int op = SYS_mprotect;
-	__asm__ volatile ("movq %1, %%rdi      # \n\
-			   movq %2, %%rsi      # \n\
-			   movq %3, %%rdx      # \n\
-			  "FIX_STACK_ALIGNMENT " \n\
-			   movq %4, %%rax      # \n\
-			   syscall	     # do the syscall \n\
-			  "UNFIX_STACK_ALIGNMENT " \n\
-			   movq %%rax, %0\n"
-	  : "=r"(ret) : "rm"(addr), "rm"(len), "rm"((long) prot), "rm"(op) : "r12",  SYSCALL_CLOBBER_LIST);
-	return ret;
+	struct generic_syscall gs = MKGS3(SYS_mprotect, addr, len, prot);
+	return do_syscall3(&gs);
 }
 
 void *__attribute__((noinline)) raw_mmap(void *addr, size_t length, int prot, int flags,
                   int fd, off_t offset)
 {
-	void *ret;
-	long int op = SYS_mmap;
-	__asm__ volatile ("movq %[arg0], %%rdi \n\
-			   movq %[arg1], %%rsi \n\
-			   movq %[arg2], %%rdx \n\
-			   movq %[arg3], %%r10 \n\
-			   movq %[arg4], %%r8  \n\
-			   movq %[arg5], %%r9  \n"
-			   FIX_STACK_ALIGNMENT "   \n\
-			   movq %[op], %%rax       \n\
-			   syscall		 \n\
-			  "UNFIX_STACK_ALIGNMENT " \n\
-			   movq %%rax, %[ret]      \n"
-		  : [ret]  "=r" (ret)
-		  : [op]   "rm" (op)
-		  , [arg0] "rm" (addr)
-		  , [arg1] "rm" (length)
-		  , [arg2] "rm" ((long) prot)
-		  , [arg3] "rm" ((long) flags)
-		  , [arg4] "rm" ((long) fd)
-		  , [arg5] "rm" (offset)
-		  : "r12", SYSCALL_CLOBBER_LIST);
-
-	return ret;
+	struct generic_syscall gs = MKGS6(SYS_mmap, addr, length, prot, flags, fd, offset);
+	return (void*) do_syscall6(&gs);
 }
 
 int __attribute__((noinline)) raw_munmap(void *addr, size_t length)
 {
-	long int ret;
-	long int op = SYS_munmap;
-	__asm__ volatile ("movq %1, %%rdi      # \n\
-			   movq %2, %%rsi      # \n\
-			  "FIX_STACK_ALIGNMENT " \n\
-			   movq %3, %%rax      # \n\
-			   syscall	     # do the syscall \n\
-			  "UNFIX_STACK_ALIGNMENT " \n\
-			   movq %%rax, %0\n"
-	  : "=r"(ret) : "rm"(addr), "rm"(length), "rm"(op) : "r12", SYSCALL_CLOBBER_LIST);
-	return ret;
+	struct generic_syscall gs = MKGS2(SYS_munmap, addr, length);
+	return do_syscall2(&gs);
 }
 
+void *__attribute__((noinline)) raw_mremap(void *old_address, size_t old_size,
+                    size_t new_size, int flags, void *new_address)
+{
+	struct generic_syscall gs = MKGS5(SYS_mremap, old_address, old_size, new_size, flags, new_address);
+	return (void*) do_syscall5(&gs);
+}
 
 int __attribute__((noinline)) raw_rt_sigaction(int signum, const struct __asm_sigaction *act,
 		     struct __asm_sigaction *oldact)
 {
-	long int ret;
-	long int op = SYS_sigaction;
-	size_t sigsetsize = sizeof (__asm_sigset_t);
-	__asm__ volatile ("movq %1, %%rdi      # \n\
-			   movq %2, %%rsi      # \n\
-			   movq %3, %%rdx      # \n\
-			   movq %4, %%r10      # \n\
-			  "FIX_STACK_ALIGNMENT " \n\
-			   movq %5, %%rax      # \n\
-			   syscall	     # do the syscall \n\
-			  "UNFIX_STACK_ALIGNMENT " \n\
-			   movq %%rax, %0\n"
-	  : "=r"(ret) : "rm"((long) signum), "rm"(act), "rm"(oldact), "rm"(sigsetsize), "rm"(op) : "r12",  SYSCALL_CLOBBER_LIST);
-
-	return ret;
+	/* This one is slightly different because it gets an extra argument */
+	struct generic_syscall gs = MKGS4(SYS_rt_sigaction, signum, act, oldact, sizeof (__asm_sigset_t));
+	return do_syscall4(&gs);
 }
 
+ssize_t __attribute__((noinline)) raw_write(int fd, const void *buf, size_t count)
+{
+	struct generic_syscall gs = MKGS3(SYS_write, fd, buf, count);
+	return do_syscall3(&gs);
+}
+
+int __attribute__((noinline)) raw_set_thread_area(struct user_desc *u_info)
+{
+	struct generic_syscall gs = MKGS1(SYS_set_thread_area, u_info);
+	return do_syscall1(&gs);
+}
+
+int __attribute__((noinline)) raw_arch_prctl(int code, unsigned long addr)
+{
+	struct generic_syscall gs = MKGS2(SYS_arch_prctl, code, addr);
+	return do_syscall2(&gs);
+}
+
+int __attribute__((noinline)) raw_brk(void *addr)
+{
+	struct generic_syscall gs = MKGS1(SYS_brk, addr);
+	return do_syscall1(&gs);
+}
+
+#if 0 /* This code seems to be dead */
 static void handle_sigabrt(int num)
 {
 	raw_exit(128 + SIGABRT);
@@ -268,53 +167,7 @@ void (__attribute__((noreturn)) __assert_fail)(
 	/* hmm -- SIGABRT might be blocked? okay, try waiting indefinitely */
 	while (1) {}
 }
-
-ssize_t __attribute__((noinline)) raw_write(int fd, const void *buf, size_t count)
-{
-	long int ret;
-	long int op = SYS_write;
-	__asm__ volatile ("movq %1, %%rdi      # \n\
-			   movq %2, %%rsi      # \n\
-			   movq %3, %%rdx      # \n\
-			  "FIX_STACK_ALIGNMENT " \n\
-			   movq %4, %%rax      # \n\
-			   syscall	     # do the syscall \n\
-			  "UNFIX_STACK_ALIGNMENT " \n\
-			   movq %%rax, %0\n"
-	  : "=r"(ret) : "rm"((long) fd), "rm"(buf), "rm"(count), "rm"(op) : "r12",  SYSCALL_CLOBBER_LIST);
-
-	return ret;
-}
-
-int __attribute__((noinline)) raw_set_thread_area(struct user_desc *u_info)
-{
-	long ret;
-	long op = SYS_set_thread_area;
-	__asm__ volatile ("movq %1, %%rdi      # \n\
-			  "FIX_STACK_ALIGNMENT " \n\
-			   movq %2, %%rax      # \n\
-			   syscall	     # do the syscall \n\
-			  "UNFIX_STACK_ALIGNMENT " \n" \
-			  "movq %%rax, %0\n"
-	  : "=r"(ret) : "r"(u_info), "rm"(op) : "r12", SYSCALL_CLOBBER_LIST);
-	return ret;
-}
-
-int __attribute__((noinline)) raw_arch_prctl(int code, unsigned long addr)
-{
-	long int ret;
-	long int op = SYS_arch_prctl;
-	__asm__ volatile ("movq %1, %%rdi      # \n\
-			   movq %2, %%rsi      # \n\
-			  "FIX_STACK_ALIGNMENT " \n\
-			   movq %3, %%rax      # \n\
-			   syscall	     # do the syscall \n\
-			  "UNFIX_STACK_ALIGNMENT " \n\
-			   movq %%rax, %0\n"
-	  : "=r"(ret) : "rm"((long) code), "rm"(addr), "rm"(op) : "r12", SYSCALL_CLOBBER_LIST);
-	return ret;
-}
-
+#endif
 
 const char *fmt_hex_num(unsigned long n)
 {

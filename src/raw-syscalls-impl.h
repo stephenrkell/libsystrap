@@ -5,7 +5,12 @@
  * presented to libc and kernel-user includes. So here be
  * dragons... more importantly, INCLUDE THIS FILE FIRST,
  * otherwise its futzing may be too late to have the intended
- * effect. */
+ * effect.
+ *
+ * The Right Way for us to do this is to generate a standalone
+ * (properly namespaced) set of headers, direct from the kernel
+ * DWARF, using the tools in my syscall-interfaces repo.
+ * FIXME: do this. */
 
 /* for accessing members of mcontext_t */
 #ifdef __FreeBSD__
