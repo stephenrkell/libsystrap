@@ -39,6 +39,9 @@ CFLAGS += -std=c99
 
 syscall-names.o: $(SYS)-syscall-macros.h
 
+# for dlmalloc.c
+vpath %.c $(srcroot)/contrib
+
 C_SRC := $(wildcard *.c)
 C_DEPS := $(patsubst %.c,.%.d,$(C_SRC))
 DEPS := $(C_DEPS)
