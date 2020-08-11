@@ -5,7 +5,7 @@ TOPDIR := $(dir $(THIS_MAKEFILE))
 default: all
 
 .PHONY: all
-all: src example
+all: src lib example
 
 .PHONY: run-tests 
 run-tests: test
@@ -18,6 +18,10 @@ test: src
 .PHONY: src
 src:
 	$(MAKE) -C src
+
+.PHONY: lib
+lib: src
+	$(MAKE) -C lib
 
 .PHONY: example
 example:
