@@ -6,30 +6,26 @@
  */
 
 #include "do-syscall.h"
-#define DO_EXIT_SYSCALL \
-	long retcode = status; \
-	op = SYS_exit; \
-	__asm__ volatile ("movq %0, %%rdi      # \n\
-			  "FIX_STACK_ALIGNMENT " \n\
-			   movq %1, %%rax      # \n\
-			   syscall	     # do the syscall \n\
-			  "UNFIX_STACK_ALIGNMENT " \n" \
-	  : /* no output*/ : "rm"(retcode), "rm"(op) : "r12", SYSCALL_CLOBBER_LIST);
 
 #include <stdlib.h>
 #include <sys/syscall.h>
 
 void (__attribute__((noreturn)) raw_exit)(int status)
 {
-	long int op;
-	DO_EXIT_SYSCALL;
+	DO_EXIT_SYSCALL(status);
 	__builtin_unreachable();
 }
 
-int __attribute__((noinline)) raw_open(const char *pathname, int flags)
+int __attribute__((noinline)) raw_open(const char *pathname, int flags, int mode)
 {
-	struct generic_syscall gs = MKGS2(SYS_open, pathname, flags);
-	return do_syscall2(&gs);
+	struct generic_syscall gs = MKGS3(SYS_open, pathname, flags, mode);
+	return do_syscall3(&gs);
+}
+
+int __attribute__((noinline)) raw_openat(int dirfd, const char *pathname, int flags, int mode)
+{
+	struct generic_syscall gs = MKGS4(SYS_openat, dirfd, pathname, flags, mode);
+	return do_syscall4(&gs);
 }
 
 int __attribute__((noinline)) raw_fstat(int fd, struct stat *buf)
@@ -127,10 +123,11 @@ int __attribute__((noinline)) raw_arch_prctl(int code, unsigned long addr)
 	return do_syscall2(&gs);
 }
 
-int __attribute__((noinline)) raw_brk(void *addr)
+/* NOTE that glibc's brk wrapper returns int, but the raw brk returns void*. */
+void *__attribute__((noinline)) raw_brk(void *addr)
 {
 	struct generic_syscall gs = MKGS1(SYS_brk, addr);
-	return do_syscall1(&gs);
+	return (void*) do_syscall1(&gs);
 }
 
 #if 0 /* This code seems to be dead */

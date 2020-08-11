@@ -8,7 +8,8 @@ struct stat;
 extern void restore_rt(void) __asm__("__restore_rt"); /* in restorer.c */
 
 void raw_exit(int status) __attribute__((noreturn));
-int raw_open(const char *pathname, int flags) __attribute__((noinline));
+int raw_open(const char *pathname, int flags, int mode) __attribute__((noinline));
+int raw_openat(int dirfd, const char *pathname, int flags, int mode) __attribute__((noinline));
 int raw_fstat(int fd, struct stat *buf) __attribute__((noinline));
 int raw_stat(char *filename, struct stat *buf) __attribute__((noinline));
 int raw_nanosleep(struct __asm_timespec *req,
@@ -29,17 +30,17 @@ int raw_mprotect(const void *addr, size_t len,
 void *raw_mmap(void *addr, size_t length, int prot, int flags,
                   int fd, off_t offset);
 int raw_munmap(void *addr, size_t length);
-void *__attribute__((noinline)) raw_mremap(void *old_address, size_t old_size,
-                    size_t new_size, int flags, void *new_address);
+void *raw_mremap(void *old_address, size_t old_size,
+                    size_t new_size, int flags, void *new_address) __attribute__((noinline));
 int raw_rt_sigaction(int signum, const struct __asm_sigaction *act,
 		     struct __asm_sigaction *oldact) __attribute__((noinline));
 void *raw_mremap(void *old_address, size_t old_size,
-    size_t new_size, int flags, void *new_address);
-int raw_brk(void *addr);
+    size_t new_size, int flags, void *new_address) __attribute__((noinline));
+void *raw_brk(void *addr) __attribute__((noinline));
 
 struct user_desc;
-int __attribute__((noinline)) raw_set_thread_area(struct user_desc *u_info);
-int __attribute__((noinline)) raw_arch_prctl(int code, unsigned long addr);
+int raw_set_thread_area(struct user_desc *u_info) __attribute__((noinline));
+int raw_arch_prctl(int code, unsigned long addr) __attribute__((noinline));
 
 /* Some utilities for our clients. */
 #define write_string(s) raw_write(2, (s), sizeof (s) - 1)

@@ -26,12 +26,16 @@ struct generic_syscall {
 	long int args[6];
 };
 
-typedef void post_handler(struct generic_syscall *s, long int ret);
+typedef void post_handler(struct generic_syscall *s, long int ret, _Bool do_sigframe_resume);
 typedef void /*(__attribute__((noreturn))*/ syscall_replacement/*)*/(
 	struct generic_syscall *s,
 	post_handler *post
 );
 
 extern syscall_replacement *replaced_syscalls[SYSCALL_MAX];
+
+void systrap_pre_handling(struct generic_syscall *gsp);
+void systrap_post_handling(struct generic_syscall *gsp, long int ret, _Bool do_sigframe_resume);
+void __libsystrap_noop_post_handling(struct generic_syscall *gsp, long int ret, _Bool do_sigframe_resume);
 
 #endif

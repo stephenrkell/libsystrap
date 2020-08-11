@@ -13,16 +13,20 @@ systrap_pre_handling(struct generic_syscall *gsp)
 {
 }
 
-void __attribute__((weak,visibility("protected")))
-systrap_post_handling(struct generic_syscall *gsp, long int ret)
+void __attribute__((visibility("protected")))
+__libsystrap_noop_post_handling(struct generic_syscall *gsp, long int ret, _Bool do_caller_fixup)
 {
+	if (do_caller_fixup)
+	{
+		fixup_caller_for_return(ret, gsp->saved_context,
+			instr_len((unsigned char *) gsp->saved_context->uc.uc_mcontext.rip,
+			(unsigned char *) -1));
+	}
 }
+void __attribute__((weak,visibility("protected")))
+__systrap_post_handling(struct generic_syscall *gsp, long int ret, _Bool do_caller_fixup)
+__attribute__((alias("__libsystrap_noop_post_handling")));
 
-#define RESUME resume_from_sigframe( \
-		ret, \
-		gsp->saved_context, \
-		instr_len((unsigned char *) gsp->saved_context->uc.uc_mcontext.rip, (unsigned char *) -1) \
-	)
 #ifndef SYSCALL_MAX
 #define SYSCALL_MAX 1023
 #endif

@@ -35,8 +35,8 @@ zaps_stack(struct generic_syscall *gs);
 	 "UNFIX_STACK_ALIGNMENT " \n\
 	  movq %%rax, %[ret]      \n"
 
-void systrap_pre_handling(struct generic_syscall *gsp);
-void systrap_post_handling(struct generic_syscall *gsp, long int ret);
+void __attribute__((weak,visibility("protected")))
+__systrap_post_handling(struct generic_syscall *gsp, long int ret, _Bool do_caller_fixup);
 
 /*
  * The x86-64 syscall argument passing convention goes like this:
@@ -212,7 +212,7 @@ __attribute__((always_inline,gnu_inline));
 
 extern inline void
 __attribute__((always_inline,gnu_inline))
-resume_from_sigframe(long int ret, struct ibcs_sigframe *p_frame, unsigned instr_len)
+fixup_caller_for_return(long int ret, struct ibcs_sigframe *p_frame, unsigned instr_len)
 {
 	/* Copy the return value of the emulated syscall into the trapping context, and
 	 * resume from *after* the faulting instruction. 
@@ -227,6 +227,11 @@ resume_from_sigframe(long int ret, struct ibcs_sigframe *p_frame, unsigned instr
 	__asm__ volatile ("movq %1, %0" : "=m"(p_frame->uc.uc_mcontext.MC_REG(rip, RIP)) : "r"(p_frame->uc.uc_mcontext.MC_REG(rip, RIP) + instr_len) : "memory");
 }
 
+/* This is our general function for performing or emulating a system call.
+ * If the syscall does not have a replacement installed, we follow a generic
+ * emulation path. Unfortunately this is BROKEN for clone() at the moment,
+ * because we can't reliably tell the compiler not to use the stack...
+ * we need to rewrite that path in assembly. */
 extern inline void 
 __attribute__((always_inline,gnu_inline))
 do_syscall_and_resume(struct generic_syscall *gsp)
@@ -241,7 +246,7 @@ do_syscall_and_resume(struct generic_syscall *gsp)
 		 * clone(), we have no way to get back here. So the semantics of a 
 		 * replaced syscall must include "do your own resumption". We therefore
 		 * pass the post-handling as a function. */
-		replaced_syscalls[gsp->syscall_number](gsp, &systrap_post_handling);
+		replaced_syscalls[gsp->syscall_number](gsp, &__systrap_post_handling);
 	}
 	else
 	{
@@ -311,28 +316,23 @@ do_syscall_and_resume(struct generic_syscall *gsp)
 		
 		/* FIXME: how to ensure that the compiler doesn't spill something earlier and 
 		 * re-load it here? Ideally we need to rewrite this whole function in assembly. 
-		 * We could make resume_from_sigframe a macro expanding to an asm volatile.... */
+		 * We could make fixup_caller_for_return a macro expanding to an asm volatile.... */
 		
-		systrap_post_handling(copied_gsp, ret); /* okay, because we have a stack (perhaps zeroed/new) */
+		__systrap_post_handling(copied_gsp, ret, !stack_zapped); /* okay, because we have a stack (perhaps zeroed/new) */
 		/* FIXME: unsafe to access gsp here! Take a copy of *gsp! */
-		
-		if (!stack_zapped)
-		{
-			resume_from_sigframe(ret, copied_gsp->saved_context, trap_len);
-		}
-		else 
+		if (stack_zapped)
 		{
 			/* We copied the context into the new stack. So just resume from sigframe
 			 * as before, with two minor alterations. Firstly, the caller expects to
 			 * resume with the new top-of-stack in rsp. Secondly, we fix up the current rsp
 			 * so that the compiler-generated code will find its way to restore_rt 
 			 * (i.e. that the function epilogue will use our new stack, not the old one). */
-			
+
 			struct ibcs_sigframe *p_frame = (struct ibcs_sigframe *) ((char*) new_top_of_stack - sizeof (struct ibcs_sigframe));
 			/* Make sure that the new stack pointer is the one returned to the caller. */
 			p_frame->uc.uc_mcontext.MC_REG(rsp, RSP) = (uintptr_t) new_top_of_stack;
 			/* Do the usual manipulations of saved context, to return and resume from the syscall. */
-			resume_from_sigframe(ret, p_frame, trap_len);
+			fixup_caller_for_return(ret, p_frame, trap_len);
 			/* Hack our rsp so that the epilogue / sigret will execute correctly. */
 			__asm__ volatile ("movq %0, %%rsp" : /* no outputs */ : "r"(new_rsp) : "%rsp");
 		}

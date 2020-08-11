@@ -28,7 +28,7 @@ __assert_fail (const char *assertion, const char *file,
 #include "syscall-names.h"
 #include "raw-syscalls-defs.h"
 
-int raw_open(const char *pathname, int flags);
+int raw_open(const char *pathname, int flags, int mode);
 int raw_close(int fd);
 extern int etext;
 
@@ -67,7 +67,7 @@ void trap_all_mappings(void)
 	/* When we process mappings, we do mprotect()s, which can change the memory map, 
 	 * including removing/adding lines. So there's a race condition unless we eagerly
 	 * snapshot the map. Do that here. */
-	int fd = raw_open("/proc/self/maps", O_RDONLY);
+	int fd = raw_open("/proc/self/maps", O_RDONLY, 0);
 	if (fd != -1)
 	{
 		/* We run during startup, so the number of distinct /proc lines should be small. */
@@ -239,9 +239,10 @@ systrap_pre_handling(struct generic_syscall *gsp)
 }
 
 void __attribute__((visibility("protected")))
-systrap_post_handling(struct generic_syscall *gsp)
+systrap_post_handling(struct generic_syscall *gsp, long ret, _Bool do_fixup)
 {
 	void *calling_addr = generic_syscall_get_ip(gsp);
 	struct link_map *calling_object = get_highest_loaded_object_below(calling_addr);
 	print_post_syscall(traces_out, gsp, calling_addr, calling_object, NULL);
+	__libsystrap_noop_post_handling(gsp, ret, do_fixup);
 }

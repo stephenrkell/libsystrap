@@ -141,6 +141,26 @@
 #define write_chars(s, t)  raw_write(2, s, t - s)
 #define write_ulong(a)   raw_write(2, fmt_hex_num((a)), 18)
 
+#define DO_EXIT_SYSCALL(exitcode) \
+	long retcode = (exitcode); \
+	long op = SYS_exit; \
+	__asm__ volatile ("movq %0, %%rdi      # \n\
+			  "FIX_STACK_ALIGNMENT " \n\
+			   movq %1, %%rax      # \n\
+			   syscall	     # do the syscall \n\
+			  "UNFIX_STACK_ALIGNMENT " \n" \
+	  : /* no output*/ : "rm"(retcode), "rm"(op) : "r12", SYSCALL_CLOBBER_LIST);
+
+#define DO_SIGRETURN_SYSCALL(unused) \
+	long unused_val = (unused); \
+	long op = SYS_rt_sigreturn; \
+	__asm__ volatile ("movq %0, %%rdi      # \n\
+			  "FIX_STACK_ALIGNMENT " \n\
+			   movq %1, %%rax      # \n\
+			   syscall	     # do the syscall \n\
+			  "UNFIX_STACK_ALIGNMENT " \n" \
+	  : /* no output*/ : "rm"(unused_val), "rm"(op) : "r12", SYSCALL_CLOBBER_LIST);
+
 /* In kernel-speak this is a "struct sigframe" / "struct rt_sigframe" --
  * sadly no user-level header defines it. But it seems to be vaguely standard
  * per-architecture (here Intel iBCS). */
