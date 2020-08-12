@@ -12,6 +12,9 @@ $(CONTRIB)/config.mk:
 
 include $(CONFIG)
 
+# we link with the librunt archive
+CFLAGS += -DIN_LIBRUNT_DSO
+
 CFLAGS += -DSYSTRAP_DEFINE_FILE
 CFLAGS += -I$(srcroot)/include
 CFLAGS += -g
