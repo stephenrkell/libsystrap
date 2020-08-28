@@ -24,7 +24,7 @@ ifeq ($(LIBRUNT_DIR),)
 $(error Please install the librunt source tree and set LIBRUNT_DIR to point to it)
 endif
 
-ifeq ($(realpath $(srcroot)/src/libsystrap.a),)
+ifeq ($(realpath $(srcroot)/lib/libsystrap.a),)
 $(error Please build libsystrap first)
 endif
 
@@ -76,7 +76,7 @@ syscall-macros.h: $(SYS)-syscall-macros.h
 # NOTE: the --whole-archive is only necessary for debugging, to ensure that
 # functions we might want to call from the debugger are actually linked in
 trace-syscalls.so: LDLIBS := -Bstatic \
-	$(srcroot)/src/libsystrap.a \
+	$(srcroot)/lib/libsystrap.a \
 	-Wl,--whole-archive $(LIBRUNT_DIR)/lib/librunt_preload.a -Wl,--no-whole-archive
 
 trace-syscalls.so: LDLIBS += \
@@ -101,7 +101,7 @@ trace-syscalls.so: LDFLAGS += \
 
 trace-syscalls.so: trap-syscalls.o syscall-names.o dlmalloc.a
 
-trace-syscalls.so: $(srcroot)/src/libsystrap.a
+trace-syscalls.so: $(srcroot)/lib/libsystrap.a
 	$(CC) -shared -Bsymbolic \
 		-fuse-ld=gold \
 		-Wl,-h,$@ \

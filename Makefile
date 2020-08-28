@@ -24,5 +24,5 @@ lib: src
 	$(MAKE) -C lib
 
 .PHONY: example
-example:
+example: src lib
 	$(MAKE) -C example
