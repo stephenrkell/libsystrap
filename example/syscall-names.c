@@ -1,8 +1,8 @@
 #include <stddef.h>
 #include <sys/syscall.h>
 
-#define SYSCALL(n) \
-[SYS_ ## n] = #n,
+#define SYSCALL(nam, num) \
+[SYS_ ## nam] = #nam,
 
 const char *syscall_names[] = {
 #include "syscall-macros.h"

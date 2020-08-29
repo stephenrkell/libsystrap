@@ -63,8 +63,9 @@ dlmalloc.a: dlmalloc.o
 
 # This is a quick but incomplete way to build a number->name mapping
 linux-syscall-macros.h:
-	( /usr/bin/cpp -E -D"__SYSCALL(num,decl)=decl" -o - /usr/include/asm-generic/unistd.h </dev/null | \
-           sed -r '/^(#.*)?$$/ d' | sort | uniq | sed -r 's/^(sys_)?(.*)/#ifdef SYS_\2\nSYSCALL(\2)\n#endif/') > "$@" || (rm -f "$@"; false)
+	( /usr/bin/cpp -E -dM -o - /usr/include/asm/unistd.h </dev/null | \
+           grep '#define *__NR_' | sort | uniq | \
+           sed -r 's/^#define *__NR_([^[:blank:]]*)[[:blank:]]*([0-9]*)/#ifdef SYS_\1\nSYSCALL(\1, \2)\n#endif/') > "$@" || (rm -f "$@"; false)
 freebsd-syscall-macros.h:
 	cat /usr/include/sys/syscall.h | grep 'SYS_[a-z][A-Za-z0-9_]*' | cut -f2 | \
     sed 's/SYS_\(.*\)/SYSCALL(\1)/' > "$@" || (rm -f "$@"; false)
@@ -88,7 +89,9 @@ trace-syscalls.so: LDLIBS += \
 trace-syscalls.so: LDFLAGS += \
 -fno-lto -nostdlib -Wl,--no-as-needed \
 -Wl,--defsym,__private_strdup=strdup -Wl,--defsym,__private_malloc=malloc \
--Wl,--defsym,__private_free=free
+-Wl,--defsym,__private_free=free \
+-Wl,--defsym,__wrap___runt_files_notify_load=__runt_files_notify_load \
+-Wl,--defsym,__wrap___runt_files_metadata_by_addr=__runt_files_metadata_by_addr
 # hmm -- is this necessary now? FIXME: CHECK
 trace-syscalls.so: LDFLAGS += \
 -Wl,--defsym,stat=raw_stat

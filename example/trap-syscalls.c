@@ -194,12 +194,14 @@ static void startup(void)
 void print_pre_syscall(void *stream, struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, void *ret)
 			__attribute__((visibility("protected")));
 void print_pre_syscall(void *stream, struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, void *ret) {
+	char namebuf[5];
+	snprintf(namebuf, sizeof namebuf, "%d", gsp->syscall_number);
 	fprintf(stream, "== %d == > %p (%s+0x%x) %s(%p, %p, %p, %p, %p, %p)\n",
 			 getpid(), 
 			 calling_addr,
 			 calling_object->l_name,
 			 (char*) calling_addr - (char*) calling_object->l_addr,
-			 syscall_names[gsp->syscall_number],
+			 syscall_names[gsp->syscall_number]?:namebuf,
 			 gsp->args[0],
 			 gsp->args[1],
 			 gsp->args[2],
