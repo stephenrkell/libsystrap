@@ -23,7 +23,8 @@ CFLAGS += -O2
 CFLAGS += -fPIC
 CFLAGS += -ffreestanding -fno-omit-frame-pointer
 
-instr.o: CFLAGS += -DUSE_XED
+# the decoder we use nowadays is the "official" Intel one
+CFLAGS += -DUSE_XED
 
 ifeq ($(DEBUG),)
 CFLAGS += -DNDEBUG

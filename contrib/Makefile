@@ -162,6 +162,10 @@ CONFIG_MK +=\nLIBRUNT_LDFLAGS ?= -L$(CONTRIB)/librunt/lib -Wl,-rpath,$(CONTRIB)/
 # non-autoconf'd stuff (liballocs, libsystrap) may expect LIBRUNT_DIR
 varlist += LIBRUNT_CFLAGS LIBRUNT_LDFLAGS LIBRUNT_DIR
 
+# ----------------------------libx86emulate
+CONFIG_MK +=\nLIBX86EMULATE_DIR ?= $(realpath $(CONTRIB)/libx86emulate)\n
+varlist += LIBX86EMULATE_DIR
+
 # ----------------------------config.mk
 
 # If the user nukes a sub-config.mk that our config.mk depends on,
