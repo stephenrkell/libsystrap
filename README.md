@@ -28,6 +28,13 @@ the JIT must create executable mappings by making system calls, which we
 can intercept as they happen, and perform our breakpointing on the
 dynamically generated instructions.
 
+What about newer ways like SECCOMP-BPF on Linux? The short answer is:
+I don't know. It may be possible to use these within the library, to
+the user's benefit. My first reaction is that newer kernel-side
+mechanisms are more restrictive, more complex, more change-prone,
+and interact badly with programs that themselves want to use those
+features. But they may be worth using despite that.
+
 # libsystrap
 
 This is a simple library to do the breakpointing and install a SIGILL
