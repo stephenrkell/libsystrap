@@ -28,26 +28,16 @@ extern inline _Bool
 __attribute__((always_inline,gnu_inline))
 zaps_stack(struct generic_syscall *gs);
 
+/* FIX_STACK_ALIGNMENT is in raw-syscalls-impl.h, included above */
 #define PERFORM_SYSCALL	     \
 	  FIX_STACK_ALIGNMENT "   \n\
-	  movq %[op], %%rax       \n\
-	  syscall		 \n\
+	  mov %[op], %%"stringifx(syscallnumreg)"       \n\
+	 "stringifx(SYSCALL_INSTR)"		 \n\
 	 "UNFIX_STACK_ALIGNMENT " \n\
-	  movq %%rax, %[ret]      \n"
+	  mov %%"stringifx(syscallnumreg)", %[ret]      \n"
 
 void __attribute__((weak,visibility("protected")))
 __systrap_post_handling(struct generic_syscall *gsp, long int ret, _Bool do_caller_fixup);
-
-/*
- * The x86-64 syscall argument passing convention goes like this:
- * RAX: syscall_number
- * RDI: ARG0
- * RSI: ARG1
- * RDX: ARG2
- * R10: ARG3
- * R8:  ARG4
- * R9:  ARG5
- */
 
 /* I wrote this using old-style initializers because we don't want to
  * zero-clobber registers that are unrelated to the call. But those
@@ -70,7 +60,7 @@ do_syscall0(struct generic_syscall *gsp)
 	__asm__ volatile (PERFORM_SYSCALL
 	  : [ret] "=r" (ret)
 	  : [op]  "rm" ((long int) gsp->syscall_number)
-	  : "r12", SYSCALL_CLOBBER_LIST);
+	  : DO_SYSCALL_CLOBBER_LIST);
 
 	return ret;
 }
@@ -81,12 +71,12 @@ do_syscall1(struct generic_syscall *gsp)
 {
 	long int ret;
 
-	__asm__ volatile ("movq %[arg0], %%rdi \n"
+	__asm__ volatile ("mov %[arg0], %%"stringifx(argreg0)" \n"
 			   PERFORM_SYSCALL
 	  : [ret]  "=r" (ret)
 	  : [op]   "rm" ((long int) gsp->syscall_number)
 	  , [arg0] "rm" ((long int) gsp->args[0])
-	  : "r12", SYSCALL_CLOBBER_LIST);
+	  : DO_SYSCALL_CLOBBER_LIST);
 
 	return ret;
 }
@@ -96,14 +86,14 @@ __attribute__((always_inline,gnu_inline))
 do_syscall2(struct generic_syscall *gsp)
 {
 	long int ret;
-	__asm__ volatile ("movq %[arg0], %%rdi \n\
-			   movq %[arg1], %%rsi \n"
+	__asm__ volatile ("mov %[arg0], %%"stringifx(argreg0)" \n\
+			   mov %[arg1], %%"stringifx(argreg1)" \n"
 			   PERFORM_SYSCALL
 	  : [ret]  "=r" (ret)
 	  : [op]   "rm" ((long int) gsp->syscall_number)
 	  , [arg0] "rm" ((long int) gsp->args[0])
 	  , [arg1] "rm" ((long int) gsp->args[1])
-	  : "r12", SYSCALL_CLOBBER_LIST);
+	  : DO_SYSCALL_CLOBBER_LIST);
 
 	return ret;
 }
@@ -113,16 +103,16 @@ __attribute__((always_inline,gnu_inline))
 do_syscall3(struct generic_syscall *gsp)
 {
 	long int ret;
-	__asm__ volatile ("movq %[arg0], %%rdi \n\
-			   movq %[arg1], %%rsi \n\
-			   movq %[arg2], %%rdx \n"
+	__asm__ volatile ("mov %[arg0], %%"stringifx(argreg0)" \n\
+			   mov %[arg1], %%"stringifx(argreg1)" \n\
+			   mov %[arg2], %%"stringifx(argreg2)" \n"
 			   PERFORM_SYSCALL
 	  : [ret]  "=r" (ret)
 	  : [op]   "rm" ((long int) gsp->syscall_number)
 	  , [arg0] "rm" ((long int) gsp->args[0])
 	  , [arg1] "rm" ((long int) gsp->args[1])
 	  , [arg2] "rm" ((long int) gsp->args[2])
-	  : "r12", SYSCALL_CLOBBER_LIST);
+	  : DO_SYSCALL_CLOBBER_LIST);
 
 	return ret;
 }
@@ -132,10 +122,10 @@ __attribute__((always_inline,gnu_inline))
 do_syscall4(struct generic_syscall *gsp)
 {
 	long int ret;
-	__asm__ volatile ("movq %[arg0], %%rdi \n\
-			   movq %[arg1], %%rsi \n\
-			   movq %[arg2], %%rdx \n\
-			   movq %[arg3], %%r10 \n"
+	__asm__ volatile ("mov %[arg0], %%"stringifx(argreg0)" \n\
+			   mov %[arg1], %%"stringifx(argreg1)" \n\
+			   mov %[arg2], %%"stringifx(argreg2)" \n\
+			   mov %[arg3], %%"stringifx(argreg3)" \n"
 			   PERFORM_SYSCALL
 	  : [ret]  "=r" (ret)
 	  : [op]   "rm" ((long int) gsp->syscall_number)
@@ -143,7 +133,7 @@ do_syscall4(struct generic_syscall *gsp)
 	  , [arg1] "rm" ((long int) gsp->args[1])
 	  , [arg2] "rm" ((long int) gsp->args[2])
 	  , [arg3] "rm" ((long int) gsp->args[3])
-	  : "r12", SYSCALL_CLOBBER_LIST);
+	  : DO_SYSCALL_CLOBBER_LIST);
 
 	return ret;
 }
@@ -153,11 +143,11 @@ __attribute__((always_inline,gnu_inline))
 do_syscall5(struct generic_syscall *gsp)
 {
 	long int ret;
-	__asm__ volatile ("movq %[arg0], %%rdi \n\
-			   movq %[arg1], %%rsi \n\
-			   movq %[arg2], %%rdx \n\
-			   movq %[arg3], %%r10 \n\
-			   movq %[arg4], %%r8  \n"
+	__asm__ volatile ("mov %[arg0], %%"stringifx(argreg0)" \n\
+			   mov %[arg1], %%"stringifx(argreg1)" \n\
+			   mov %[arg2], %%"stringifx(argreg2)" \n\
+			   mov %[arg3], %%"stringifx(argreg3)" \n\
+			   mov %[arg4], %%"stringifx(argreg4)"  \n"
 			   PERFORM_SYSCALL
 	  : [ret]  "=r" (ret)
 	  : [op]   "rm" ((long int) gsp->syscall_number)
@@ -166,7 +156,7 @@ do_syscall5(struct generic_syscall *gsp)
 	  , [arg2] "rm" ((long int) gsp->args[2])
 	  , [arg3] "rm" ((long int) gsp->args[3])
 	  , [arg4] "rm" ((long int) gsp->args[4])
-	  : "r12", SYSCALL_CLOBBER_LIST);
+	  : DO_SYSCALL_CLOBBER_LIST);
 
 	return ret;
 }
@@ -176,12 +166,12 @@ __attribute__((always_inline,gnu_inline))
 do_syscall6(struct generic_syscall *gsp)
 {
 	long int ret;
-	__asm__ volatile ("movq %[arg0], %%rdi \n\
-			   movq %[arg1], %%rsi \n\
-			   movq %[arg2], %%rdx \n\
-			   movq %[arg3], %%r10 \n\
-			   movq %[arg4], %%r8  \n\
-			   movq %[arg5], %%r9  \n"
+	__asm__ volatile ("mov %[arg0], %%"stringifx(argreg0)" \n\
+			   mov %[arg1], %%"stringifx(argreg1)" \n\
+			   mov %[arg2], %%"stringifx(argreg2)" \n\
+			   mov %[arg3], %%"stringifx(argreg3)" \n\
+			   mov %[arg4], %%"stringifx(argreg4)" \n\
+			   mov %[arg5], %%"stringifx(argreg5)" \n"
 			   PERFORM_SYSCALL
 	  : [ret]  "=r" (ret)
 	  : [op]   "rm" ((long int) gsp->syscall_number)
@@ -191,7 +181,7 @@ do_syscall6(struct generic_syscall *gsp)
 	  , [arg3] "rm" ((long int) gsp->args[3])
 	  , [arg4] "rm" ((long int) gsp->args[4])
 	  , [arg5] "rm" ((long int) gsp->args[5])
-	  : "r12", SYSCALL_CLOBBER_LIST);
+	  : DO_SYSCALL_CLOBBER_LIST);
 
 	return ret;
 }
@@ -221,10 +211,11 @@ fixup_caller_for_return(long int ret, struct ibcs_sigframe *p_frame, unsigned in
 	 * it away for me. So do it in volatile assembly. */
 
 	// set the return value
-	__asm__ volatile ("movq %1, %0" : "=m"(p_frame->uc.uc_mcontext.MC_REG(rax, RAX)) : "r"(ret) : "memory");
+	// HACK: it's in the same place as the syscall number
+	__asm__ volatile ("mov %1, %0" : "=m"(p_frame->uc.uc_mcontext.MC_REG(syscallnumreg, SYSCALLNUMREG)) : "r"(ret) : "memory");
 
 	// adjust the saved program counter to point past the trapping instr
-	__asm__ volatile ("movq %1, %0" : "=m"(p_frame->uc.uc_mcontext.MC_REG(rip, RIP)) : "r"(p_frame->uc.uc_mcontext.MC_REG(rip, RIP) + instr_len) : "memory");
+	__asm__ volatile ("mov %1, %0" : "=m"(p_frame->uc.uc_mcontext.MC_REG_IP) : "r"(p_frame->uc.uc_mcontext.MC_REG(rip, RIP) + instr_len) : "memory");
 }
 
 /* This is our general function for performing or emulating a system call.
@@ -251,10 +242,11 @@ do_syscall_and_resume(struct generic_syscall *gsp)
 	else
 	{
 		/* HACK: these must not be spilled to the stack at the point where the 
-		 * syscall occurs, or they may be lost.  */
-		register _Bool stack_zapped __asm__ ("rbx") = zaps_stack(gsp);
-		register uintptr_t *new_top_of_stack __asm__ ("rcx") = (uintptr_t *) gsp->args[1];
-		register uintptr_t *new_rsp __asm__ ("rdx") = 0;
+		 * syscall occurs, or they may be lost.
+		 * HACK EVEN MORE: this code doesn't work right now  */
+		register _Bool stack_zapped /*__asm__ ("rbx")*/ = zaps_stack(gsp);
+		register uintptr_t *new_top_of_stack /*__asm__ ("rcx")*/ = (uintptr_t *) gsp->args[1];
+		register uintptr_t *new_sp /*__asm__ ("rdx")*/ = 0;
 		
 		if (stack_zapped)
 		{
@@ -265,7 +257,13 @@ do_syscall_and_resume(struct generic_syscall *gsp)
 			 * which does the sigret. Will it work? Yes, it seems to. */
 			
 			uintptr_t *stack_copy_low;
+#if defined(__x86_64__)
 			__asm__ volatile ("movq %%rsp, %0" : "=rm"(stack_copy_low) : : );
+#elif defined(__i386__)
+			__asm__ volatile ("movl %%esp, %0" : "=rm"(stack_copy_low) : : );
+#else
+#error "Unsupported architecture."
+#endif
 			
 			uintptr_t *stack_copy_high
 			 = (uintptr_t *)((char*) gsp->saved_context + sizeof (struct ibcs_sigframe));
@@ -284,11 +282,11 @@ do_syscall_and_resume(struct generic_syscall *gsp)
 					new_stack_lowaddr[i] += fixup_amount;
 				}
 			}
-			new_rsp = new_stack_lowaddr; // (uintptr_t) ((char *) stack_copy_low + fixup_amount);
+			new_sp = new_stack_lowaddr; // (uintptr_t) ((char *) stack_copy_low + fixup_amount);
 		}
 		
-		register unsigned trap_len __asm__ ("rsi") = instr_len(
-			(unsigned char*) gsp->saved_context->uc.uc_mcontext.MC_REG(rip, RIP),
+		register unsigned trap_len /*__asm__ ("rsi")*/ = instr_len(
+			(unsigned char*) gsp->saved_context->uc.uc_mcontext.MC_REG_IP,
 			(unsigned char*) -1 /* we don't know where the end of the mapping is */
 			);
 		
@@ -300,9 +298,15 @@ do_syscall_and_resume(struct generic_syscall *gsp)
 		/* Did our stack actually get zapped? */
 		if (stack_zapped)
 		{
-			uintptr_t *seen_rsp;
-			__asm__ volatile ("movq %%rsp, %0" : "=r"(seen_rsp) : : );
-			stack_zapped &= (seen_rsp == new_top_of_stack);
+			uintptr_t *seen_sp;
+#if defined(__x86_64__)
+			__asm__ volatile ("movq %%rsp, %0" : "=r"(seen_sp) : : );
+#elif defined(__i386__)
+			__asm__ volatile ("mov %%esp, %0" : "=r"(seen_sp) : : );
+#else
+#error "Unsupported architecture."
+#endif
+			stack_zapped &= (seen_sp == new_top_of_stack);
 		}
 		
 		/* At this point, if we're the child:
@@ -330,11 +334,23 @@ do_syscall_and_resume(struct generic_syscall *gsp)
 
 			struct ibcs_sigframe *p_frame = (struct ibcs_sigframe *) ((char*) new_top_of_stack - sizeof (struct ibcs_sigframe));
 			/* Make sure that the new stack pointer is the one returned to the caller. */
+#if defined(__x86_64__)
 			p_frame->uc.uc_mcontext.MC_REG(rsp, RSP) = (uintptr_t) new_top_of_stack;
+#elif defined(__i386__)
+			p_frame->uc.uc_mcontext.MC_REG(esp, ESP) = (uintptr_t) new_top_of_stack;
+#else
+#error "Unsupported architecture"
+#endif
 			/* Do the usual manipulations of saved context, to return and resume from the syscall. */
 			fixup_caller_for_return(ret, p_frame, trap_len);
 			/* Hack our rsp so that the epilogue / sigret will execute correctly. */
-			__asm__ volatile ("movq %0, %%rsp" : /* no outputs */ : "r"(new_rsp) : "%rsp");
+#if defined(__x86_64__)
+			__asm__ volatile ("movq %0, %%rsp" : /* no outputs */ : "r"(new_sp) : "%rsp");
+#elif defined(__i386__)
+			__asm__ volatile ("mov %0, %%esp" : /* no outputs */ : "r"(new_sp) : "%esp");
+#else
+#error "Unsupported architecture"
+#endif
 		}
 	}
 }

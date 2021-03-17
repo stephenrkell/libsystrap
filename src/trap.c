@@ -117,10 +117,30 @@ void walk_instructions(unsigned char *pos, unsigned char *end,
 	}
 }
 
-static const unsigned char X86_64_MOV_0x38_EAX[] = {0xb8, 0x38, 0, 0, 0};
-static const unsigned char X86_64_MOV_0xF_RAX[] = {0x48, 0xc7, 0xc0, 0x0f, 0, 0, 0};
-static const unsigned char *blacklisted_prev_instrs[] = {X86_64_MOV_0x38_EAX, X86_64_MOV_0xF_RAX, NULL};
-static const unsigned int blacklisted_prev_lengths[] = {5, 7};
+struct instr_ { unsigned len; uint8_t bytes[]; };
+#define def_instr_seq(name, bytes...) static const struct instr_ name = \
+{ (sizeof ((uint8_t[]) { bytes })/sizeof(uint8_t)), { bytes } };
+
+#if defined(__x86_64__)
+#define instr_seqs(m) \
+  m(CLONE_EAX,     0xb8, /* 0x38 */ __NR_clone,                    0, 0, 0 ) \
+  m(SIGRETURN_EAX, 0xb8, /* 0x0f */ __NR_rt_sigreturn,             0, 0, 0 ) \
+  m(CLONE_RAX,     0x48, 0xc7, 0xc0, /* 0x38 */ __NR_clone,        0, 0, 0 ) \
+  m(SIGRETURN_RAX, 0x48, 0xc7, 0xc0, /* 0x0f */ __NR_rt_sigreturn, 0, 0, 0 )
+#elif defined(__i386__)
+#define instr_seqs(m) \
+  m(CLONE_EAX,        0xc7, 0xc0, /* 0x78 */ __NR_clone,        0, 0, 0 ) \
+  m(RT_SIGRETURN_EAX, 0xc7, 0xc0, /* 0xad */ __NR_rt_sigreturn, 0, 0, 0 ) \
+  m(SIGRETURN_EAX,    0xc7, 0xc0, /* 0x77 */ __NR_sigreturn,    0, 0, 0 )
+#else
+#error "Unsupported architecture."
+#endif
+
+#define addrof_instr_seq(name, bytes...) \
+  &(name),
+instr_seqs(def_instr_seq)
+const struct instr_ *instr_seqs[] = { instr_seqs(addrof_instr_seq) NULL };
+
 static void instruction_cb(unsigned char *pos, unsigned len, void *arg)
 {
 	if (is_syscall_instr(pos, pos + len))
@@ -134,14 +154,13 @@ static void instruction_cb(unsigned char *pos, unsigned len, void *arg)
 		 * values for each function and to only instrument syscalls if needed */
 		/* Seems like we need to do the same for syscall 56 (clone)...
 		 * We REALLY want a way to accurately remove harmful instrumentations. */
-		const unsigned char **blinstr = blacklisted_prev_instrs;
-		const unsigned int *bllen = blacklisted_prev_lengths;
-		for (; *blinstr; ++blinstr, ++bllen)
+		const struct instr_ **blinstr = &instr_seqs[0];
+		for (; *blinstr; ++blinstr)
 		{
 			int match = 1;
-			for (int i = 1; i <= *bllen; i++)
+			for (int i = 1; i <= (*blinstr)->len; i++)
 			{
-				if (pos[-i] != (*blinstr)[*bllen-i])
+				if (pos[-i] != (*blinstr)->bytes[(*blinstr)->len-i])
 				{
 					match = 0;
 					break;
@@ -263,10 +282,8 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 	void *base_addr = NULL;
 	const void *first_section_start = __runt_find_section_boundary(
 		begin, SHF_EXECINSTR, 0, NULL, NULL);
-	assert(first_section_start == vaddr_to_nearest_instruction(begin, filename, 0, NULL));
 	const void *last_section_end = __runt_find_section_boundary(
 		end, SHF_EXECINSTR, 1, NULL, NULL);
-	assert(last_section_end == vaddr_to_nearest_instruction(end, filename, 1, NULL));
 	/* These might return respectively (void*)-1 and (void*)0, to signify
 	 * "no instructions in that range, according to section headers".
 	 * The section headers are pretty reliable, so we choose not to
@@ -367,7 +384,6 @@ void install_sigill_handler(void)
 	/* Install our SIGILL (was SIGTRAP, but that interferes with gdb) handler.
 	 * Linux seems to require us to provide a restorer; the code is in restore_rt. */
 #ifndef SA_RESTORER
-//#define SA_RESTORER 0x04000000u
 #error "NO SA_RESTORER set; are you including the asm signal.h?"
 #endif
 	struct __asm_sigaction action = {

@@ -27,6 +27,15 @@
 #define MC_REG(lower, upper) lower
 #endif
 
+/* Define some generic register aliases */
+#if defined(__x86_64__)
+#define MC_REG_IP MC_REG(rip, RIP)
+#elif defined(__i386__)
+#define MC_REG_IP MC_REG(eip, EIP)
+#else
+#error "Unrecognised architecture"
+#endif
+
 #include <sys/types.h>
 
 #if defined(__linux__)
@@ -109,6 +118,24 @@
 
 #include "raw-syscalls-defs.h"
 
+#if defined(__x86_64__)
+/* The x86-64 syscall argument passing convention goes like this:
+ * RAX: syscall_number
+ * RDI: arg0
+ * RSI: arg1
+ * RDX: arg2
+ * R10: arg3
+ * R8:  arg4
+ * R9:  arg5
+ */
+#define syscallnumreg rax
+#define SYSCALLNUMREG RAX
+#define argreg0 rdi
+#define argreg1 rsi
+#define argreg2 rdx
+#define argreg3 r10
+#define argreg4 r8
+#define argreg5 r9
 /* Our callee-save registers are
  *	 rbp, rbx, r12, r13, r14, r15
  * but all others need to be in the clobber list.
@@ -116,6 +143,10 @@
  *	 xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8, xmm9, xmm10, xmm11, xmm12, xmm13, xmm14, xmm15
  *	 condition codes, memory
  */
+/* FIXME: why the huge clobber list?
+ * According to the ABI,
+ * http://refspecs.linuxfoundation.org/elf/x86_64-abi-0.99.pdf
+ * only %rcx, %r11 and %rax are clobbered */
 #define SYSCALL_CLOBBER_LIST \
 	"%rdi", "%rsi", "%rax", "%rcx", "%rdx", "%r8", "%r9", "%r10", "%r11", \
 	"%xmm0", "%xmm1", "%xmm2", "%xmm3", "%xmm4", "%xmm5", "%xmm6", "%xmm7", "%xmm8", \
@@ -130,7 +161,71 @@
 #define UNFIX_STACK_ALIGNMENT \
 	"addq %%r12, %%rsp\n"
 
+#define DO_SYSCALL_CLOBBER_LIST \
+   "r12", SYSCALL_CLOBBER_LIST
+
+#define SYSCALL_INSTR syscall
+
+#elif defined(__i386__)
+
+/* On i386 the kernel convention is
+ * EAX: syscall_number
+ * EBX: arg0
+ * ECX: arg1
+ * EDX: arg2
+ * ESI: arg3
+ * EDI: arg4
+ * EBP: arg5
+ */
+#define syscallnumreg eax
+#define SYSCALLNUMREG EAX
+#define argreg0 ebx
+#define argreg1 ecx
+#define argreg2 edx
+#define argreg3 esi
+#define argreg4 edi
+#define argreg5 ebp
+/* Our callee-save registers are
+ *	 ... all of 'em! we use int $0x80 for now (FIXME: use sysenter instead?)
+ * but all others need to be in the clobber list.
+ *	 condition codes, memory
+ */
+#define SYSCALL_CLOBBER_LIST \
+	"cc" /*, "memory" */
+/* We need a spare callee-save register for the fixup amount.
+ * But we don't have one! We will need everything for the call.
+ * Instead we push it four times to preserve 16-byte alignment. */
+#define FIX_STACK_ALIGNMENT \
+	"mov %%esp, %%eax\n\
+	 and $0xf, %%eax    # now we have either 8 or 0 in eax \n\
+	 sub %%eax, %%esp   # fix the stack pointer \n\
+	 push %%eax \n\
+	 push %%eax \n\
+	 push %%eax \n\
+	 push %%eax \n\
+	 "
+/* To undo our push-hack, we pop the replicated value four times.
+ * This clobbers ebx. */
+#define UNFIX_STACK_ALIGNMENT \
+	"pop %%ebx\n\
+	 pop %%ebx\n\
+	 pop %%ebx\n\
+	 pop %%ebx\n\
+	 add %%ebx, %%esp\n\
+	"
+#define DO_SYSCALL_CLOBBER_LIST \
+   "ebx", SYSCALL_CLOBBER_LIST
+
+#define SYSCALL_INSTR int $0x80
+
+#else
+#error "Unsupported architecture."
+#endif
+
 #define stringify(cond) #cond
+
+// stringify expanded
+#define stringifx(cond) stringify(cond)
 
 #ifndef assert
 #define assert(cond) \
@@ -144,22 +239,22 @@
 #define DO_EXIT_SYSCALL(exitcode) \
 	long retcode = (exitcode); \
 	long op = SYS_exit; \
-	__asm__ volatile ("movq %0, %%rdi      # \n\
+	__asm__ volatile ("mov %0, %%"stringifx(argreg0)"      # \n\
 			  "FIX_STACK_ALIGNMENT " \n\
-			   movq %1, %%rax      # \n\
-			   syscall	     # do the syscall \n\
+			   mov %1, %%"stringifx(syscallnumreg)"      # \n\
+			   "stringifx(SYSCALL_INSTR)"	     # do the syscall \n\
 			  "UNFIX_STACK_ALIGNMENT " \n" \
-	  : /* no output*/ : "rm"(retcode), "rm"(op) : "r12", SYSCALL_CLOBBER_LIST);
+	  : /* no output*/ : "rm"(retcode), "rm"(op) : DO_SYSCALL_CLOBBER_LIST);
 
-#define DO_SIGRETURN_SYSCALL(unused) \
-	long unused_val = (unused); \
-	long op = SYS_rt_sigreturn; \
-	__asm__ volatile ("movq %0, %%rdi      # \n\
+#define DO_SIGRETURN_SYSCALL(num /* SYS_rt_sigreturn */) \
+	long unused_val = 0; \
+	long op = num; \
+	__asm__ volatile ("mov %0, %%"stringifx(argreg0)"      # \n\
 			  "FIX_STACK_ALIGNMENT " \n\
-			   movq %1, %%rax      # \n\
-			   syscall	     # do the syscall \n\
+			   mov %1, %%"stringifx(syscallnumreg)"      # \n\
+			   "stringifx(SYSCALL_INSTR)"	     # do the syscall \n\
 			  "UNFIX_STACK_ALIGNMENT " \n" \
-	  : /* no output*/ : "rm"(unused_val), "rm"(op) : "r12", SYSCALL_CLOBBER_LIST);
+	  : /* no output*/ : "rm"(unused_val), "rm"(op) : DO_SYSCALL_CLOBBER_LIST);
 
 /* In kernel-speak this is a "struct sigframe" / "struct rt_sigframe" --
  * sadly no user-level header defines it. But it seems to be vaguely standard

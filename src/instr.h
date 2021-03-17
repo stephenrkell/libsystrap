@@ -1,9 +1,6 @@
 #ifndef INSTR_H_
 #define INSTR_H_
 
-#define PACKAGE "NOT binutils"
-#define HAVE_STRINGSIZE
-
 #include <stdint.h>
 
 #ifdef __cplusplus

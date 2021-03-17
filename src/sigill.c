@@ -35,14 +35,21 @@ void handle_sigill(int n)
 	/* Decode the syscall using sigcontext. */
 	_handle_sigill_debug_printf(1, "Took a trap from instruction at %p", p_frame->uc.uc_mcontext.MC_REG(rip, RIP));
 #ifdef EXECUTABLE
-	if (p_frame->uc.uc_mcontext.MC_REG(rip, RIP) == (uintptr_t) ignore_ud2_addr)
+	if (p_frame->uc.uc_mcontext.MC_REG_IP == (uintptr_t) ignore_ud2_addr)
 	{
 		_handle_sigill_debug_printf(1, " which is our test trap address; continuing.\n");
 		resume_from_sigframe(0, p_frame, 2);
 		return;
 	}
 #endif
+
+#if defined(__x86_64__)
 	unsigned long syscall_num = (unsigned long) p_frame->uc.uc_mcontext.MC_REG(rax, RAX);
+#elif defined(__i386__
+	unsigned long syscall_num = (unsigned long) p_frame->uc.uc_mcontext.MC_REG(eax, EAX);
+#else
+#error "Unrecognised architecture"
+#endif
 	assert(syscall_num >= 0);
 	assert(syscall_num < SYSCALL_MAX);
 	_handle_sigill_debug_printf(1, " which we think is syscall %s/%d\n",
@@ -55,12 +62,23 @@ void handle_sigill(int n)
 		.saved_context = p_frame,
 		.syscall_number = syscall_num,
 		.args = {
+#if defined(__x86_64__)
 			p_frame->uc.uc_mcontext.MC_REG(rdi, RDI),
 			p_frame->uc.uc_mcontext.MC_REG(rsi, RSI),
 			p_frame->uc.uc_mcontext.MC_REG(rdx, RDX),
 			p_frame->uc.uc_mcontext.MC_REG(r10, R10),
 			p_frame->uc.uc_mcontext.MC_REG(r8, R8),
 			p_frame->uc.uc_mcontext.MC_REG(r9, R9)
+#elif define(__i386__)
+			p_frame->uc.uc_mcontext.MC_REG(ebx, EBX),
+			p_frame->uc.uc_mcontext.MC_REG(ecx, ECX),
+			p_frame->uc.uc_mcontext.MC_REG(edx, EDX),
+			p_frame->uc.uc_mcontext.MC_REG(esi, ESI),
+			p_frame->uc.uc_mcontext.MC_REG(edi, EDI),
+			p_frame->uc.uc_mcontext.MC_REG(ebp, EBP)
+#else
+#error "Unrecognised architecture."
+#endif
 		}
 	};
 

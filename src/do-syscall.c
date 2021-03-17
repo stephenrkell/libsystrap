@@ -19,7 +19,7 @@ __libsystrap_noop_post_handling(struct generic_syscall *gsp, long int ret, _Bool
 	if (do_caller_fixup)
 	{
 		fixup_caller_for_return(ret, gsp->saved_context,
-			instr_len((unsigned char *) gsp->saved_context->uc.uc_mcontext.rip,
+			instr_len((unsigned char *) gsp->saved_context->uc.uc_mcontext.MC_REG_IP,
 			(unsigned char *) -1));
 	}
 }
@@ -34,5 +34,5 @@ syscall_replacement *replaced_syscalls[SYSCALL_MAX] = { NULL };
 
 void *generic_syscall_get_ip(struct generic_syscall *gsp)
 {
-	return (void*) gsp->saved_context->uc.uc_mcontext.MC_REG(rip, RIP);
+	return (void*) gsp->saved_context->uc.uc_mcontext.MC_REG_IP;
 }

@@ -1,5 +1,6 @@
-/* Simplified version of sysdeps/unix/sysv/linux/x86_64/sigaction.c to only
- * keep the restorer definition.
+/* Simplified version of sysdeps/unix/sysv/linux/x86_64/sigaction.c
+ * and
+ * keeping only the restorer definitions.
 
  * Original copyright notice:
    POSIX.1 `sigaction' call for Linux/x86-64.
@@ -19,6 +20,8 @@
    You should have received a copy of the GNU Lesser General Public
    License along with the GNU C Library; if not, see
    <http://www.gnu.org/licenses/>.  */
+
+#if defined(__x86_64__)
 
 #define CFI_STRINGIFY(Name) CFI_STRINGIFY2 (Name)
 #define CFI_STRINGIFY2(Name) #Name
@@ -146,3 +149,52 @@ __asm__									\
    );
 /* The return code for realtime-signals.  */
 RESTORE (restore_rt, __NR_rt_sigreturn)
+
+#elif defined(__i386__)
+
+#ifndef __NR_rt_sigreturn
+#define __NR_rt_sigreturn 173
+#endif
+
+#ifndef __NR_sigreturn
+#define __NR_sigreturn 119
+#endif
+
+/* POSIX.1 `sigaction' call for Linux/i386.
+   Copyright (C) 1991-2018 Free Software Foundation, Inc.
+   This file is part of the GNU C Library. 
+   
+   See licensing terms above. */
+
+#define RESTORE(name, syscall) RESTORE2 (name, syscall)
+#define RESTORE2(name, syscall) \
+asm                                             \
+  (                                             \
+   ".text\n"                                    \
+   "    .align 16\n"                            \
+   "__" #name ":\n"                             \
+   "    movl $" #syscall ", %eax\n"             \
+   "    int  $0x80"                             \
+   );
+
+/* The return code for realtime-signals.  */
+RESTORE (restore_rt, __NR_rt_sigreturn)
+
+/* For the boring old signals.  */
+#undef RESTORE2
+#define RESTORE2(name, syscall) \
+asm                                             \
+  (                                             \
+   ".text\n"                                    \
+   "    .align 8\n"                             \
+   "__" #name ":\n"                             \
+   "    popl %eax\n"                            \
+   "    movl $" #syscall ", %eax\n"             \
+   "    int  $0x80"                             \
+   );
+
+RESTORE (restore, __NR_sigreturn)
+
+#else
+#error "Unsupported platform/architecture"
+#endif

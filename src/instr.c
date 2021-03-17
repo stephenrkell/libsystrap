@@ -51,7 +51,13 @@ static void init_udis86() __attribute__((constructor));
 static void init_udis86()
 {
 	ud_init(&ud_obj);
+#if defined(__x86_64__)
 	ud_set_mode(&ud_obj, 64); // FIXME: sysdep
+#elif defined(__i386__)
+	ud_set_mode(&ud_obj, 32); // FIXME: sysdep, UNTESTED. -srk
+#else
+#error "Unrecognised x86 architecture."
+#endif
 }
 static int instr_len_udis86(unsigned char *ins, unsigned char *end)
 {
@@ -77,8 +83,17 @@ static int instr_len_xed(unsigned char *ins, unsigned char *end)
 
     xed_decoded_inst_t xedd;
     xed_decoded_inst_zero(&xedd);
-    xed_decoded_inst_set_mode(&xedd, XED_MACHINE_MODE_LONG_64,
-            XED_ADDRESS_WIDTH_64b); // FIXME: Not portable
+    xed_decoded_inst_set_mode(&xedd,
+#if defined(__x86_64__)
+			XED_MACHINE_MODE_LONG_64,
+			XED_ADDRESS_WIDTH_64b
+#elif defined(__i386__)
+			XED_MACHINE_MODE_LONG_COMPAT_32, /* or do we want XED_MACHINE_MODE_LEGACY_32? */
+			XED_ADDRESS_WIDTH_32b
+#else
+#error "Unrecognised x86 architecture."
+#endif
+    );
 
     xed_error_enum_t xed_error = xed_decode(&xedd, ins, end-ins);
     if (xed_error == XED_ERROR_NONE)
@@ -93,8 +108,15 @@ static THREAD unsigned const char *limit;
 static THREAD struct cpu_user_regs regs = {
 };
 static THREAD struct x86_emulate_ctxt ctxt = {
+#if defined(__x86_64__)
 	.addr_size = 64,
 	.sp_size = 64
+#elif defined(__i386__)
+	.addr_size = 32,
+	.sp_size = 32
+#else
+#error "Unrecognised x86 architecture."
+#endif
 };
 static void *my_memcpy(void *dest, const void *src, size_t n)
 {
@@ -153,9 +175,17 @@ static THREAD struct
 
 int convert_one_reg(unsigned regnum)
 {
+#if defined(__x86_64__)
 #define CASE(frag, FRAG) case (offsetof(struct cpu_user_regs, frag)): return DWARF_X86_64_ ## FRAG;
+#elif defined(__i386__)
+#define CASE(frag, FRAG) case (offsetof(struct cpu_user_regs, frag)): return DWARF_X86_ ## FRAG;
+#else
+#error "Unrecognised x86 architecture."
+#endif
+
 	switch (regnum)
 	{
+#if defined(__x86_64__)
 		CASE(r15, R15)
 		CASE(r14, R14)
 		CASE(r13, R13)
@@ -172,6 +202,18 @@ int convert_one_reg(unsigned regnum)
 		CASE(rsi, RSI)
 		CASE(rdi, RDI)
 		CASE(rip, RIP)
+#elif defined(__i386__)
+		CASE(ebp, EBP)
+		CASE(ebx, EBX)
+		CASE(eax, EAX)
+		CASE(ecx, ECX)
+		CASE(edx, EDX)
+		CASE(esi, ESI)
+		CASE(edi, EDI)
+		CASE(eip, EIP)
+#else
+#error "Unrecognised x86 architecture."
+#endif
 		case (unsigned)-1:
 		default:
 			return -1;
@@ -220,8 +262,10 @@ int enumerate_operands(unsigned const char *ins, unsigned const char *end,
 	active_cb_state.client_cb = saw_operand;
 	active_cb_state.arg = arg;
 	limit = end;
+// NOTE: this is glibc's mcontext structure, not the kernel's
 #define COPY_REG(rname, RNAME) .rname = mcontext->gregs[REG_ ## RNAME]
 	struct cpu_user_regs regs = {
+#if defined(__x86_64__)
 		COPY_REG(r15, R15),
 		COPY_REG(r14, R14),
 		COPY_REG(r13, R13),
@@ -238,9 +282,23 @@ int enumerate_operands(unsigned const char *ins, unsigned const char *end,
 		COPY_REG(rsi, RSI),
 		COPY_REG(rdi, RDI),
 		.rip = (uint64_t) ins,
+		COPY_REG(rsp, RSP),
+#elif defined(__i386__)
+		COPY_REG(ebp, EBP),
+		COPY_REG(ebx, EBX),
+		COPY_REG(eax, EAX),
+		COPY_REG(ecx, ECX),
+		COPY_REG(edx, EDX),
+		COPY_REG(esi, ESI),
+		COPY_REG(edi, EDI),
+		.eip = (uint32_t) ins,
+		COPY_REG(esp, ESP),
+#else
+#error "Unrecognised x86 architecture."
+#endif
+/* Common registers */
 		COPY_REG(cs, CSGSFS) & 0xff,
 		COPY_REG(eflags, EFL),
-		COPY_REG(rsp, RSP),
 		//COPY_REG(ss, SS),
 		//COPY_REG(es, ES),
 		//COPY_REG(ds, DS),
@@ -248,8 +306,15 @@ int enumerate_operands(unsigned const char *ins, unsigned const char *end,
 		.fs = (mcontext->gregs[REG_CSGSFS] & 0xff0000) >> 8,
 	};
 	struct x86_emulate_ctxt ctxt = {
+#if defined(__x86_64__)
 		.addr_size = 64,
 		.sp_size = 64,
+#elif defined(__i386__)
+		.addr_size = 32,
+		.sp_size = 32,
+#else
+#error "Unrecognised x86 architecture."
+#endif
 		.regs = &regs
 	};
 	
@@ -293,7 +358,13 @@ static opdis_insn_t *get_opdis_insn(unsigned char *ins, unsigned char *end)
 		o = opdis_init();
 		/* Unbelievably, opdis_insn_t won't tell us the encoded length of the instruction. 
 		 * So we have to snarf it via a custom decoder. */
+#if defined(__x86_64__)
 		opdis_set_arch(o, bfd_arch_i386, bfd_mach_x86_64, NULL);
+#elif defined(__i386__)
+		opdis_set_arch(o, bfd_arch_i386, bfd_mach_i386_i386 /* or bfd_mach_x64_32? */, NULL);
+#else
+#error "Unrecognised x86 architecture."
+#endif
 		opdis_set_display(o, display_cb, NULL);
 		opdis_set_decoder(o, decode_cb, &cur_insn_len);
 		// assert(o->buf);
