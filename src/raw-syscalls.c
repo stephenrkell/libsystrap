@@ -105,6 +105,16 @@ int __attribute__((noinline)) raw_rt_sigaction(int signum, const struct __asm_si
 	return do_syscall4(&gs);
 }
 
+#ifdef __i386__
+int __attribute__((noinline)) raw_sigaction(int signum, const struct __asm_sigaction *act,
+		     struct __asm_sigaction *oldact)
+{
+	/* This one is slightly different because it gets an extra argument */
+	struct generic_syscall gs = MKGS4(SYS_sigaction, signum, act, oldact, sizeof (__asm_sigset_t));
+	return do_syscall4(&gs);
+}
+#endif
+
 ssize_t __attribute__((noinline)) raw_write(int fd, const void *buf, size_t count)
 {
 	struct generic_syscall gs = MKGS3(SYS_write, fd, buf, count);
@@ -151,6 +161,7 @@ static void install_sigabrt_handler(void)
 	assert(ret == 0);
 }
 
+#if 0
 void (__attribute__((noreturn)) __assert_fail)(
 	const char *msg, const char *file,
 	unsigned int line, const char *function)
@@ -164,6 +175,7 @@ void (__attribute__((noreturn)) __assert_fail)(
 	/* hmm -- SIGABRT might be blocked? okay, try waiting indefinitely */
 	while (1) {}
 }
+#endif
 #endif
 
 const char *fmt_hex_num(unsigned long n)

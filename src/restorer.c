@@ -92,7 +92,7 @@ __asm__									\
    ".align 16\n"							\
    ".LSTART_" #name ":\n"						\
    "	.type __" #name ",@function\n"					\
-   "    .globl __" #name "\n" \
+   "    .globl __" #name "\n"                                           \
    "__" #name ":\n"							\
    "	movq $" #syscall ", %rax\n"					\
    "	syscall\n"							\
@@ -168,7 +168,7 @@ RESTORE (restore_rt, __NR_rt_sigreturn)
 
 #define RESTORE(name, syscall) RESTORE2 (name, syscall)
 #define RESTORE2(name, syscall) \
-asm                                             \
+__asm__                                         \
   (                                             \
    ".text\n"                                    \
    "    .align 16\n"                            \
@@ -183,7 +183,7 @@ RESTORE (restore_rt, __NR_rt_sigreturn)
 /* For the boring old signals.  */
 #undef RESTORE2
 #define RESTORE2(name, syscall) \
-asm                                             \
+__asm__                                         \
   (                                             \
    ".text\n"                                    \
    "    .align 8\n"                             \

@@ -12,9 +12,11 @@
 #include <alloca.h>
 #ifndef assert
 // HACK to avoid including assert.h
-extern void 
+#if 0 /* musl already gives us this... ho hum */
+extern void
 __assert_fail (const char *assertion, const char *file,
         unsigned int line, const char *function) __attribute__((__noreturn__));
+#endif
 #define stringify(cond) #cond
 #define assert(cond) \
         do { ((cond) ? ((void) 0) : (__assert_fail("Assertion failed: \"" stringify((cond)) "\"", __FILE__, __LINE__, __func__ ))); }  while (0)
@@ -39,6 +41,19 @@ extern int etext;
 
 void *traces_out __attribute__((visibility("hidden"))) /* really FILE* */;
 int trace_fd __attribute__((visibility("hidden")));
+static int debug_level;
+static FILE **p_err_stream;
+static FILE *our_fake_stderr; // will fdopen stderr if necessary
+#define debug_printf(lvl, fmt, ...) do { \
+    if ((lvl) <= debug_level) { \
+      if (!p_err_stream || !*p_err_stream) { \
+          p_err_stream = &our_fake_stderr; \
+          *p_err_stream = fdopen(2, "w"); if (!*p_err_stream) abort(); \
+      } \
+      fprintf(*p_err_stream, fmt, ## __VA_ARGS__ ); \
+      fflush(*p_err_stream); \
+    } \
+  } while (0)
 
 /* FIXME: use a librunt API for doing this. */
 static int process_mapping_cb(struct maps_entry *ent, char *linebuf, void *arg)
@@ -68,18 +83,30 @@ void trap_all_mappings(void)
 	 * including removing/adding lines. So there's a race condition unless we eagerly
 	 * snapshot the map. Do that here. */
 	int fd = raw_open("/proc/self/maps", O_RDONLY, 0);
-	if (fd != -1)
+	if (fd >= 0)
 	{
 		/* We run during startup, so the number of distinct /proc lines should be small. */
 	#define MAX_LINES 1024
-		char *lines[MAX_LINES];
+	#define MAX_ALLBUF 81920 // 80kB
+		static char *lines[MAX_LINES];
+		static char allbuf[MAX_ALLBUF];
+		char *p_allbuf = &allbuf[0];
 		int n = 0;
 		ssize_t linesz;
 		char linebuf[8192];
 		while (-1 != (linesz = get_a_line_from_maps_fd(linebuf, sizeof linebuf, fd)))
 		{
-			lines[n] = alloca(linesz + 1);
-			if (!lines[n]) abort();
+			/* I have seen alloca blow the stack here on 32-bit, so use a static buffer.
+			 * We simply fill the buffer with all the data we get from get_a_line...(),
+			 * and point lines[i] into it at the start-of-line positions. */
+			//char *a = alloca(linesz + 1);
+			char *a = p_allbuf;
+			// if the combined offset exceeds the size of allbuf, we give up
+			if ((p_allbuf - &allbuf[0]) + linesz + 1 > sizeof allbuf) abort();
+			p_allbuf += (linesz + 1);
+			lines[n] = a;
+			assert(lines[n]);
+			// copy info allbuf from linebuf
 			strncpy(lines[n], linebuf, linesz);
 			lines[n][linesz] = '\0';
 			++n;
@@ -94,22 +121,8 @@ void trap_all_mappings(void)
 		}
 
 		raw_close(fd);
-	}
+	} else debug_printf(0, "Could not open /proc/self/maps");
 }
-
-static int debug_level;
-static FILE **p_err_stream;
-static FILE *our_fake_stderr; // will fdopen stderr if necessary
-#define debug_printf(lvl, fmt, ...) do { \
-    if ((lvl) <= debug_level) { \
-      if (!p_err_stream || !*p_err_stream) { \
-          p_err_stream = &our_fake_stderr; \
-          *p_err_stream = fdopen(2, "w"); \
-      } \
-      fprintf(*p_err_stream, fmt, ## __VA_ARGS__ ); \
-      fflush(*p_err_stream); \
-    } \
-  } while (0)
 
 /* FIXME: if we do dynamic loading, we don't currently trap those segments.
  * This should be fixable with the help of librunt. */
@@ -161,7 +174,7 @@ static void startup(void)
 	
 	char *trace_fd_str = getenv("TRACE_SYSCALLS_TRACE_FD");
 	if (trace_fd_str) trace_fd = atoi(trace_fd_str);
-	debug_printf(0, "TRACE_SYSCALLS_TRACE_FD is %s, ", trace_fd_str);
+	debug_printf(0, "TRACE_SYSCALLS_TRACE_FD is %s, ", trace_fd_str ?: "(none)");
 	if (!trace_fd_str || trace_fd == 2)
 	{
 		debug_printf(0, "dup'ing stderr, ");

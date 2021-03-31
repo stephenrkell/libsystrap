@@ -14,3 +14,6 @@
         path = contrib/libx86emulate
         url = https://github.com/stephenrkell/libx86emulate.git
 
+[submodule "contrib/donald"]
+	path = contrib/donald
+	url = https://github.com/stephenrkell/donald

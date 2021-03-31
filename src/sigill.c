@@ -6,6 +6,7 @@
 #include <sys/mman.h>
 #include <stdint.h>
 #include <stdarg.h>
+#include <stdio.h>
 #include "systrap_private.h"
 #include "do-syscall.h"
 
@@ -16,9 +17,9 @@
 __attribute__ ((noinline)) static void _handle_sigill_debug_printf(int level, const char *fmt, ...) {
 	 va_list vl;
 	 va_start(vl, fmt);
-	 if ((level) <= debug_level) {
-		  vfprintf(*p_err_stream, fmt, vl);
-		  fflush(*p_err_stream);
+	 if ((level) <= systrap_debug_level) {
+		  vfprintf(stderr, fmt, vl);
+		  fflush(stderr);
 	 }
 	 va_end(vl);
 }
@@ -33,7 +34,7 @@ void handle_sigill(int n)
 	struct ibcs_sigframe *p_frame = (struct ibcs_sigframe *) (frame_base + 1);
 
 	/* Decode the syscall using sigcontext. */
-	_handle_sigill_debug_printf(1, "Took a trap from instruction at %p", p_frame->uc.uc_mcontext.MC_REG(rip, RIP));
+	_handle_sigill_debug_printf(1, "Took a trap from instruction at %p", p_frame->uc.uc_mcontext.MC_REG_IP);
 #ifdef EXECUTABLE
 	if (p_frame->uc.uc_mcontext.MC_REG_IP == (uintptr_t) ignore_ud2_addr)
 	{
@@ -45,7 +46,7 @@ void handle_sigill(int n)
 
 #if defined(__x86_64__)
 	unsigned long syscall_num = (unsigned long) p_frame->uc.uc_mcontext.MC_REG(rax, RAX);
-#elif defined(__i386__
+#elif defined(__i386__)
 	unsigned long syscall_num = (unsigned long) p_frame->uc.uc_mcontext.MC_REG(eax, EAX);
 #else
 #error "Unrecognised architecture"
@@ -69,7 +70,7 @@ void handle_sigill(int n)
 			p_frame->uc.uc_mcontext.MC_REG(r10, R10),
 			p_frame->uc.uc_mcontext.MC_REG(r8, R8),
 			p_frame->uc.uc_mcontext.MC_REG(r9, R9)
-#elif define(__i386__)
+#elif defined(__i386__)
 			p_frame->uc.uc_mcontext.MC_REG(ebx, EBX),
 			p_frame->uc.uc_mcontext.MC_REG(ecx, ECX),
 			p_frame->uc.uc_mcontext.MC_REG(edx, EDX),

@@ -29,6 +29,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdarg.h>
+#include <stdio.h>
 #ifdef __linux__
 #include <alloca.h>
 #endif
@@ -342,9 +343,7 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 
 void handle_sigill(int n) __attribute__((visibility("hidden")));
 struct FILE;
-int debug_level __attribute__((visibility("hidden"))) = 0;
-FILE **p_err_stream __attribute__((visibility("hidden"))) = NULL;
-FILE *our_fake_stderr __attribute__((visibility("hidden"))) = NULL;
+int systrap_debug_level __attribute__((visibility("hidden"))) = 0;
 
 /* We initialize our error-reporting stuff, but don't actually 
  * set up any traps. That's left to the client. */
@@ -355,9 +354,9 @@ static void __attribute__((constructor)) startup(void)
 	char *stop_self_str = getenv("TRAP_SYSCALLS_STOP_SELF");
 	stop_self = (stop_self_str != NULL);
 	struct __asm_timespec one_second = { /* seconds */ 1, /* nanoseconds */ 0 };
-	if (debug_level_str) debug_level = atoi(debug_level_str);
+	if (debug_level_str) systrap_debug_level = atoi(debug_level_str);
 	if (sleep_for_seconds_str) sleep_for_seconds = atoi(sleep_for_seconds_str);
-	debug_printf(1, "Debug level is %s=%d.\n", debug_level_str, debug_level);
+	debug_printf(1, "Debug level is %s=%d.\n", debug_level_str, systrap_debug_level);
 	if (stop_self) {
 		self_pid = raw_getpid();
 		debug_printf(1, "TRAP_SYSCALLS_STOP_SELF is set, sending SIGSTOP to self (pid %d)\n", self_pid);
@@ -394,7 +393,14 @@ void install_sigill_handler(void)
 		#endif
 	};
 	struct __asm_sigaction oldaction;
-	int ret = raw_rt_sigaction(SIGILL, &action, &oldaction);
+	int ret =
+/* FIXME: clean this up */
+#ifdef __x86_64__
+	raw_rt_sigaction
+#else
+	raw_sigaction
+#endif
+	(SIGILL, &action, &oldaction);
 	if (ret != 0) abort();
 	return;
 }

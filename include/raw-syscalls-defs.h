@@ -34,6 +34,10 @@ void *raw_mremap(void *old_address, size_t old_size,
                     size_t new_size, int flags, void *new_address) __attribute__((noinline));
 int raw_rt_sigaction(int signum, const struct __asm_sigaction *act,
 		     struct __asm_sigaction *oldact) __attribute__((noinline));
+#ifdef __i386__
+int raw_sigaction(int signum, const struct __asm_sigaction *act,
+		     struct __asm_sigaction *oldact) __attribute__((noinline));
+#endif
 void *raw_mremap(void *old_address, size_t old_size,
     size_t new_size, int flags, void *new_address) __attribute__((noinline));
 void *raw_brk(void *addr) __attribute__((noinline));

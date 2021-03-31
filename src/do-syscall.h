@@ -22,6 +22,9 @@ extern int debug_level;
 #include "systrap_private.h"
 #include "instr.h"
 
+// make a noncommital declaration of __assert_fail
+void __assert_fail() __attribute__((noreturn));
+
 extern uintptr_t our_load_address;
 
 extern inline _Bool 
@@ -29,12 +32,10 @@ __attribute__((always_inline,gnu_inline))
 zaps_stack(struct generic_syscall *gs);
 
 /* FIX_STACK_ALIGNMENT is in raw-syscalls-impl.h, included above */
-#define PERFORM_SYSCALL	     \
-	  FIX_STACK_ALIGNMENT "   \n\
-	  mov %[op], %%"stringifx(syscallnumreg)"       \n\
-	 "stringifx(SYSCALL_INSTR)"		 \n\
-	 "UNFIX_STACK_ALIGNMENT " \n\
-	  mov %%"stringifx(syscallnumreg)", %[ret]      \n"
+#define PERFORM_SYSCALL	 \
+	  FIX_STACK_ALIGNMENT "  \n\
+	 "stringifx(SYSCALL_INSTR)		" \n\
+	 "UNFIX_STACK_ALIGNMENT" \n"
 
 void __attribute__((weak,visibility("protected")))
 __systrap_post_handling(struct generic_syscall *gsp, long int ret, _Bool do_caller_fixup);
@@ -55,135 +56,133 @@ extern inline long int
 __attribute__((always_inline,gnu_inline))
 do_syscall0(struct generic_syscall *gsp)
 {
-	long int ret;
+	long int ret_op = (long int) gsp->syscall_number;
 
 	__asm__ volatile (PERFORM_SYSCALL
-	  : [ret] "=r" (ret)
-	  : [op]  "rm" ((long int) gsp->syscall_number)
+	  : [ret] "+a" (ret_op) :
 	  : DO_SYSCALL_CLOBBER_LIST);
 
-	return ret;
+	return ret_op;
 }
 
 extern inline long int
 __attribute__((always_inline,gnu_inline))
 do_syscall1(struct generic_syscall *gsp)
 {
-	long int ret;
+	long int ret_op = (long int) gsp->syscall_number;
 
-	__asm__ volatile ("mov %[arg0], %%"stringifx(argreg0)" \n"
+	__asm__ volatile (
+			  "mov %[arg0], %%"stringifx(argreg0)" \n"
 			   PERFORM_SYSCALL
-	  : [ret]  "=r" (ret)
-	  : [op]   "rm" ((long int) gsp->syscall_number)
-	  , [arg0] "rm" ((long int) gsp->args[0])
-	  : DO_SYSCALL_CLOBBER_LIST);
+	  : [ret]  "+a" (ret_op)
+	  : [arg0] "rm" ((long int) gsp->args[0])
+	  : "%"stringifx(argreg0), DO_SYSCALL_CLOBBER_LIST);
 
-	return ret;
+	return ret_op;
 }
 
 extern inline long int 
 __attribute__((always_inline,gnu_inline))
 do_syscall2(struct generic_syscall *gsp)
 {
-	long int ret;
-	__asm__ volatile ("mov %[arg0], %%"stringifx(argreg0)" \n\
+	long int ret_op = (long int) gsp->syscall_number;
+	__asm__ volatile (
+			  "mov %[arg0], %%"stringifx(argreg0)" \n\
 			   mov %[arg1], %%"stringifx(argreg1)" \n"
 			   PERFORM_SYSCALL
-	  : [ret]  "=r" (ret)
-	  : [op]   "rm" ((long int) gsp->syscall_number)
-	  , [arg0] "rm" ((long int) gsp->args[0])
+	  : [ret]  "+a" (ret_op)
+	  : [arg0] "rm" ((long int) gsp->args[0])
 	  , [arg1] "rm" ((long int) gsp->args[1])
-	  : DO_SYSCALL_CLOBBER_LIST);
+	  : "%"stringifx(argreg0), "%"stringifx(argreg1), DO_SYSCALL_CLOBBER_LIST);
 
-	return ret;
+	return ret_op;
 }
 
 extern inline long int 
 __attribute__((always_inline,gnu_inline))
 do_syscall3(struct generic_syscall *gsp)
 {
-	long int ret;
-	__asm__ volatile ("mov %[arg0], %%"stringifx(argreg0)" \n\
+	long int ret_op = (long int) gsp->syscall_number;
+	__asm__ volatile (
+			  "mov %[arg0], %%"stringifx(argreg0)" \n\
 			   mov %[arg1], %%"stringifx(argreg1)" \n\
 			   mov %[arg2], %%"stringifx(argreg2)" \n"
 			   PERFORM_SYSCALL
-	  : [ret]  "=r" (ret)
-	  : [op]   "rm" ((long int) gsp->syscall_number)
-	  , [arg0] "rm" ((long int) gsp->args[0])
+	  : [ret]  "+a" (ret_op)
+	  : [arg0] "rm" ((long int) gsp->args[0])
 	  , [arg1] "rm" ((long int) gsp->args[1])
 	  , [arg2] "rm" ((long int) gsp->args[2])
-	  : DO_SYSCALL_CLOBBER_LIST);
+	  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%"stringifx(argreg2), DO_SYSCALL_CLOBBER_LIST);
 
-	return ret;
+	return ret_op;
 }
 
 extern inline long int
 __attribute__((always_inline,gnu_inline)) 
 do_syscall4(struct generic_syscall *gsp)
 {
-	long int ret;
-	__asm__ volatile ("mov %[arg0], %%"stringifx(argreg0)" \n\
+	long int ret_op = (long int) gsp->syscall_number;
+	__asm__ volatile (
+			  "mov %[arg0], %%"stringifx(argreg0)" \n\
 			   mov %[arg1], %%"stringifx(argreg1)" \n\
 			   mov %[arg2], %%"stringifx(argreg2)" \n\
 			   mov %[arg3], %%"stringifx(argreg3)" \n"
 			   PERFORM_SYSCALL
-	  : [ret]  "=r" (ret)
-	  : [op]   "rm" ((long int) gsp->syscall_number)
-	  , [arg0] "rm" ((long int) gsp->args[0])
+	  : [ret]  "+a" (ret_op)
+	  : [arg0] "rm" ((long int) gsp->args[0])
 	  , [arg1] "rm" ((long int) gsp->args[1])
 	  , [arg2] "rm" ((long int) gsp->args[2])
 	  , [arg3] "rm" ((long int) gsp->args[3])
-	  : DO_SYSCALL_CLOBBER_LIST);
+	  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%"stringifx(argreg2), "%"stringifx(argreg3), DO_SYSCALL_CLOBBER_LIST);
 
-	return ret;
+	return ret_op;
 }
 
 extern inline long int
 __attribute__((always_inline,gnu_inline)) 
 do_syscall5(struct generic_syscall *gsp)
 {
-	long int ret;
-	__asm__ volatile ("mov %[arg0], %%"stringifx(argreg0)" \n\
+	long int ret_op = (long int) gsp->syscall_number;
+	__asm__ volatile (
+			  "mov %[arg0], %%"stringifx(argreg0)" \n\
 			   mov %[arg1], %%"stringifx(argreg1)" \n\
 			   mov %[arg2], %%"stringifx(argreg2)" \n\
 			   mov %[arg3], %%"stringifx(argreg3)" \n\
 			   mov %[arg4], %%"stringifx(argreg4)"  \n"
 			   PERFORM_SYSCALL
-	  : [ret]  "=r" (ret)
-	  : [op]   "rm" ((long int) gsp->syscall_number)
-	  , [arg0] "rm" ((long int) gsp->args[0])
+	  : [ret]  "+a" (ret_op)
+	  : [arg0] "rm" ((long int) gsp->args[0])
 	  , [arg1] "rm" ((long int) gsp->args[1])
 	  , [arg2] "rm" ((long int) gsp->args[2])
 	  , [arg3] "rm" ((long int) gsp->args[3])
 	  , [arg4] "rm" ((long int) gsp->args[4])
-	  : DO_SYSCALL_CLOBBER_LIST);
+	  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%"stringifx(argreg2), "%"stringifx(argreg3), "%"stringifx(argreg4), DO_SYSCALL_CLOBBER_LIST);
 
-	return ret;
+	return ret_op;
 }
 
 extern inline long int
 __attribute__((always_inline,gnu_inline)) 
 do_syscall6(struct generic_syscall *gsp)
 {
-	long int ret;
-	__asm__ volatile ("mov %[arg0], %%"stringifx(argreg0)" \n\
+	long int ret_op = (long int) gsp->syscall_number;
+	__asm__ volatile (
+			   "mov %[arg0], %%"stringifx(argreg0)" \n\
 			   mov %[arg1], %%"stringifx(argreg1)" \n\
 			   mov %[arg2], %%"stringifx(argreg2)" \n\
 			   mov %[arg3], %%"stringifx(argreg3)" \n\
 			   mov %[arg4], %%"stringifx(argreg4)" \n\
 			   mov %[arg5], %%"stringifx(argreg5)" \n"
 			   PERFORM_SYSCALL
-	  : [ret]  "=r" (ret)
-	  : [op]   "rm" ((long int) gsp->syscall_number)
-	  , [arg0] "rm" ((long int) gsp->args[0])
+	  : [ret]  "+a" (ret_op)
+	  : [arg0] "rm" ((long int) gsp->args[0])
 	  , [arg1] "rm" ((long int) gsp->args[1])
 	  , [arg2] "rm" ((long int) gsp->args[2])
 	  , [arg3] "rm" ((long int) gsp->args[3])
 	  , [arg4] "rm" ((long int) gsp->args[4])
 	  , [arg5] "rm" ((long int) gsp->args[5])
-	  : DO_SYSCALL_CLOBBER_LIST);
-
-	return ret;
+	  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%"stringifx(argreg2), "%"stringifx(argreg3), "%"stringifx(argreg4), /*"%"stringifx(argreg5),*/ DO_SYSCALL_CLOBBER_LIST);
+	return ret_op;
 }
 
 
@@ -215,7 +214,7 @@ fixup_caller_for_return(long int ret, struct ibcs_sigframe *p_frame, unsigned in
 	__asm__ volatile ("mov %1, %0" : "=m"(p_frame->uc.uc_mcontext.MC_REG(syscallnumreg, SYSCALLNUMREG)) : "r"(ret) : "memory");
 
 	// adjust the saved program counter to point past the trapping instr
-	__asm__ volatile ("mov %1, %0" : "=m"(p_frame->uc.uc_mcontext.MC_REG_IP) : "r"(p_frame->uc.uc_mcontext.MC_REG(rip, RIP) + instr_len) : "memory");
+	__asm__ volatile ("mov %1, %0" : "=m"(p_frame->uc.uc_mcontext.MC_REG_IP) : "r"(p_frame->uc.uc_mcontext.MC_REG_IP + instr_len) : "memory");
 }
 
 /* This is our general function for performing or emulating a system call.

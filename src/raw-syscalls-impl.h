@@ -146,17 +146,33 @@
 /* FIXME: why the huge clobber list?
  * According to the ABI,
  * http://refspecs.linuxfoundation.org/elf/x86_64-abi-0.99.pdf
- * only %rcx, %r11 and %rax are clobbered */
+ * only %rcx, %r11 and %rax are clobbered.
+ * AHA. But the clobber list applies not only to the syscall instruction,
+ * but also to our argument-setting sequences. So we conservatively declare
+ * as clobbered all the register that are used as arguments at any width.
+ * FIXME: parameterise this by the number of arguments, maybe. */
 #define SYSCALL_CLOBBER_LIST \
 	"%rdi", "%rsi", "%rax", "%rcx", "%rdx", "%r8", "%r9", "%r10", "%r11", \
 	"%xmm0", "%xmm1", "%xmm2", "%xmm3", "%xmm4", "%xmm5", "%xmm6", "%xmm7", "%xmm8", \
 	"%xmm9", "%xmm10", "%xmm11", "%xmm12", "%xmm13", "%xmm14", "%xmm15", \
 	"cc" /*, "memory" */
+#define SAVE_SYSCALL_REGS1
+#define SAVE_SYSCALL_REGS2
+#define SAVE_SYSCALL_REGS3
+#define SAVE_SYSCALL_REGS4
+#define SAVE_SYSCALL_REGS5
+#define SAVE_SYSCALL_REGS6
+#define RESTORE_SYSCALL_REGS1
+#define RESTORE_SYSCALL_REGS2
+#define RESTORE_SYSCALL_REGS3
+#define RESTORE_SYSCALL_REGS4
+#define RESTORE_SYSCALL_REGS5
+#define RESTORE_SYSCALL_REGS6
+
 #define FIX_STACK_ALIGNMENT \
-	"movq %%rsp, %%rax\n\
-	 andq $0xf, %%rax    # now we have either 8 or 0 in rax \n\
-	 subq %%rax, %%rsp   # fix the stack pointer \n\
-	 movq %%rax, %%r12   # save the amount we fixed it up by in r12 \n\
+	"movq %%rsp, %%r12\n\
+	 andq $0xf, %%r12    # now we have either 8 or 0 in r12 \n\
+	 subq %%r12, %%rsp   # fix the stack pointer \n\
 	 "
 #define UNFIX_STACK_ALIGNMENT \
 	"addq %%r12, %%rsp\n"
@@ -192,10 +208,61 @@
  */
 #define SYSCALL_CLOBBER_LIST \
 	"cc" /*, "memory" */
+/* HACK: we can't declare all registers as clobbered, as gcc complains --
+ * not just about ebp (special) but about unsatisfiable constraints. Instead
+ * of clobbering we need to save/restore.
+ * GAH. This doesn't work either. E.g. for a 3-argument call...
+ * 
+ 
+   0xf7230861 <+1>:     mov    $0x5,%edx
+   0xf7230866 <+6>:     mov    %esp,%ebp
+   0xf7230868 <+8>:     push   %ebx
+   0xf7230869 <+9>:     push   %ecx
+   0xf723086a <+10>:    push   %edx
+   0xf723086b <+11>:    mov    0x8(%ebp),%ebx
+   0xf723086e <+14>:    mov    0xc(%ebp),%ecx
+   0xf7230871 <+17>:    mov    0x10(%ebp),%edx
+   0xf7230874 <+20>:    mov    %edx,%eax
+
+ ... this code clobbers %edx before it is used to fill %eax, because
+ the compiler thinks it *isn't* clobbered.
+ COULD try to hack around this by saying "m" instead of "rm", i.e.
+ "fill arguments from memory, not registers"
+ but will we run into further problems from the compiler thinking
+ that $edx (say) is available when it isn't?
+ 
+ The bottom line seems to be that if we want to make a register
+ unavailable during the snippet,
+ even if we restore its value (so it is not "changed during the snippet" -- or is it?)
+ we have to list it as clobbered.
+ That means for a 6-argument syscall we run into our old problem again.
+ Probably it's harmless there because the compiler won't use %ebp.
+ But maybe for a 5-argument syscall even, we will run out of registers.
+ 
+ GCC has a concept of "early clobber" -- useful?
+ https://gcc.gnu.org/onlinedocs/gcc/Extended-Asm.html#Clobbers-and-Scratch-Registers
+ 
+ GCC ought not to have assigned %edx, even though we preserve it,
+ because it's not OK to use it in the middle.
+ HMM. Doing the push/pop ourselves seems wrong.
+ Surely the point is that gcc knows how to do that?
+ If it needs to save them (because the asm snippet will clobber them),
+ it should do it.
+ So, tentatively, remove the push/pop and find another way to
+ solve the constraint satisfaction problem, maybe by exploiting the in/outness of %eax
+ We may include the push/pop for ebp as a special case.
+ 
+ FIXME: use the constraints! e.g.
+ 
+#define argconstraint0 "d"
+ */
+
 /* We need a spare callee-save register for the fixup amount.
  * But we don't have one! We will need everything for the call.
  * Instead we push it four times to preserve 16-byte alignment. */
 #define FIX_STACK_ALIGNMENT \
+  ""
+#if 0
 	"mov %%esp, %%eax\n\
 	 and $0xf, %%eax    # now we have either 8 or 0 in eax \n\
 	 sub %%eax, %%esp   # fix the stack pointer \n\
@@ -204,17 +271,21 @@
 	 push %%eax \n\
 	 push %%eax \n\
 	 "
+#endif
 /* To undo our push-hack, we pop the replicated value four times.
  * This clobbers ebx. */
 #define UNFIX_STACK_ALIGNMENT \
+
+#if 0
 	"pop %%ebx\n\
 	 pop %%ebx\n\
 	 pop %%ebx\n\
 	 pop %%ebx\n\
 	 add %%ebx, %%esp\n\
 	"
+#endif
 #define DO_SYSCALL_CLOBBER_LIST \
-   "ebx", SYSCALL_CLOBBER_LIST
+   /*"ebx",*/  SYSCALL_CLOBBER_LIST
 
 #define SYSCALL_INSTR int $0x80
 
@@ -266,8 +337,10 @@ struct ibcs_sigframe
 	struct __asm_siginfo info;
 };
 
+#if 0
 void __assert_fail(const char *assertion, const char *file,
                    unsigned int line, const char *function) __attribute__((noreturn));
+#endif
 // FIXME: utility code: prototypes belong here?
 unsigned long read_hex_num(const char **p_c, const char *end);
 
