@@ -60,7 +60,7 @@ do_syscall0(struct generic_syscall *gsp)
 
 	__asm__ volatile (PERFORM_SYSCALL
 	  : [ret] "+a" (ret_op) :
-	  : DO_SYSCALL_CLOBBER_LIST);
+	  : DO_SYSCALL_CLOBBER_LIST(0));
 
 	return ret_op;
 }
@@ -76,7 +76,7 @@ do_syscall1(struct generic_syscall *gsp)
 			   PERFORM_SYSCALL
 	  : [ret]  "+a" (ret_op)
 	  : [arg0] "rm" ((long int) gsp->args[0])
-	  : "%"stringifx(argreg0), DO_SYSCALL_CLOBBER_LIST);
+	  : "%"stringifx(argreg0), DO_SYSCALL_CLOBBER_LIST(1));
 
 	return ret_op;
 }
@@ -93,7 +93,7 @@ do_syscall2(struct generic_syscall *gsp)
 	  : [ret]  "+a" (ret_op)
 	  : [arg0] "rm" ((long int) gsp->args[0])
 	  , [arg1] "rm" ((long int) gsp->args[1])
-	  : "%"stringifx(argreg0), "%"stringifx(argreg1), DO_SYSCALL_CLOBBER_LIST);
+	  : "%"stringifx(argreg0), "%"stringifx(argreg1), DO_SYSCALL_CLOBBER_LIST(2));
 
 	return ret_op;
 }
@@ -112,7 +112,8 @@ do_syscall3(struct generic_syscall *gsp)
 	  : [arg0] "rm" ((long int) gsp->args[0])
 	  , [arg1] "rm" ((long int) gsp->args[1])
 	  , [arg2] "rm" ((long int) gsp->args[2])
-	  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%"stringifx(argreg2), DO_SYSCALL_CLOBBER_LIST);
+	  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%"stringifx(argreg2),
+	    DO_SYSCALL_CLOBBER_LIST(3));
 
 	return ret_op;
 }
@@ -133,7 +134,8 @@ do_syscall4(struct generic_syscall *gsp)
 	  , [arg1] "rm" ((long int) gsp->args[1])
 	  , [arg2] "rm" ((long int) gsp->args[2])
 	  , [arg3] "rm" ((long int) gsp->args[3])
-	  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%"stringifx(argreg2), "%"stringifx(argreg3), DO_SYSCALL_CLOBBER_LIST);
+	  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%"stringifx(argreg2), "%"stringifx(argreg3),
+	    DO_SYSCALL_CLOBBER_LIST(4));
 
 	return ret_op;
 }
@@ -156,7 +158,8 @@ do_syscall5(struct generic_syscall *gsp)
 	  , [arg2] "rm" ((long int) gsp->args[2])
 	  , [arg3] "rm" ((long int) gsp->args[3])
 	  , [arg4] "rm" ((long int) gsp->args[4])
-	  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%"stringifx(argreg2), "%"stringifx(argreg3), "%"stringifx(argreg4), DO_SYSCALL_CLOBBER_LIST);
+	  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%"stringifx(argreg2), 
+	    "%"stringifx(argreg3), "%"stringifx(argreg4), DO_SYSCALL_CLOBBER_LIST(5));
 
 	return ret_op;
 }
@@ -181,7 +184,9 @@ do_syscall6(struct generic_syscall *gsp)
 	  , [arg3] "rm" ((long int) gsp->args[3])
 	  , [arg4] "rm" ((long int) gsp->args[4])
 	  , [arg5] "rm" ((long int) gsp->args[5])
-	  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%"stringifx(argreg2), "%"stringifx(argreg3), "%"stringifx(argreg4), /*"%"stringifx(argreg5),*/ DO_SYSCALL_CLOBBER_LIST);
+	  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%"stringifx(argreg2),
+	    "%"stringifx(argreg3),
+	    "%"stringifx(argreg4), /*"%"stringifx(argreg5),*/ DO_SYSCALL_CLOBBER_LIST(6));
 	return ret_op;
 }
 

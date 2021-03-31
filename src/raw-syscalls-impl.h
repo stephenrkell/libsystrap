@@ -136,38 +136,26 @@
 #define argreg3 r10
 #define argreg4 r8
 #define argreg5 r9
-/* Our callee-save registers are
- *	 rbp, rbx, r12, r13, r14, r15
- * but all others need to be in the clobber list.
- *	 rdi, rsi, rax, rcx, rdx, r8, r9, r10, r11
- *	 xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8, xmm9, xmm10, xmm11, xmm12, xmm13, xmm14, xmm15
- *	 condition codes, memory
- */
 /* FIXME: why the huge clobber list?
  * According to the ABI,
  * http://refspecs.linuxfoundation.org/elf/x86_64-abi-0.99.pdf
  * only %rcx, %r11 and %rax are clobbered.
- * AHA. But the clobber list applies not only to the syscall instruction,
- * but also to our argument-setting sequences. So we conservatively declare
- * as clobbered all the register that are used as arguments at any width.
- * FIXME: parameterise this by the number of arguments, maybe. */
-#define SYSCALL_CLOBBER_LIST \
-	"%rdi", "%rsi", "%rax", "%rcx", "%rdx", "%r8", "%r9", "%r10", "%r11", \
-	"%xmm0", "%xmm1", "%xmm2", "%xmm3", "%xmm4", "%xmm5", "%xmm6", "%xmm7", "%xmm8", \
-	"%xmm9", "%xmm10", "%xmm11", "%xmm12", "%xmm13", "%xmm14", "%xmm15", \
-	"cc" /*, "memory" */
-#define SAVE_SYSCALL_REGS1
-#define SAVE_SYSCALL_REGS2
-#define SAVE_SYSCALL_REGS3
-#define SAVE_SYSCALL_REGS4
-#define SAVE_SYSCALL_REGS5
-#define SAVE_SYSCALL_REGS6
-#define RESTORE_SYSCALL_REGS1
-#define RESTORE_SYSCALL_REGS2
-#define RESTORE_SYSCALL_REGS3
-#define RESTORE_SYSCALL_REGS4
-#define RESTORE_SYSCALL_REGS5
-#define RESTORE_SYSCALL_REGS6
+ * But the clobber list applies not only to the syscall instruction,
+ * but also to our argument-setting sequences.
+ * We use the "+a" constraint for rax, so it is not listed. */
+#define ANY_SYSCALL_CLOBBER_LIST "%rcx", "%r11"
+#define SYSCALL_CLOBBERS_0
+#define SYSCALL_CLOBBERS_1 SYSCALL_CLOBBERS_0 ,  "%rdi"
+#define SYSCALL_CLOBBERS_2 SYSCALL_CLOBBERS_1 ,  "%rsi"
+#define SYSCALL_CLOBBERS_3 SYSCALL_CLOBBERS_2 ,  "%rdx"
+#define SYSCALL_CLOBBERS_4 SYSCALL_CLOBBERS_3 ,  "%r10"
+#define SYSCALL_CLOBBERS_5 SYSCALL_CLOBBERS_4 ,  "%r8"
+#define SYSCALL_CLOBBERS_6 SYSCALL_CLOBBERS_5 ,  "%r9"
+#define SYSCALL_CLOBBERS(nargs) SYSCALL_CLOBBERS_ ## nargs
+#define SYSCALL_CLOBBER_LIST(nargs) \
+	ANY_SYSCALL_CLOBBER_LIST \
+	SYSCALL_CLOBBERS(nargs) \
+	, "cc" /*, "memory" */
 
 #define FIX_STACK_ALIGNMENT \
 	"movq %%rsp, %%r12\n\
@@ -177,8 +165,8 @@
 #define UNFIX_STACK_ALIGNMENT \
 	"addq %%r12, %%rsp\n"
 
-#define DO_SYSCALL_CLOBBER_LIST \
-   "r12", SYSCALL_CLOBBER_LIST
+#define DO_SYSCALL_CLOBBER_LIST(nargs) \
+   "%r12", SYSCALL_CLOBBER_LIST(nargs)
 
 #define SYSCALL_INSTR syscall
 
@@ -206,7 +194,7 @@
  * but all others need to be in the clobber list.
  *	 condition codes, memory
  */
-#define SYSCALL_CLOBBER_LIST \
+#define SYSCALL_CLOBBER_LIST(nargs) \
 	"cc" /*, "memory" */
 /* HACK: we can't declare all registers as clobbered, as gcc complains --
  * not just about ebp (special) but about unsatisfiable constraints. Instead
@@ -284,8 +272,8 @@
 	 add %%ebx, %%esp\n\
 	"
 #endif
-#define DO_SYSCALL_CLOBBER_LIST \
-   /*"ebx",*/  SYSCALL_CLOBBER_LIST
+#define DO_SYSCALL_CLOBBER_LIST(nargs) \
+   /*"ebx",*/  SYSCALL_CLOBBER_LIST(nargs)
 
 #define SYSCALL_INSTR int $0x80
 
@@ -315,7 +303,7 @@
 			   mov %1, %%"stringifx(syscallnumreg)"      # \n\
 			   "stringifx(SYSCALL_INSTR)"	     # do the syscall \n\
 			  "UNFIX_STACK_ALIGNMENT " \n" \
-	  : /* no output*/ : "rm"(retcode), "rm"(op) : DO_SYSCALL_CLOBBER_LIST);
+	  : /* no output*/ : "rm"(retcode), "rm"(op) : DO_SYSCALL_CLOBBER_LIST(1));
 
 #define DO_SIGRETURN_SYSCALL(num /* SYS_rt_sigreturn */) \
 	long unused_val = 0; \
@@ -325,7 +313,7 @@
 			   mov %1, %%"stringifx(syscallnumreg)"      # \n\
 			   "stringifx(SYSCALL_INSTR)"	     # do the syscall \n\
 			  "UNFIX_STACK_ALIGNMENT " \n" \
-	  : /* no output*/ : "rm"(unused_val), "rm"(op) : DO_SYSCALL_CLOBBER_LIST);
+	  : /* no output*/ : "rm"(unused_val), "rm"(op) : DO_SYSCALL_CLOBBER_LIST(1));
 
 /* In kernel-speak this is a "struct sigframe" / "struct rt_sigframe" --
  * sadly no user-level header defines it. But it seems to be vaguely standard
