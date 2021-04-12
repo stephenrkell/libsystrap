@@ -24,6 +24,9 @@ __attribute__ ((noinline)) static void _handle_sigill_debug_printf(int level, co
 	 va_end(vl);
 }
 
+void *saved_sysinfo __attribute__((visibility("hidden")));
+void *real_sysinfo __attribute__((visibility("hidden")));
+
 /* We may or may not have syscall names linked in.
  * This is just to avoid a dependency on our syscall interface spec.  */
 extern const char *syscall_names[SYSCALL_MAX + 1] __attribute__((weak));
@@ -32,6 +35,15 @@ void handle_sigill(int n)
 {
 	unsigned long *frame_base = __builtin_frame_address(0);
 	struct ibcs_sigframe *p_frame = (struct ibcs_sigframe *) (frame_base + 1);
+#if defined(__i386__)
+	unsigned char *tls;
+	__asm__("mov %%gs:0x0,%0" : "=r"(tls));
+	/* If we haven't set real_sysinfo by now, assume we didn't create a fake one.
+	 * We snarf the real one, as it will be unconditionally restored on return. */
+	if (!real_sysinfo) real_sysinfo = *(void**)(tls+16);
+	saved_sysinfo = *(void**)(tls+16);
+	*(void**)(tls+16) = real_sysinfo;
+#endif
 
 	/* Decode the syscall using sigcontext. */
 	_handle_sigill_debug_printf(1, "Took a trap from instruction at %p", p_frame->uc.uc_mcontext.MC_REG_IP);

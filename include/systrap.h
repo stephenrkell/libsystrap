@@ -20,6 +20,11 @@ void __libsystrap_force_init(void) __attribute__((visibility("hidden")));
 
 struct ibcs_sigframe; /* opaque */
 
+/* If we give the application a fake vDSO / sysinfo,
+ * we have to save/restore the original. */
+extern void *saved_sysinfo;
+extern void *real_sysinfo;
+
 struct generic_syscall {
 	struct ibcs_sigframe *saved_context;
 	int syscall_number;

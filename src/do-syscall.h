@@ -175,8 +175,15 @@ do_syscall6(struct generic_syscall *gsp)
 			   mov %[arg2], %%"stringifx(argreg2)" \n\
 			   mov %[arg3], %%"stringifx(argreg3)" \n\
 			   mov %[arg4], %%"stringifx(argreg4)" \n\
-			   mov %[arg5], %%"stringifx(argreg5)" \n"
+			 "
+#ifdef __i386__
+			  "push %%ebp \n"
+#endif
+			  "mov %[arg5], %%"stringifx(argreg5)" \n"
 			   PERFORM_SYSCALL
+#ifdef __i386__
+			  "pop %%ebp \n"
+#endif
 	  : [ret]  "+a" (ret_op)
 	  : [arg0] "rm" ((long int) gsp->args[0])
 	  , [arg1] "rm" ((long int) gsp->args[1])

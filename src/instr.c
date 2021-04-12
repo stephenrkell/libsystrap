@@ -72,13 +72,13 @@ static int instr_len_udis86(unsigned char *ins, unsigned char *end)
 }
 #endif
 #ifdef USE_XED
+_Bool xed_done_init __attribute__((visibility("hidden"))) = 0;
 static int instr_len_xed(unsigned char *ins, unsigned char *end)
 {
-    static _Bool xed_init = 0;
-    if (!xed_init)
+    if (!xed_done_init)
     {
         xed_tables_init();
-        xed_init = 1;
+        xed_done_init = 1;
     }
 
     xed_decoded_inst_t xedd;
@@ -88,7 +88,7 @@ static int instr_len_xed(unsigned char *ins, unsigned char *end)
 			XED_MACHINE_MODE_LONG_64,
 			XED_ADDRESS_WIDTH_64b
 #elif defined(__i386__)
-			XED_MACHINE_MODE_LONG_COMPAT_32, /* or do we want XED_MACHINE_MODE_LEGACY_32? */
+			XED_MACHINE_MODE_LEGACY_32,
 			XED_ADDRESS_WIDTH_32b
 #else
 #error "Unrecognised x86 architecture."

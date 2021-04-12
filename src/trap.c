@@ -385,11 +385,21 @@ void install_sigill_handler(void)
 #ifndef SA_RESTORER
 #error "NO SA_RESTORER set; are you including the asm signal.h?"
 #endif
+
+/* Which restorer routine do we need? */
+#if defined(__i386__)
+#define sigill_restorer __restore
+#elif defined(__x86_64__)
+#define sigill_restorer __restore_rt
+#else
+#error "Unsupported architecture."
+#endif
+
 	struct __asm_sigaction action = {
 		.sa_handler = &handle_sigill,
 		.sa_flags = SA_RESTORER | SA_NODEFER
 		#ifndef __FreeBSD__
-		, .sa_restorer = restore_rt
+		, .sa_restorer = sigill_restorer
 		#endif
 	};
 	struct __asm_sigaction oldaction;

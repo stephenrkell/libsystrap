@@ -29,6 +29,7 @@ __assert_fail (const char *assertion, const char *file,
 #include "systrap.h"
 #include "syscall-names.h"
 #include "raw-syscalls-defs.h"
+#include "trace-syscalls.h"
 
 int raw_open(const char *pathname, int flags, int mode);
 int raw_close(int fd);
@@ -124,49 +125,8 @@ void trap_all_mappings(void)
 	} else debug_printf(0, "Could not open /proc/self/maps");
 }
 
-/* FIXME: if we do dynamic loading, we don't currently trap those segments.
- * This should be fixable with the help of librunt. */
-void trap_all_sections_startup(void)
+void init_fds(void)
 {
-	/* NOTE: this is racy, but we should be running before
-	 * other threads are started. */
-	for (struct link_map *lm = _r_debug.r_map; lm; lm = lm->l_next)
-	{
-		struct file_metadata *fm = __runt_files_metadata_by_addr(lm->l_ld);
-		if (!fm)
-		{
-			debug_printf(0, "bad file: %s\n", lm->l_name);
-		}
-		for (ElfW(Shdr) *shdr = fm->shdrs; shdr != fm->shdrs + fm->ehdr->e_shnum; ++shdr)
-		{
-			if (shdr->sh_flags & SHF_EXECINSTR)
-			{
-				trap_one_instruction_range(
-					(void*)(lm->l_addr + shdr->sh_addr),
-					(void*)(lm->l_addr + shdr->sh_addr + shdr->sh_size),
-					(shdr->sh_flags & SHF_WRITE),
-					1
-				);
-			}
-		}
-	}
-}
-
-void __init_tls(size_t *auxv) {} /* HACK borrowed from musl's own dynlink.c */
-void __init_libc(char **envp, char *pn); // musl-internal API
-
-static void startup(void) __attribute__((constructor(101)));
-static void startup(void)
-{
-	/* We use musl as our libc. That means there are (up to) two libc instances
-	 * in the process! Before we do any libc calls, make sure musl's state
-	 * is initialized. We use librunt to get the env/arg values. */
-	const char **p_argv_0 = NULL, **p_argv_end = NULL;
-	const char **p_envv_0 = NULL, **p_envv_end = NULL;
-	__runt_auxv_init();
-	__runt_auxv_get_argv(&p_argv_0, &p_argv_end);
-	__runt_auxv_get_env(&p_envv_0, &p_envv_end);
-	__init_libc((char**) p_envv_0, (char*) *p_argv_0);
 	if (getenv("TRACE_SYSCALLS_DELAY_STARTUP"))
 	{
 		sleep(atoi(getenv("TRACE_SYSCALLS_DELAY_STARTUP")));
@@ -199,10 +159,27 @@ static void startup(void)
 		}
 	}
 	else debug_printf(0, "not outputting traces.\n");
-	
+}
+
+void __init_libc(char **envp, char *pn); // musl-internal API
+
+static void startup(void) __attribute__((constructor(101)));
+static void startup(void)
+{
+	/* We use musl as our libc. That means there are (up to) two libc instances
+	 * in the process! Before we do any libc calls, make sure musl's state
+	 * is initialized. We use librunt to get the env/arg values. */
+	const char **p_argv_0 = NULL, **p_argv_end = NULL;
+	const char **p_envv_0 = NULL, **p_envv_end = NULL;
+	__runt_auxv_init();
+	__runt_auxv_get_argv(&p_argv_0, &p_argv_end);
+	__runt_auxv_get_env(&p_envv_0, &p_envv_end);
+	__init_libc((char**) p_envv_0, (char*) *p_argv_0);
+	init_fds();
 	trap_all_mappings();
 	install_sigill_handler();
 }
+
 
 void print_pre_syscall(void *stream, struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, void *ret)
 			__attribute__((visibility("protected")));
@@ -212,8 +189,8 @@ void print_pre_syscall(void *stream, struct generic_syscall *gsp, void *calling_
 	fprintf(stream, "== %d == > %p (%s+0x%x) %s(%p, %p, %p, %p, %p, %p)\n",
 			 getpid(), 
 			 calling_addr,
-			 calling_object->l_name,
-			 (char*) calling_addr - (char*) calling_object->l_addr,
+			 calling_object ? calling_object->l_name : "(unknown)",
+			 calling_object ? (char*) calling_addr - (char*) calling_object->l_addr : (ptrdiff_t) 0,
 			 syscall_names[gsp->syscall_number]?:namebuf,
 			 gsp->args[0],
 			 gsp->args[1],
@@ -231,8 +208,8 @@ void print_post_syscall(void *stream, struct generic_syscall *gsp, void *calling
 	fprintf(stream, "== %d == < %p (%s+0x%x) %s(%p, %p, %p, %p, %p, %p) = %p\n",
 		getpid(),
 		calling_addr,
-		calling_object->l_name,
-		(char*) calling_addr - (char*) calling_object->l_addr,
+		calling_object ? calling_object->l_name : "(unknown)",
+		calling_object ? (char*) calling_addr - (char*) calling_object->l_addr : (ptrdiff_t) 0,
 		syscall_names[gsp->syscall_number],
 			gsp->args[0],
 			gsp->args[1],

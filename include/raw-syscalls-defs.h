@@ -5,7 +5,10 @@ struct __asm_sigaction;
 struct user_desc;
 struct __asm_timespec;
 struct stat;
-extern void restore_rt(void) __asm__("__restore_rt"); /* in restorer.c */
+#ifdef __i386__
+extern void __restore(void); /* in restorer.c */
+#endif
+extern void __restore_rt(void); /* in restorer.c */
 
 void raw_exit(int status) __attribute__((noreturn));
 int raw_open(const char *pathname, int flags, int mode) __attribute__((noinline));

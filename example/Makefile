@@ -40,6 +40,7 @@ include $(CONFIG)
 
 CFLAGS += $(LIBC_CFLAGS)
 CFLAGS += -DSYSTRAP_DEFINE_FILE
+CFLAGS += -I$(XED_DIR)/include
 
 ifeq ($(LIBRUNT_DIR),)
 $(error Please install the librunt source tree and set LIBRUNT_DIR to point to it)
@@ -67,11 +68,13 @@ vpath %.c $(srcroot)/contrib
 
 # for donald things
 vpath %.c $(DONALD)/src
+vpath %.h $(DONALD)/src
+CFLAGS += -I$(DONALD)/src
 
 C_SRC := $(wildcard *.c)
 C_DEPS := $(patsubst %.c,.%.d,$(C_SRC))
 DEPS := $(C_DEPS)
-OBJS := $(patsubst %.c,%.o,$(C_SRC))
+LOCAL_OBJS := $(filter-out pre-entry.o,$(filter-out write-footprints.o,$(patsubst %.c,%.o,$(C_SRC))))
 
 $(DEPS): .%.d: %.c
 	$(CC) -MG -MM $(CFLAGS) $+ > "$@" || rm -f "$@"
@@ -115,45 +118,68 @@ trace-syscalls.so: LDLIBS += \
 	$(LIBC_A) -lunwind-$(UNWIND_MACHINE) -lunwind -lpthread -lgcc
 
 # we used to insist -Wl,--hash-style=sysv here, but relf.h now groks GNU-style
+trace-syscalls.so trace-syscalls-ld.so: LDFLAGS += \
+-fno-lto -nostdlib -Wl,--no-as-needed
 trace-syscalls.so: LDFLAGS += \
--fno-lto -nostdlib -Wl,--no-as-needed \
--Wl,--defsym,__private_strdup=strdup -Wl,--defsym,__private_malloc=malloc \
+-Wl,--defsym,__private_malloc=malloc \
 -Wl,--defsym,__private_free=free \
 -Wl,--defsym,__wrap___runt_files_notify_load=__runt_files_notify_load \
--Wl,--defsym,__wrap___runt_files_metadata_by_addr=__runt_files_metadata_by_addr
+-Wl,--defsym,__wrap___runt_files_metadata_by_addr=__runt_files_metadata_by_addr \
+-Wl,--defsym,__private_strdup=strdup
 # hmm -- is this necessary now? FIXME: CHECK
 trace-syscalls.so: LDFLAGS += \
 -Wl,--defsym,stat=raw_stat
-# for debugging, output a map file
-trace-syscalls.so: LDFLAGS += \
-  -Wl,-Map,trace-syscalls.map
 # don't use lazy binding -- it's bad if we've removed exec permission
-trace-syscalls.so: LDFLAGS += \
-	-Wl,-z,now -fno-lto -Wl,--exclude-libs=ALL
-# we define our own, simpler __init_tp
-trace-syscalls.so: LDFLAGS += -Wl,--wrap,__init_tp
-trace-syscalls-ld.so: LDFLAGS += -Wl,--wrap,__init_tp
+trace-syscalls.so trace-syscalls-ld.so: LDFLAGS += \
+	-Wl,-z,now
+# generate a map file, for debugging
+trace-syscalls.so trace-syscalls-ld.so: LDFLAGS += -Wl,-Map,$@.map
+# don't re-export symbols from any archives we link in
+trace-syscalls.so trace-syscalls-ld.so: LDFLAGS += \
+      -Wl,--exclude-libs=ALL
+# we define our own, simpler __init_tp -- DOESN'T WORK but we can use musl's
+trace-syscalls.so trace-syscalls-ld.so: LDFLAGS += -Wl,--wrap,__init_tp
+# we insert our startup logic by wrapping enter()
+trace-syscalls-ld.so: LDFLAGS += -Wl,--wrap,enter -Wl,--wrap,load_one_phdr
+trace-syscalls-ld.so: LDLIBS += -Bstatic \
+  $(srcroot)/src/libsystrap.a \
+  $(LIBRUNT_DIR)/lib/librunt_preload.a \
+  $(LIBC_A)
 
 trace-syscalls.so: trap-syscalls.o syscall-names.o dlmalloc.a
 
 trace-syscalls.so: $(srcroot)/lib/libsystrap.a
-	$(CC) -shared -Bstatic -static-libgcc \
+	$(CC) -shared -static-libgcc \
 		-fuse-ld=gold \
-		-Wl,-h,$@ \
+		-Wl,-soname=$@ \
 		-o "$@" $(filter-out %.a,$+) \
 		$(LDFLAGS) $(LDLIBS)
 
-OBJS := premain.o main.o entry.o load.o
+LDSO_OBJS := premain.o main.o entry.o load.o pre-entry.o
+# ask for a spare .dynamic slot
+trace-syscalls-ld.so: LDFLAGS += -Wl,--spare-dynamic-tags=5
 
-$(OBJS): CFLAGS += -DDONALD_NAME=\"trace-syscalls-ld\" \
-  -DCHAIN_LOADER
+$(LDSO_OBJS): CFLAGS += -DDONALD_NAME=\"trace-syscalls-ld\" \
+  -DCHAIN_LOADER \
+  -DCHAIN_LOADER_COVER_TRACKS_DECLS='$(shell cat chain-decls.h)' \
+  -DCHAIN_LOADER_COVER_TRACKS='frob_dynamic(base_addr, inferior_dynamic_vaddr, phdrs, ehdr.e_phnum); \
+    set_inferior_metadata(&ehdr, shdrs, phdrs, base_addr); \
+    create_fake_vdso(p_auxv); '
+
 # FIXME: localize all global symbols except maybe _start?
-trace-syscalls-ld.so: trace-syscalls-ld.lds $(OBJS)
+trace-syscalls-ld.so: trace-syscalls-ld.lds $(LDSO_OBJS) $(LOCAL_OBJS) dynamic-list
 	$(CC) $(CFLAGS) -fuse-ld=bfd \
-            -Bsymbolic -nostdlib -nostartfiles -shared -o "$@" \
-            $(filter-out %.lds,$+) \
-            -Wl,-Bstatic $(srcroot)/src/libsystrap.a $(LIBC_A) -Wl,-Bsymbolic \
-            -T $(filter %.lds,$+) -Wl,-soname=ld-linux.so.2 
+            -Bsymbolic -nostdlib -nostartfiles -static-libgcc -shared -o "$@" \
+            $(filter-out dynamic-list,$(filter-out %.lds,$+)) \
+            $(LDFLAGS) $(LDLIBS) -lgcc -Wl,-Bsymbolic \
+            -T $(filter %.lds,$+) -Wl,-soname=ld-linux.so.2 \
+            -Wl,--dynamic-list,dynamic-list
+
+# There is no way to make _DYNAMIC a dynamic symbol.
+# A bit of a HACK, but we look for _init and _fini to find our own load address
+# (in find_r_debug()), so try to export them.
+dynamic-list:
+	printf '{ etext; _init; _fini; };\n' >$@ || (rm -f $@; false)
 
 trace-syscalls-ld.lds: $(shell which ld) $(THIS_MAKEFILE)
 	USE_LD=ld.bfd $(CC) -fuse-ld=bfd -nostdlib -nostartfiles -shared \

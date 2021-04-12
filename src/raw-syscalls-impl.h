@@ -321,8 +321,17 @@
 struct ibcs_sigframe
 {
 	char *pretcode;
+#ifdef __i386__
+	int sig; // on x86 sigill is not RT, so we get a non-rt sigframe
+#endif
+#ifdef __i386__
+	struct {
+		struct sigcontext uc_mcontext;
+	} uc;
+#else
 	struct __asm_ucontext uc;
-	struct __asm_siginfo info;
+#endif
+	struct __asm_siginfo info; // FIXME: this is wrong on i386
 };
 
 #if 0
