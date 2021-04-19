@@ -152,8 +152,6 @@ RESTORE (restore_rt, __NR_rt_sigreturn)
 
 #elif defined(__i386__)
 
-extern void *saved_sysinfo;
-
 #ifndef __NR_rt_sigreturn
 #define __NR_rt_sigreturn 173
 #endif
@@ -172,11 +170,10 @@ extern void *saved_sysinfo;
 #define RESTORE2(name, syscall) \
 __asm__                                         \
   (                                             \
+   ".globl __" #name "\n"                       \
    ".text\n"                                    \
    "    .align 16\n"                            \
    "__" #name ":\n"                             \
-   "    movl saved_sysinfo, %eax\n"             \
-   "    movl %eax, %gs:0x10 \n"                 \
    "    movl $" #syscall ", %eax\n"             \
    "    int  $0x80"                             \
    );
@@ -189,12 +186,12 @@ RESTORE (restore_rt, __NR_rt_sigreturn)
 #define RESTORE2(name, syscall) \
 __asm__                                         \
   (                                             \
+   ".globl __" #name "\n"                       \
    ".text\n"                                    \
    "    .align 8\n"                             \
    "__" #name ":\n"                             \
-   "    movl saved_sysinfo, %eax\n"             \
-   "    movl %eax, %gs:0x10 \n"                 \
    "    popl %eax\n"                            \
+   "    movl $" #syscall ", %eax\n"             \
    "    int  $0x80"                             \
    );
 

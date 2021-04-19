@@ -27,9 +27,22 @@ void __assert_fail() __attribute__((noreturn));
 
 extern uintptr_t our_load_address;
 
-extern inline _Bool 
+/* HACK: sysdep */
+extern inline _Bool
 __attribute__((always_inline,gnu_inline))
-zaps_stack(struct generic_syscall *gs);
+zaps_stack(struct generic_syscall *gsp, void **p_new_sp)
+{
+#ifdef __FreeBSD__
+	return 0;
+#else
+	if (gsp->syscall_number == __NR_clone && gsp->args[1] /* newstack */ != 0)
+	{
+		*p_new_sp = (void*) gsp->args[1];
+		return 1;
+	}
+	return 0;
+#endif
+}
 
 /* FIX_STACK_ALIGNMENT is in raw-syscalls-impl.h, included above */
 #define PERFORM_SYSCALL	 \
@@ -141,7 +154,7 @@ do_syscall4(struct generic_syscall *gsp)
 }
 
 extern inline long int
-__attribute__((always_inline,gnu_inline)) 
+__attribute__((always_inline,gnu_inline))
 do_syscall5(struct generic_syscall *gsp)
 {
 	long int ret_op = (long int) gsp->syscall_number;
@@ -198,35 +211,222 @@ do_syscall6(struct generic_syscall *gsp)
 }
 
 
-/* These must be inline and noreturn because we can't rely on the on-stack return
- * address being there after the syscall. In particular, clone() will leave us with
- * a zero-filled stack. So everything we need to resume the caller must be in registers.
- * Note that we can use stack locals. But we can't rely on stack locals *before* the 
- * syscall still being there afterwards. */
+/* At least clone(), and perhaps other system calls, will zap the stack.
+ * This is a problem for us, because of our long return path.
+ * Our normal return path is
+ * - we return to handle_sigill()
+ * - its on-stack return address is aliased by our ibcs_sigframe's pretcode
+ * - this points to __restore / __restore_rt
+ * - that does a sigreturn with the on-stack sigcontext, restoring the caller's registers.
+ *
+ * The general approach is to pre-copy the stack contents into the new stack,
+ * immediately before we do the syscall. The stack contents includes the
+ * generic_syscall struct, to which we have a pointer 'gsp'.
+ * Immediately after the syscall, if the stack was zapped,
+ * we swizzle the gsp to the one we copied onto the new stack.
+ * All this is done in inline assembly.
+ *
+ * We normally also have to fix up the caller's
+ * - eax/rax, with the return value
+ * - eip/rip, with the faulting instr + N bytes
+ * but in this case we *also* have to fix up the caller's
+ * - esp/rsp, with the equivalent offset on the new stack.
+ *
+ * Complication 1: when copying the stack, we also have to fix up stack-internal
+ * pointers so that they point into the new stack.
+ */
 extern inline void
 do_syscall_and_resume(struct generic_syscall *sys)
 __attribute__((always_inline,gnu_inline));
 
-extern inline long int 
+extern inline long int
 do_real_syscall(struct generic_syscall *sys)
 __attribute__((always_inline,gnu_inline));
 
 extern inline void
 __attribute__((always_inline,gnu_inline))
-fixup_caller_for_return(long int ret, struct ibcs_sigframe *p_frame, unsigned instr_len)
+fixup_sigframe_for_return(struct ibcs_sigframe *p_frame, long int ret, unsigned instr_len, void *maybe_new_sp)
 {
 	/* Copy the return value of the emulated syscall into the trapping context, and
-	 * resume from *after* the faulting instruction. 
-	 * 
-	 * Writing through p_frame is undefined behaviour in C, or at least, gcc optimises 
+	 * resume from *after* the faulting instruction.
+	 *
+	 * Writing through p_frame is undefined behaviour in C, or at least, gcc optimises
 	 * it away for me. So do it in volatile assembly. */
 
 	// set the return value
 	// HACK: it's in the same place as the syscall number
 	__asm__ volatile ("mov %1, %0" : "=m"(p_frame->uc.uc_mcontext.MC_REG(syscallnumreg, SYSCALLNUMREG)) : "r"(ret) : "memory");
-
 	// adjust the saved program counter to point past the trapping instr
 	__asm__ volatile ("mov %1, %0" : "=m"(p_frame->uc.uc_mcontext.MC_REG_IP) : "r"(p_frame->uc.uc_mcontext.MC_REG_IP + instr_len) : "memory");
+	if (maybe_new_sp)
+	{
+		__asm__ volatile ("mov %1, %0" : "=m"(p_frame->uc.uc_mcontext.MC_REG_SP) : "r"(maybe_new_sp) : "memory");
+	}
+}
+
+extern inline void
+__attribute__((always_inline,gnu_inline))
+do_generic_syscall_and_resume(struct generic_syscall *gsp)
+{
+	void *new_top_of_stack = NULL;
+	_Bool stack_may_be_zapped = zaps_stack(gsp, &new_top_of_stack);
+
+	/* FIXME: on i386, the effective trap_len is either
+	 * 2 (normally)
+	 * or
+	 * 2 + some delta, if our trap site is the 'sysenter' inside the
+	 * vDSO.
+	 * We detect specially the case where we have a real_sysinfo, a fake_sysinfo,
+	 * a sysenter_offset_in_real_sysinfo,
+	 * and the trap site.
+	 * We fix it up to the first 'nop' after an int 0x80 following the sysenter.
+	 * This is a hack. In principle, the actual resume address is entirely private
+	 * to the kernel. But it seems to work by immediately following the sysenter
+	 * with an int 0x80 and pretending that the user context is that int 0x80.
+	 * So, to the rest of the kernel it looks like that int 0x80 is what caused
+	 * the syscall. See linux's arch/x86/entry/vdso/vma.c... my reading is that the
+	 * the never-used int 0x80 instruction bytes are called the 'landing pad'.
+	 *
+	 * FIXME: actually implement this delta. Weirdly we seem no longer to witness
+	 * the double-trap that was a problem earlier (spurious second syscall with %eax
+	 * equal to the return value of the previous syscall). Debug this. Maybe we're
+	 * just not taking traps from the fake vDSO any more? That's one of the last things
+	 * I fiddled with. But I am seeing exit_group().
+	 *
+	 * OH. It's because we only do *one* such syscall, and GAHAHAHAH. My test case
+	 * is exit, which just does exit_group().
+	 */
+	// because we might be about to lose our stack, don't create a local variable to
+	// hold the precalculated trap length; define macros which will calculate it
+	// at the point of use.
+
+#define trap_site (gsp->saved_context->uc.uc_mcontext.MC_REG_IP)
+#define trap_site_sysinfo_offset ((intptr_t)(trap_site) - (intptr_t)(fake_sysinfo))
+#define trap_site_is_in_fake_vdso (trap_site_sysinfo_offset >= 0 && \
+   trap_site_sysinfo_offset < KERNEL_VSYSCALL_MAX_SIZE)
+#define trap_len ( \
+    (trap_site_is_in_fake_vdso) ? (2 + sysinfo_int80_offset - trap_site_sysinfo_offset) : 2 \
+)
+// we used to pay attention to the instruction, but they all have length 2
+#if 0
+	register unsigned trap_len /*__asm__ ("rsi")*/ = instr_len(
+		(unsigned char*) gsp->saved_context->uc.uc_mcontext.MC_REG_IP,
+		(unsigned char*) -1 /* we don't know where the end of the mapping is */
+		);
+#endif
+
+	register long ret;
+	if (!stack_may_be_zapped)
+	{
+		ret = do_real_syscall(gsp);            /* always inlined */
+		fixup_sigframe_for_return(gsp->saved_context, ret, trap_len, NULL);
+		__systrap_post_handling(gsp, ret, /* do_caller_fixup */ 0);
+		return;
+	}
+
+	assert(new_top_of_stack);
+	// we should have a new top of stack
+	assert(gsp->args[1]);
+	// everything we need gets copied
+	/* We want to initialize the new stack. Then we will have to fix up
+	 * rsp immediately after return, then jump straight to pretcode,
+	 * which does the sigret. Will it work? Yes, it seems to. */
+	uintptr_t *cur_stack_low;
+#if defined(__x86_64__)
+	__asm__ volatile ("movq %%rsp, %0" : "=rm"(cur_stack_low) : : );
+#elif defined(__i386__)
+	__asm__ volatile ("movl %%esp, %0" : "=rm"(cur_stack_low) : : );
+#else
+#error "Unsupported architecture."
+#endif
+	uintptr_t *p_src_end = (uintptr_t *)((char*) gsp->saved_context + sizeof (struct ibcs_sigframe));
+	/* FIXME: check we are still in bounds of the new stack. */
+	uintptr_t *p_dest = (uintptr_t *) new_top_of_stack - (p_src_end - cur_stack_low);
+	long delta_nbytes = (intptr_t) p_dest - (intptr_t) new_top_of_stack;
+	for (uintptr_t *p_src = cur_stack_low; p_src != p_src_end; ++p_src, ++p_dest)
+	{
+		*p_dest = *p_src;
+		/* Relocate any word we copy if it's a stack address. HMM.
+		 * I suppose we don't use any large integers that aren't addresses?
+		 * We should really walk this buffer like it's a real stack, and
+		 * fix up only saved sp/bp values. Perhaps __builtin_frame_address
+		 * is useful here? */
+		if (*p_src < (uintptr_t) p_src_end && *p_src >= (uintptr_t) cur_stack_low)
+		{
+			// srcval + delta_nbytes = destval
+			*p_dest += delta_nbytes;
+		}
+	}
+	/* After the syscall we're already using the new stack, so make it right. */
+	gsp->args[1] = (uintptr_t)(void*)(p_dest - 1);
+	/* We have to use one big asm in order to keep stuff
+	 * in registers long enough to call our helper.
+	 *
+	 * The basic idea is that everything we might need, if
+	 * our stack gets zapped, is copied to the *new* stack
+	 * and addressed via gsp.
+	 *
+	 * Then, the gsp within the new stack is the only thing
+	 * we need to hold on to. Get everything else from that!
+	 * For example the fixed-up stack pointer is stored within
+	 * the gsp structure.
+	 *
+	 * On 32-bit x86, how do we want this to work?
+	 * We have to use %ebp which is the only spare register.
+	 * But we have both 'delta' and 'gsp' to transfer.
+	 */
+	long int ret_op = (long int) gsp->syscall_number;
+	struct generic_syscall *swizzled_gsp = (struct generic_syscall *)((uintptr_t) gsp + delta_nbytes);
+	__asm__ volatile (
+		  "mov %[arg0], %%"stringifx(argreg0)" \n\
+		   mov %[arg1], %%"stringifx(argreg1)" \n\
+		   mov %[arg2], %%"stringifx(argreg2)" \n\
+		   mov %[arg3], %%"stringifx(argreg3)" \n\
+		   mov %[arg4], %%"stringifx(argreg4)"  \n\
+		   mov %[swizzled_gsp], %%ebp \n"
+		   PERFORM_SYSCALL
+		   /* Immediately test: did our stack actually get zapped? */
+	#if defined(__x86_64__)
+		   /* FIXME: what about UNFIX_STACK_ALIGNMENT messing with %rsp? */
+		   "cmpq %%rsp, %[arg1]\n"
+		   "jne .L001$ \n" // FIXME make temporary label
+		   "mov %%rbp,%[gsp] \n"
+	#elif defined(__i386__)
+		   "cmpl %%esp, %[arg1]\n"
+		   "jne .L001$ \n" // FIXME make temporary label
+		   "mov %%ebp,%[gsp] \n"
+	#else
+	#error "Unsupported architecture."
+	#endif
+		".L001$:\n"
+		   "nop\n"
+		/* At this point, if we're the child:
+		 *
+		 * (1) we can't safely use anything that might have been spilled to the stack.
+		 *
+		 * (2 we can't look at the old sigframe, even via its absolute ptr, because
+		 *    the other thread might have finished with it and cleaned up.
+		 *    Instead, use the copy we put in the new stack.
+		 */
+#if defined(__i386__)
+#elif defined(__x86_64__)
+			   /* Shuffle regs */
+
+#endif
+		  : [ret]  "+a" (ret_op), [gsp] "=m"(gsp)
+		  : [swizzled_gsp] "m" (swizzled_gsp)
+		  , [arg0] "m" ((long int) gsp->args[0])
+		  , [arg1] "m" ((long int) gsp->args[1])
+		  , [arg2] "m" ((long int) gsp->args[2])
+		  , [arg3] "m" ((long int) gsp->args[3])
+		  , [arg4] "m" ((long int) gsp->args[4])
+		  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%"stringifx(argreg2),
+		    "%"stringifx(argreg3), "%"stringifx(argreg4), DO_SYSCALL_CLOBBER_LIST(5)
+	);
+
+	fixup_sigframe_for_return(gsp->saved_context, /*new_top_of_stack - sizeof (struct ibcs_sigframe), */
+		ret_op, trap_len, /* new_sp */ (void*) gsp->args[1]);
+	__systrap_post_handling(gsp, ret_op, /* do_caller_fixup */ 0);
 }
 
 /* This is our general function for performing or emulating a system call.
@@ -252,117 +452,7 @@ do_syscall_and_resume(struct generic_syscall *gsp)
 	}
 	else
 	{
-		/* HACK: these must not be spilled to the stack at the point where the 
-		 * syscall occurs, or they may be lost.
-		 * HACK EVEN MORE: this code doesn't work right now  */
-		register _Bool stack_zapped /*__asm__ ("rbx")*/ = zaps_stack(gsp);
-		register uintptr_t *new_top_of_stack /*__asm__ ("rcx")*/ = (uintptr_t *) gsp->args[1];
-		register uintptr_t *new_sp /*__asm__ ("rdx")*/ = 0;
-		
-		if (stack_zapped)
-		{
-			assert(new_top_of_stack);
-			
-			/* We want to initialize the new stack. Then we will have to fix up 
-			 * rsp immediately after return, then jump straight to pretcode,
-			 * which does the sigret. Will it work? Yes, it seems to. */
-			
-			uintptr_t *stack_copy_low;
-#if defined(__x86_64__)
-			__asm__ volatile ("movq %%rsp, %0" : "=rm"(stack_copy_low) : : );
-#elif defined(__i386__)
-			__asm__ volatile ("movl %%esp, %0" : "=rm"(stack_copy_low) : : );
-#else
-#error "Unsupported architecture."
-#endif
-			
-			uintptr_t *stack_copy_high
-			 = (uintptr_t *)((char*) gsp->saved_context + sizeof (struct ibcs_sigframe));
-			
-			unsigned copy_nwords = stack_copy_high - stack_copy_low;
-			uintptr_t *new_stack_lowaddr = new_top_of_stack - copy_nwords;
-			ptrdiff_t fixup_amount = (char*) new_stack_lowaddr - (char*) stack_copy_low;
-			for (unsigned i = 0; i < copy_nwords; ++i)
-			{
-				new_stack_lowaddr[i] = stack_copy_low[i];
-				/* Relocate any word we copy if it's a stack address. HMM.
-				 * I suppose we don't use any large integers that aren't addresses? */
-				if (new_stack_lowaddr[i] < (uintptr_t) stack_copy_high
-							&& new_stack_lowaddr[i] >= (uintptr_t) stack_copy_low)
-				{
-					new_stack_lowaddr[i] += fixup_amount;
-				}
-			}
-			new_sp = new_stack_lowaddr; // (uintptr_t) ((char *) stack_copy_low + fixup_amount);
-		}
-		
-		register unsigned trap_len /*__asm__ ("rsi")*/ = instr_len(
-			(unsigned char*) gsp->saved_context->uc.uc_mcontext.MC_REG_IP,
-			(unsigned char*) -1 /* we don't know where the end of the mapping is */
-			);
-		
-		struct generic_syscall *copied_gsp = alloca(sizeof (struct generic_syscall));
-		// HACK: avoid string.h dependency (causes __locale_t problems)
-		__builtin_memcpy(copied_gsp, gsp, sizeof *gsp);
-		
-		long int ret = do_real_syscall(gsp);            /* always inlined */
-		/* Did our stack actually get zapped? */
-		if (stack_zapped)
-		{
-			uintptr_t *seen_sp;
-#if defined(__x86_64__)
-			__asm__ volatile ("movq %%rsp, %0" : "=r"(seen_sp) : : );
-#elif defined(__i386__)
-			__asm__ volatile ("mov %%esp, %0" : "=r"(seen_sp) : : );
-#else
-#error "Unsupported architecture."
-#endif
-			stack_zapped &= (seen_sp == new_top_of_stack);
-		}
-		
-		/* At this point, if we're the child:
-		 * 
-		 * (1) we can't safely use anything that might have been spilled to the stack. 
-		 * 
-		 * (2 we can't look at the old sigframe, even via its absolute ptr, because 
-		 *    the other thread might have finished with it and cleaned up.
-		 *    Instead, use the copy we put in the new stack.
-		 */
-		
-		/* FIXME: how to ensure that the compiler doesn't spill something earlier and 
-		 * re-load it here? Ideally we need to rewrite this whole function in assembly. 
-		 * We could make fixup_caller_for_return a macro expanding to an asm volatile.... */
-		
-		__systrap_post_handling(copied_gsp, ret, !stack_zapped); /* okay, because we have a stack (perhaps zeroed/new) */
-		/* FIXME: unsafe to access gsp here! Take a copy of *gsp! */
-		if (stack_zapped)
-		{
-			/* We copied the context into the new stack. So just resume from sigframe
-			 * as before, with two minor alterations. Firstly, the caller expects to
-			 * resume with the new top-of-stack in rsp. Secondly, we fix up the current rsp
-			 * so that the compiler-generated code will find its way to restore_rt 
-			 * (i.e. that the function epilogue will use our new stack, not the old one). */
-
-			struct ibcs_sigframe *p_frame = (struct ibcs_sigframe *) ((char*) new_top_of_stack - sizeof (struct ibcs_sigframe));
-			/* Make sure that the new stack pointer is the one returned to the caller. */
-#if defined(__x86_64__)
-			p_frame->uc.uc_mcontext.MC_REG(rsp, RSP) = (uintptr_t) new_top_of_stack;
-#elif defined(__i386__)
-			p_frame->uc.uc_mcontext.MC_REG(esp, ESP) = (uintptr_t) new_top_of_stack;
-#else
-#error "Unsupported architecture"
-#endif
-			/* Do the usual manipulations of saved context, to return and resume from the syscall. */
-			fixup_caller_for_return(ret, p_frame, trap_len);
-			/* Hack our rsp so that the epilogue / sigret will execute correctly. */
-#if defined(__x86_64__)
-			__asm__ volatile ("movq %0, %%rsp" : /* no outputs */ : "r"(new_sp) : "%rsp");
-#elif defined(__i386__)
-			__asm__ volatile ("mov %0, %%esp" : /* no outputs */ : "r"(new_sp) : "%esp");
-#else
-#error "Unsupported architecture"
-#endif
-		}
+		do_generic_syscall_and_resume(gsp);
 	}
 }
 
@@ -371,19 +461,6 @@ __attribute__((always_inline,gnu_inline))
 do_real_syscall (struct generic_syscall *gsp) 
 {
 	return do_syscall6(gsp);
-}
-
-/* HACK: sysdep */
-extern inline _Bool 
-__attribute__((always_inline,gnu_inline))
-zaps_stack(struct generic_syscall *gsp)
-{
-#ifdef __FreeBSD__
-	return 0;
-#else
-	return gsp->syscall_number == __NR_clone
-				&& gsp->args[1] /* newstack */ != 0;
-#endif
 }
 
 #endif

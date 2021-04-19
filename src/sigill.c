@@ -24,8 +24,16 @@ __attribute__ ((noinline)) static void _handle_sigill_debug_printf(int level, co
 	 va_end(vl);
 }
 
+/* FIXME: for thread-safety, saved_sysinfo should be a local
+ * which we thread through to our callees, all the way to the
+ * resume function. How do we get it to the restorer? We can
+ * use TLS I guess, though danger.... */
 void *saved_sysinfo __attribute__((visibility("hidden")));
 void *real_sysinfo __attribute__((visibility("hidden")));
+#ifdef __i386__
+unsigned sysinfo_int80_offset __attribute__((visibility("hidden")));
+#endif
+void *fake_sysinfo __attribute__((visibility("hidden")));
 
 /* We may or may not have syscall names linked in.
  * This is just to avoid a dependency on our syscall interface spec.  */
@@ -41,7 +49,7 @@ void handle_sigill(int n)
 	/* If we haven't set real_sysinfo by now, assume we didn't create a fake one.
 	 * We snarf the real one, as it will be unconditionally restored on return. */
 	if (!real_sysinfo) real_sysinfo = *(void**)(tls+16);
-	saved_sysinfo = *(void**)(tls+16);
+	void *saved_sysinfo = *(void**)(tls+16);
 	*(void**)(tls+16) = real_sysinfo;
 #endif
 
@@ -52,6 +60,9 @@ void handle_sigill(int n)
 	{
 		_handle_sigill_debug_printf(1, " which is our test trap address; continuing.\n");
 		resume_from_sigframe(0, p_frame, 2);
+#if defined(__i386__)
+		*(void**)(tls+16) = saved_sysinfo;
+#endif
 		return;
 	}
 #endif
@@ -95,5 +106,11 @@ void handle_sigill(int n)
 		}
 	};
 
-	do_syscall_and_resume(&gsp); // inline
+	do_syscall_and_resume(&gsp); // inline, but doesn't return?!
+	raw_write(2, "blah\n", sizeof "blah\n");
+	// FIXME: this isn't hit?!!? Messes with how I thought resumption worked
+	_handle_sigill_debug_printf(1, "Resuming from instruction at %p", p_frame->uc.uc_mcontext.MC_REG_IP);
+#if defined(__i386__)
+	*(void**)(tls+16) = saved_sysinfo;
+#endif
 }

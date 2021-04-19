@@ -467,6 +467,16 @@ instr_len(unsigned const char *ins, unsigned const char *end)
 	return len;
 }
 
+int is_sysenter_instr(unsigned const char *ins, unsigned const char *end)
+{
+	if ((end >= ins + 2) && *ins == 0x0f && *(ins+1) == 0x34) return 2;
+	return 0;
+}
+int is_int80_instr(unsigned const char *ins, unsigned const char *end)
+{
+	if ((end >= ins + 2) && *ins == 0xcd && *(ins+1) == 0x80) return 2;
+	return 0;
+}
 int is_syscall_instr(unsigned const char *ins, unsigned const char *end)
 {
 	/* Using opdis for this is non-portable and slow, so we don't do it. 
@@ -488,8 +498,8 @@ int is_syscall_instr(unsigned const char *ins, unsigned const char *end)
 	// 		|| (0 == strcmp(insn->mnemonic, "int"
 	// 			/*&& (insn->operands[0] == 0x80 || insn->operands[0] == 0x81)*/));
 	if (((end >= ins + 2) && *ins == 0x0f && *(ins+1) == 0x05) /* syscall */
-	 || ((end >= ins + 2) && *ins == 0x0f && *(ins+1) == 0x34) /* sysenter */
-	 || ((end >= ins + 2) && *ins == 0xcd && *(ins+1) == 0x80)) /* int 80 */
+	 || is_sysenter_instr(ins, end) /* sysenter */
+	 || is_int80_instr(ins, end))
 	{
 		return 2;
 	}

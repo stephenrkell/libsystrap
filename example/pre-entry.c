@@ -4,6 +4,8 @@
 void __real_enter(void *entry_point);
 void __wrap_enter(void *entry_point)
 {
+	// FIXME: libsystrap isn't being init'd, so force it
+	__libsystrap_force_init();
 	init_fds();
 	/* We want to trap only the ld.so's executable phdr(s).
 	 * How do we find them?
@@ -28,6 +30,13 @@ void __wrap_enter(void *entry_point)
 	 */
 	trap_all_mappings();
 	install_sigill_handler();
+	// FIXME: should go in the real entry point?
+#if defined(__i386__)
+	unsigned char *tls;
+	__asm__("mov %%gs:0x0,%0" : "=r"(tls));
+	if (fake_sysinfo) *(void**)(tls+16) = fake_sysinfo;
+#endif
+
 	__real_enter(entry_point);
 }
 

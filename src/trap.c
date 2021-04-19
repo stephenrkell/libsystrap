@@ -98,6 +98,24 @@ void replace_syscall_with_ud2(unsigned char *pos, unsigned len)
 	assert(len >= 2);
 	unsigned char replacement[] = { (unsigned char) 0x0f, (unsigned char) 0x0b }; // ud2
 	debug_printf(1, "Replacing syscall at %p with trap\n", pos);
+#ifdef __i386__
+	if (is_sysenter_instr(pos, pos + len) &&
+			(uintptr_t) pos >= (uintptr_t) fake_sysinfo &&
+			(uintptr_t) pos <  (uintptr_t) fake_sysinfo + KERNEL_VSYSCALL_MAX_SIZE)
+	{
+		/* We're instrumenting the sysenter position in the *fake* ld.so.
+		 * Remember its offset. */
+		unsigned char *forward_pos = pos;
+		while (!is_int80_instr(forward_pos, forward_pos + 2)
+			&& forward_pos <= (unsigned char *) fake_sysinfo + KERNEL_VSYSCALL_MAX_SIZE - 2)
+		{ ++forward_pos; }
+		if (forward_pos <= (unsigned char *) fake_sysinfo + KERNEL_VSYSCALL_MAX_SIZE - 2)
+		{
+			assert(is_int80_instr(forward_pos, forward_pos + 2));
+			sysinfo_int80_offset = (uintptr_t) forward_pos - (uintptr_t) fake_sysinfo;
+		}
+	}
+#endif
 	replace_instruction_with(pos, len, replacement, sizeof replacement);
 }
 

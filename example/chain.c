@@ -35,7 +35,7 @@ static struct link_map temporary_link_map = {
 };
 extern void _start;
 #if MAPPING_MAX != 16
-#error MAPPING_MAX isn't what we expected
+#error "MAPPING_MAX is not what we expected"
 #endif
 uintptr_t ldso_load_addr;
 uintptr_t ldso_end_addr;
@@ -343,8 +343,11 @@ void create_fake_vdso(ElfW(auxv_t) *auxv)
 {
 	/* Firstly, find the original vdso. */
 	ElfW(auxv_t) *saw_at_sysinfo_entry = NULL;
+	ElfW(auxv_t) *saw_at_sysinfo_ehdr_entry = NULL;
 	uintptr_t orig_vdso_ehdr_address = 0;
 	uintptr_t fake_vdso_ehdr_address = 0;
+	void *mapping = MAP_FAILED;
+	size_t mapping_sz;
 	for (ElfW(auxv_t) *p = auxv; p->a_type; ++p)
 	{
 		switch (p->a_type)
@@ -354,25 +357,22 @@ void create_fake_vdso(ElfW(auxv_t) *auxv)
 				saw_at_sysinfo_entry = p;
 				break;
 			case AT_SYSINFO_EHDR: {
+				saw_at_sysinfo_ehdr_entry = p;
 				// make a temporary file
 				char fname[] = "/tmp/tmp.XXXXXX";
 				int fd = mkstemp(fname);
 				if (fd == -1) abort();
 				unlink(fname);
-				unsigned long sz = count_vdso_size((void*) p->a_un.a_val);
-				int ret = ftruncate(fd, sz);
-				void *mapping = MAP_FAILED;
+				mapping_sz = count_vdso_size((void*) p->a_un.a_val);
+				int ret = ftruncate(fd, mapping_sz);
 				if (ret == 0)
 				{
-					mapping = mmap(NULL, sz, PROT_READ|PROT_WRITE, MAP_SHARED,
+					mapping = mmap(NULL, mapping_sz, PROT_READ|PROT_WRITE, MAP_SHARED,
 						fd, 0);
 					if (mapping != MAP_FAILED)
 					{
 						orig_vdso_ehdr_address = p->a_un.a_val;
 						fake_vdso_ehdr_address = (uintptr_t) mapping;
-						copy_and_trap_vdso_elf(mapping, (void*) p->a_un.a_val, sz);
-						p->a_un.a_val = (uintptr_t) mapping;
-						ret = mprotect(mapping, sz, PROT_READ|PROT_EXEC);
 					}
 				}
 				close(fd);
@@ -381,10 +381,25 @@ void create_fake_vdso(ElfW(auxv_t) *auxv)
 				continue;
 		}
 	}
+	/* We need to set up real_sysinfo and fake_sysinfo before we
+	 * do the copy_and_trap_vdso_elf, because we need to snarf
+	 * the magic "landing pad" offset within the vsyscall while
+	 * we do the trapping.  */
 	if (saw_at_sysinfo_entry)
 	{
+		assert(saw_at_sysinfo_ehdr_entry);
 		real_sysinfo = (void*) saw_at_sysinfo_entry->a_un.a_val;
-		saw_at_sysinfo_entry->a_un.a_val = fake_vdso_ehdr_address
-			+ ((uintptr_t) real_sysinfo - orig_vdso_ehdr_address);
+		fake_sysinfo = (void*) (fake_vdso_ehdr_address
+			+ ((uintptr_t) real_sysinfo - orig_vdso_ehdr_address));
+		saw_at_sysinfo_entry->a_un.a_val = (uintptr_t) fake_sysinfo;
+	}
+	if (mapping != MAP_FAILED)
+	{
+		assert(saw_at_sysinfo_ehdr_entry);
+		copy_and_trap_vdso_elf(mapping, (void*) saw_at_sysinfo_ehdr_entry->a_un.a_val, mapping_sz);
+		int ret = mprotect(mapping, mapping_sz, PROT_READ|PROT_EXEC);
+		// swap in the fake vdso
+		saw_at_sysinfo_ehdr_entry->a_un.a_val = (uintptr_t) mapping;
+		assert(ret == 0);
 	}
 }

@@ -3,9 +3,6 @@ srcroot := $(realpath $(dir $(THIS_MAKEFILE)))/..
 
 SYS := $(shell uname -s | tr A-Z a-z )
 
-# for debugging
-CFLAGS += -save-temps
-
 ARCH ?= $(shell gcc -print-multiarch | sed 's/-.*//' )
 ifeq ($(ARCH),i386)
 LD_SO ?= /lib/ld-linux.so.2
@@ -146,7 +143,7 @@ trace-syscalls-ld.so: LDLIBS += -Bstatic \
   $(LIBRUNT_DIR)/lib/librunt_preload.a \
   $(LIBC_A)
 
-trace-syscalls.so: trap-syscalls.o syscall-names.o dlmalloc.a
+trace-syscalls.so: trace-syscalls.o syscall-names.o dlmalloc.a
 
 trace-syscalls.so: $(srcroot)/lib/libsystrap.a
 	$(CC) -shared -static-libgcc \

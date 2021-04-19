@@ -22,8 +22,6 @@ CFLAGS += -Wall -Wno-unused-label -Wno-comment
 CFLAGS += -O2
 CFLAGS += -fPIC
 CFLAGS += -ffreestanding -fno-omit-frame-pointer
-# HACK temp
-CFLAGS += -save-temps
 # the decoder we use nowadays is the "official" Intel one
 CFLAGS += -DUSE_XED
 
@@ -38,13 +36,12 @@ endif
 CFLAGS += -I/usr/include/$(shell $(CC) -dumpmachine)
 
 C_SRC := $(wildcard *.c)
-S_SRC := $(wildcard *.s)
 CC_SRC := $(wildcard *.cc)
 
 C_DEPS := $(patsubst %.c,.%.d,$(C_SRC))
 CC_DEPS := $(patsubst %.cc,.%.d,$(CC_SRC))
 DEPS := $(C_DEPS) $(CC_DEPS)
-OBJS := $(patsubst %.c,%.o,$(C_SRC)) $(patsubst %.cc,%.o,$(CC_SRC)) $(patsubst %.s,%.o,$(S_SRC))
+OBJS := $(patsubst %.c,%.o,$(C_SRC)) $(patsubst %.cc,%.o,$(CC_SRC))
 
 $(CC_DEPS): .%.d: %.cc
 	$(CXX) -MM $(CXXFLAGS) $+ > "$@" || rm -f "$@"

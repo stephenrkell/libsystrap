@@ -140,44 +140,6 @@ void *__attribute__((noinline)) raw_brk(void *addr)
 	return (void*) do_syscall1(&gs);
 }
 
-#if 0 /* This code seems to be dead */
-static void handle_sigabrt(int num)
-{
-	raw_exit(128 + SIGABRT);
-}
-
-static void install_sigabrt_handler(void) __attribute__((constructor));
-static void install_sigabrt_handler(void)
-{
-	struct __asm_sigaction action = {
-		.sa_handler = &handle_sigabrt,
-		.sa_mask = 0,
-		.sa_flags = /*SA_SIGINFO |*/ 0x04000000u /* SA_RESTORER */ | /*SA_RESTART |*/ SA_NODEFER
-		#ifndef __FreeBSD__
-		, .sa_restorer = restore_rt
-		#endif
-	};
-	int ret = raw_rt_sigaction(SIGABRT, &action, NULL);
-	assert(ret == 0);
-}
-
-#if 0
-void (__attribute__((noreturn)) __assert_fail)(
-	const char *msg, const char *file,
-	unsigned int line, const char *function)
-{
-	const char *msg_end = msg;
-	while (*msg_end++);
-	raw_write(2, "Assertion failed: ", sizeof "Assertion failed: " - 1);
-	raw_write(2, msg, msg_end - msg - 1);
-	raw_write(2, "\n", sizeof "\n" - 1);
-	raw_kill(raw_getpid(), SIGABRT);
-	/* hmm -- SIGABRT might be blocked? okay, try waiting indefinitely */
-	while (1) {}
-}
-#endif
-#endif
-
 const char *fmt_hex_num(unsigned long n)
 {
 	static char buf[19];

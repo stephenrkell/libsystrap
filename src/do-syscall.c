@@ -18,9 +18,12 @@ __libsystrap_noop_post_handling(struct generic_syscall *gsp, long int ret, _Bool
 {
 	if (do_caller_fixup)
 	{
-		fixup_caller_for_return(ret, gsp->saved_context,
-			instr_len((unsigned char *) gsp->saved_context->uc.uc_mcontext.MC_REG_IP,
-			(unsigned char *) -1));
+		fixup_sigframe_for_return(
+			gsp->saved_context,
+			ret,
+			instr_len((unsigned char *) gsp->saved_context->uc.uc_mcontext.MC_REG_IP, (unsigned char *) -1),
+			NULL
+		);
 	}
 }
 void __attribute__((weak,visibility("protected")))

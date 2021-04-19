@@ -22,8 +22,14 @@ struct ibcs_sigframe; /* opaque */
 
 /* If we give the application a fake vDSO / sysinfo,
  * we have to save/restore the original. */
-extern void *saved_sysinfo;
 extern void *real_sysinfo;
+#ifdef __i386__
+/* We snarf the offset from fake_sysinfo's __kernel_vsyscall
+ * to the int80 instruction that follows sysenter. */
+extern unsigned sysinfo_int80_offset;
+#define KERNEL_VSYSCALL_MAX_SIZE 32
+#endif
+extern void *fake_sysinfo;
 
 struct generic_syscall {
 	struct ibcs_sigframe *saved_context;
