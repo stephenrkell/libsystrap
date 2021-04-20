@@ -27,6 +27,7 @@ extern void *real_sysinfo;
 /* We snarf the offset from fake_sysinfo's __kernel_vsyscall
  * to the int80 instruction that follows sysenter. */
 extern unsigned sysinfo_int80_offset;
+extern unsigned sysinfo_sysenter_offset;
 #define KERNEL_VSYSCALL_MAX_SIZE 32
 #endif
 extern void *fake_sysinfo;

@@ -103,6 +103,7 @@ void replace_syscall_with_ud2(unsigned char *pos, unsigned len)
 			(uintptr_t) pos >= (uintptr_t) fake_sysinfo &&
 			(uintptr_t) pos <  (uintptr_t) fake_sysinfo + KERNEL_VSYSCALL_MAX_SIZE)
 	{
+		sysinfo_sysenter_offset = (uintptr_t) pos - (uintptr_t) fake_sysinfo;
 		/* We're instrumenting the sysenter position in the *fake* ld.so.
 		 * Remember its offset. */
 		unsigned char *forward_pos = pos;

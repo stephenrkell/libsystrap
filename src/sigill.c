@@ -32,6 +32,7 @@ void *saved_sysinfo __attribute__((visibility("hidden")));
 void *real_sysinfo __attribute__((visibility("hidden")));
 #ifdef __i386__
 unsigned sysinfo_int80_offset __attribute__((visibility("hidden")));
+unsigned sysinfo_sysenter_offset __attribute__((visibility("hidden")));
 #endif
 void *fake_sysinfo __attribute__((visibility("hidden")));
 
@@ -99,7 +100,33 @@ void handle_sigill(int n)
 			p_frame->uc.uc_mcontext.MC_REG(edx, EDX),
 			p_frame->uc.uc_mcontext.MC_REG(esi, ESI),
 			p_frame->uc.uc_mcontext.MC_REG(edi, EDI),
-			p_frame->uc.uc_mcontext.MC_REG(ebp, EBP)
+			/* The sixth arg is special:
+			 * If we are doing sysenter, it is *pointed to* by %ebp.
+			 * If we are doing int 80, it *is* ebp.
+			 * Our do_syscall code just wants to put a value into %ebp.
+			 * It will use int 80.
+			 * So if we have come from the unique sysenter instruction,
+			 * we want to snarf 0(%ebp), otherwise %ebp.
+			 *
+			 * Further problem:
+			 * what if we don't have a six-arg call? Then there
+			 * may be nothing good in the slot. To check %ebp is
+			 * not totally bogus, we want to test it against the
+			 * bounds of the current stack. Two problems:
+			 *
+			 * 1. if sigaltstack is in effect, this will be broken.
+			 *
+			 * 2. How do we get the bounds of the current stack anyway?
+			 *
+			 * For now, a giant HACK: within two pages of saved esp. */
+#define MAYBE_DEREF_EBP(ebp, esp) \
+			(((ebp) >= (esp) && ((ebp)-(esp) < 8192)) ? *(uintptr_t*)(ebp) : 0)
+#define IS_SYSENTER(eip) \
+			((eip) == (uintptr_t) fake_sysinfo + sysinfo_sysenter_offset)
+			IS_SYSENTER(p_frame->uc.uc_mcontext.MC_REG_IP)
+			 ? MAYBE_DEREF_EBP(p_frame->uc.uc_mcontext.MC_REG(ebp, EBP),
+			                   p_frame->uc.uc_mcontext.MC_REG(esp, ESP))
+			 : p_frame->uc.uc_mcontext.MC_REG(ebp, EBP)
 #else
 #error "Unrecognised architecture."
 #endif
@@ -107,9 +134,7 @@ void handle_sigill(int n)
 	};
 
 	do_syscall_and_resume(&gsp); // inline, but doesn't return?!
-	raw_write(2, "blah\n", sizeof "blah\n");
-	// FIXME: this isn't hit?!!? Messes with how I thought resumption worked
-	_handle_sigill_debug_printf(1, "Resuming from instruction at %p", p_frame->uc.uc_mcontext.MC_REG_IP);
+	_handle_sigill_debug_printf(1, "Resuming from instruction at %p\n", p_frame->uc.uc_mcontext.MC_REG_IP);
 #if defined(__i386__)
 	*(void**)(tls+16) = saved_sysinfo;
 #endif
