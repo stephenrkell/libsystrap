@@ -137,7 +137,9 @@ trace-syscalls.so trace-syscalls-ld.so: LDFLAGS += \
 # we define our own, simpler __init_tp -- DOESN'T WORK but we can use musl's
 trace-syscalls.so trace-syscalls-ld.so: LDFLAGS += -Wl,--wrap,__init_tp
 # we insert our startup logic by wrapping enter()
-trace-syscalls-ld.so: LDFLAGS += -Wl,--wrap,enter -Wl,--wrap,load_one_phdr
+trace-syscalls-ld.so: LDFLAGS += -Wl,--wrap,enter -Wl,--wrap,load_one_phdr \
+-Wl,--defsym,__wrap___runt_files_notify_load=__runt_files_notify_load \
+-Wl,--wrap,__runt_files_metadata_by_addr
 trace-syscalls-ld.so: LDLIBS += -Bstatic \
   $(srcroot)/src/libsystrap.a \
   $(LIBRUNT_DIR)/lib/librunt_preload.a \
@@ -162,6 +164,8 @@ $(LDSO_OBJS): CFLAGS += -DDONALD_NAME=\"trace-syscalls-ld\" \
   -DCHAIN_LOADER_COVER_TRACKS='frob_dynamic(base_addr, inferior_dynamic_vaddr, phdrs, ehdr.e_phnum); \
     set_inferior_metadata(&ehdr, shdrs, phdrs, base_addr); \
     create_fake_vdso(p_auxv); '
+
+bootstrap.o: CFLAGS += -DCHAIN_LOADER
 
 # FIXME: localize all global symbols except maybe _start?
 trace-syscalls-ld.so: trace-syscalls-ld.lds $(LDSO_OBJS) $(LOCAL_OBJS) dynamic-list

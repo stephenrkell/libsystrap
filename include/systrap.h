@@ -1,6 +1,9 @@
 #ifndef SYSTRAP_H_
 #define SYSTRAP_H_
 
+#include <elf.h>
+#include <link.h>
+
 #define SYSCALL_MAX 1023 /* A safe-ish overapproximation for now... */
 
 void install_sigill_handler(void);
@@ -9,6 +12,10 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 	_Bool is_writable, _Bool is_readable);
 void trap_one_instruction_range(unsigned char *begin, unsigned char *end,
 	_Bool is_writable, _Bool is_readable);
+void trap_one_executable_region_given_shdrs(unsigned char *begin,
+	unsigned char *end, const char *filename,
+	_Bool is_writable, _Bool is_readable,
+	ElfW(Shdr) *shdrs, unsigned nshdr, ElfW(Addr) laddr);
 void walk_instructions(unsigned char *pos, unsigned char *end,
 	void (*cb)(unsigned char *pos, unsigned len, void *arg), void *arg);
 void replace_instruction_with(unsigned char *pos, unsigned len,

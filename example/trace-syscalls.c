@@ -42,19 +42,9 @@ extern int etext;
 
 void *traces_out __attribute__((visibility("hidden"))) /* really FILE* */;
 int trace_fd __attribute__((visibility("hidden")));
-static int debug_level;
-static FILE **p_err_stream;
-static FILE *our_fake_stderr; // will fdopen stderr if necessary
-#define debug_printf(lvl, fmt, ...) do { \
-    if ((lvl) <= debug_level) { \
-      if (!p_err_stream || !*p_err_stream) { \
-          p_err_stream = &our_fake_stderr; \
-          *p_err_stream = fdopen(2, "w"); if (!*p_err_stream) abort(); \
-      } \
-      fprintf(*p_err_stream, fmt, ## __VA_ARGS__ ); \
-      fflush(*p_err_stream); \
-    } \
-  } while (0)
+int debug_level __attribute__((visibility("hidden")));
+FILE **p_err_stream __attribute__((visibility("hidden")));
+FILE *our_fake_stderr __attribute__((visibility("hidden"))); // will fdopen stderr if necessary
 
 /* FIXME: use a librunt API for doing this. */
 static int process_mapping_cb(struct maps_entry *ent, char *linebuf, void *arg)

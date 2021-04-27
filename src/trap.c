@@ -72,9 +72,6 @@ unsigned long read_hex_num(const char **p_c, const char *end)
 	return cur;
 }
 
-static const void *our_text_begin_address;
-static const void *our_text_end_address;
-
 void replace_instruction_with(unsigned char *pos, unsigned len,
 		unsigned char *replacement, unsigned replacement_len)
 {
@@ -286,8 +283,10 @@ void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *e
 	
 }
 
-void trap_one_executable_region(unsigned char *begin, unsigned char *end, const char *filename,
-	_Bool is_writable, _Bool is_readable)
+void trap_one_executable_region_given_shdrs(unsigned char *begin,
+	unsigned char *end, const char *filename,
+	_Bool is_writable, _Bool is_readable,
+	ElfW(Shdr) *shdrs, unsigned nshdr, ElfW(Addr) laddr)
 {
 	assert(end >= begin);
 	// it's executable; scan for syscall instructions
@@ -299,11 +298,18 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 	 * then re-traverse the whole thing. So we mmap the section
 	 * header table. PROBLEM: we can't re-open a file that is
 	 * guaranteed to be the same. */
-	void *base_addr = NULL;
-	const void *first_section_start = __runt_find_section_boundary(
-		begin, SHF_EXECINSTR, 0, NULL, NULL);
-	const void *last_section_end = __runt_find_section_boundary(
-		end, SHF_EXECINSTR, 1, NULL, NULL);
+	const void *first_section_start = NULL;
+	const void *last_section_end = (void*)-1;
+	if (shdrs)
+	{
+		uintptr_t ret = find_section_boundary((uintptr_t) begin - laddr, SHF_EXECINSTR, 0,
+			shdrs, nshdr, NULL);
+		if (ret) first_section_start = (const void *) laddr + ret;
+		ret = find_section_boundary((uintptr_t) end - laddr, SHF_EXECINSTR, 1,
+			shdrs, nshdr, NULL);
+		if (ret != (uintptr_t) -1) last_section_end = (const void *) laddr + ret;
+	}
+
 	/* These might return respectively (void*)-1 and (void*)0, to signify
 	 * "no instructions in that range, according to section headers".
 	 * The section headers are pretty reliable, so we choose not to
@@ -358,6 +364,14 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 			trap_one_instruction_range(begin_instr_pos, end_instr_pos, is_writable, is_readable);
 		}
 	}
+}
+void trap_one_executable_region(unsigned char *begin, unsigned char *end, const char *filename,
+	_Bool is_writable, _Bool is_readable)
+{
+	struct file_metadata *fm = __runt_files_metadata_by_addr(begin);
+	trap_one_executable_region_given_shdrs(begin, end, filename, is_writable,
+		is_readable,
+		fm ? fm->shdrs : NULL, fm ? fm->ehdr->e_shnum : 0, fm ? fm->l->l_addr : 0);
 }
 
 void handle_sigill(int n) __attribute__((visibility("hidden")));

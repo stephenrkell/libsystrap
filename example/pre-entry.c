@@ -1,5 +1,16 @@
+#define _GNU_SOURCE
+#include <stdint.h>
+#include <unistd.h>
+#include <stddef.h>
+#include <link.h>
+#include <dlfcn.h>
+#include <assert.h>
 #include "systrap.h"
+#include "relf.h"
 #include "trace-syscalls.h"
+
+extern uintptr_t __start___replaced_syscalls;
+extern uintptr_t __stop___replaced_syscalls;
 
 void __real_enter(void *entry_point);
 void __wrap_enter(void *entry_point)
@@ -7,7 +18,7 @@ void __wrap_enter(void *entry_point)
 	// FIXME: libsystrap isn't being init'd, so force it
 	__libsystrap_force_init();
 	init_fds();
-	/* We want to trap only the ld.so's executable phdr(s).
+	/* We want to trap only the inferior ld.so's executable phdr(s).
 	 * How do we find them?
 	 * We could wrap load_one_phdr -- is that good value?
 	 * We will need to do some stuff for vdso,
@@ -36,7 +47,20 @@ void __wrap_enter(void *entry_point)
 	__asm__("mov %%gs:0x0,%0" : "=r"(tls));
 	if (fake_sysinfo) *(void**)(tls+16) = fake_sysinfo;
 #endif
-
+	/* Install replacements.
+	 * Why not just initialize the replaced_syscalls array itself?
+	 * Well, it can't be split across multiple files, unlike this approach.
+	 * This is a bit nasty though.
+	 */
+	unsigned nreplacements = (&__stop___replaced_syscalls - &__start___replaced_syscalls) / 2;
+	for (unsigned n = 0; n < nreplacements; ++n)
+	{
+		uintptr_t syscall_n = (&__start___replaced_syscalls)[2*n];
+		void (*replacement)(struct generic_syscall *s, post_handler *post)
+		 = (void*)(&__start___replaced_syscalls)[2*n + 1];
+		replaced_syscalls[syscall_n] = replacement;
+	}
+	find_r_debug()->r_map = NULL;
 	__real_enter(entry_point);
 }
 
