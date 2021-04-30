@@ -1,4 +1,7 @@
 #define _GNU_SOURCE
+
+#include "raw-syscalls-impl.h" /* always include raw-syscalls first, and let it do the asm includes */
+
 #include <stdio.h>
 #include <assert.h>
 #include <sys/types.h>
@@ -49,7 +52,9 @@ static void replacement_ ## name (struct generic_syscall *s, post_handler *post)
 { \
 	name ## _args(init_from_generic, ;); \
 	name ## _ret_t ret = bootstrap_ ## name( name ## _args(expand_name, comma) ); \
-	post(s, (uintptr_t) ret, 1); \
+	post(s, (uintptr_t) ret, 0); \
+	fixup_sigframe_for_return(s->saved_context, (long int) ret, \
+	    trap_len(&s->saved_context->uc.uc_mcontext), NULL); \
 } \
 __asm__( ".pushsection __replaced_syscalls,\"aw\", @progbits\n"\
   ASMPTR " " stringifx(expand(__NR_ ## name)) "\n"\

@@ -245,27 +245,6 @@ __attribute__((always_inline,gnu_inline));
 
 extern inline void
 __attribute__((always_inline,gnu_inline))
-fixup_sigframe_for_return(struct ibcs_sigframe *p_frame, long int ret, unsigned instr_len, void *maybe_new_sp)
-{
-	/* Copy the return value of the emulated syscall into the trapping context, and
-	 * resume from *after* the faulting instruction.
-	 *
-	 * Writing through p_frame is undefined behaviour in C, or at least, gcc optimises
-	 * it away for me. So do it in volatile assembly. */
-
-	// set the return value
-	// HACK: it's in the same place as the syscall number
-	__asm__ volatile ("mov %1, %0" : "=m"(p_frame->uc.uc_mcontext.MC_REG(syscallnumreg, SYSCALLNUMREG)) : "r"(ret) : "memory");
-	// adjust the saved program counter to point past the trapping instr
-	__asm__ volatile ("mov %1, %0" : "=m"(p_frame->uc.uc_mcontext.MC_REG_IP) : "r"(p_frame->uc.uc_mcontext.MC_REG_IP + instr_len) : "memory");
-	if (maybe_new_sp)
-	{
-		__asm__ volatile ("mov %1, %0" : "=m"(p_frame->uc.uc_mcontext.MC_REG_SP) : "r"(maybe_new_sp) : "memory");
-	}
-}
-
-extern inline void
-__attribute__((always_inline,gnu_inline))
 do_generic_syscall_and_resume(struct generic_syscall *gsp)
 {
 	void *new_top_of_stack = NULL;
@@ -296,30 +275,13 @@ do_generic_syscall_and_resume(struct generic_syscall *gsp)
 	 * OH. It's because we only do *one* such syscall, and GAHAHAHAH. My test case
 	 * is exit, which just does exit_group().
 	 */
-	// because we might be about to lose our stack, don't create a local variable to
-	// hold the precalculated trap length; define macros which will calculate it
-	// at the point of use.
-
-#define trap_site (gsp->saved_context->uc.uc_mcontext.MC_REG_IP)
-#define trap_site_sysinfo_offset ((intptr_t)(trap_site) - (intptr_t)(fake_sysinfo))
-#define trap_site_is_in_fake_vdso (trap_site_sysinfo_offset >= 0 && \
-   trap_site_sysinfo_offset < KERNEL_VSYSCALL_MAX_SIZE)
-#define trap_len ( \
-    (trap_site_is_in_fake_vdso) ? (2 + sysinfo_int80_offset - trap_site_sysinfo_offset) : 2 \
-)
-// we used to pay attention to the instruction, but they all have length 2
-#if 0
-	register unsigned trap_len /*__asm__ ("rsi")*/ = instr_len(
-		(unsigned char*) gsp->saved_context->uc.uc_mcontext.MC_REG_IP,
-		(unsigned char*) -1 /* we don't know where the end of the mapping is */
-		);
-#endif
 
 	register long ret;
 	if (!stack_may_be_zapped)
 	{
 		ret = do_real_syscall(gsp);            /* always inlined */
-		fixup_sigframe_for_return(gsp->saved_context, ret, trap_len, NULL);
+		fixup_sigframe_for_return(gsp->saved_context, ret,
+			trap_len(&gsp->saved_context->uc.uc_mcontext), NULL);
 		__systrap_post_handling(gsp, ret, /* do_caller_fixup */ 0);
 		return;
 	}
@@ -373,32 +335,67 @@ do_generic_syscall_and_resume(struct generic_syscall *gsp)
 	 *
 	 * On 32-bit x86, how do we want this to work?
 	 * We have to use %ebp which is the only spare register.
-	 * But we have both 'delta' and 'gsp' to transfer.
+	 * But logically we have both 'delta' and 'gsp' to transfer.
+	 * We solve this by calculating the swizzled (new-stack) ebp.
+	 * We eagerly put this in %ebp for the call, having pushed
+	 * the old value. If we zapped the stack, then we now have a
+	 * new stack and %ebp is pointing correctly into that.
+	 * If we didn't zap the stack, we restore the old %ebp by popping.
 	 */
 	long int ret_op = (long int) gsp->syscall_number;
 	struct generic_syscall *swizzled_gsp = (struct generic_syscall *)((uintptr_t) gsp + delta_nbytes);
+	uintptr_t swizzled_bp;
+#if defined(__x86_64__)
+	__asm__ volatile ("movq %%rbp, %0" : "=m"(swizzled_bp) : : );
+#elif defined(__i386__)
+	__asm__ volatile ("movl %%ebp, %0" : "=m"(swizzled_bp) : : );
+#else
+#error "Unsupported architecture."
+#endif
+	swizzled_bp += delta_nbytes;
 	__asm__ volatile (
 		  "mov %[arg0], %%"stringifx(argreg0)" \n\
 		   mov %[arg1], %%"stringifx(argreg1)" \n\
 		   mov %[arg2], %%"stringifx(argreg2)" \n\
 		   mov %[arg3], %%"stringifx(argreg3)" \n\
-		   mov %[arg4], %%"stringifx(argreg4)"  \n\
-		   mov %[swizzled_gsp], %%ebp \n"
+		   mov %[arg4], %%"stringifx(argreg4)"  \n"
+	#if defined(__x86_64__)
+		  "push %%rbp\n\
+		   mov %[swizzled_bp], %%rbp \n"
 		   PERFORM_SYSCALL
 		   /* Immediately test: did our stack actually get zapped? */
-	#if defined(__x86_64__)
 		   /* FIXME: what about UNFIX_STACK_ALIGNMENT messing with %rsp? */
-		   "cmpq %%rsp, %[arg1]\n"
+		   "cmpq %%rsp, %%"stringifx(argreg1)"\n"
 		   "jne .L001$ \n" // FIXME make temporary label
-		   "mov %%rbp,%[gsp] \n"
+		   "jmp .L002$ \n" // FIXME make temporary label
+		".L001$:\n"
+		   "pop %%rbp\n"
 	#elif defined(__i386__)
-		   "cmpl %%esp, %[arg1]\n"
+		  "push %%ebp\n\
+		   mov %[swizzled_bp], %%ebp \n"
+		   PERFORM_SYSCALL
+		   /* Immediately test: did our stack actually get zapped? */
+		   "cmpl %%esp, %%"stringifx(argreg1)"\n"
 		   "jne .L001$ \n" // FIXME make temporary label
-		   "mov %%ebp,%[gsp] \n"
+		   /* Our old stack is gone. We've already put swizzled_bp in ebp where it belongs. */
+		   /* There is no need to pop the saved %ebp; our old stack is really gone!
+		    * But note that the compiler-generated code may still want %ebp,
+		    * to refer to our locals. That's why we swizzled it.
+		    * It should also be the case that our new gsp equals the old gsp plus delta_nbytes.
+		    * But we can't assert that because we no longer have the old gsp.
+		    *
+		    * We list gsp it as a memory output so that the compiler thinks it's
+		    * clobbered. That way, it will keep it in its stack slot during the asm block,
+		    * and will reload it later if it's needed in a register. Of course it
+		    * will be reloading the new, swizzled version, but that is all transparent
+		    * to the compiler. */
+		   "jmp .L002$ \n" // FIXME make temporary label
+		".L001$:\n"
+		   "pop %%ebp\n"
 	#else
 	#error "Unsupported architecture."
 	#endif
-		".L001$:\n"
+		".L002$:\n"
 		   "nop\n"
 		/* At this point, if we're the child:
 		 *
@@ -410,11 +407,10 @@ do_generic_syscall_and_resume(struct generic_syscall *gsp)
 		 */
 #if defined(__i386__)
 #elif defined(__x86_64__)
-			   /* Shuffle regs */
-
+		/* FIXME: Shuffle regs. WHY?? */
 #endif
-		  : [ret]  "+a" (ret_op), [gsp] "=m"(gsp)
-		  : [swizzled_gsp] "m" (swizzled_gsp)
+		  : [ret]  "+a" (ret_op), [gsp] "=m"(gsp)  /* gsp is a fake output, i.e. a clobber */
+		  : [swizzled_bp] "m" (swizzled_bp)        /* swizzled_bp is an input */
 		  , [arg0] "m" ((long int) gsp->args[0])
 		  , [arg1] "m" ((long int) gsp->args[1])
 		  , [arg2] "m" ((long int) gsp->args[2])
@@ -425,7 +421,8 @@ do_generic_syscall_and_resume(struct generic_syscall *gsp)
 	);
 
 	fixup_sigframe_for_return(gsp->saved_context, /*new_top_of_stack - sizeof (struct ibcs_sigframe), */
-		ret_op, trap_len, /* new_sp */ (void*) gsp->args[1]);
+		ret_op, trap_len(&gsp->saved_context->uc.uc_mcontext),
+		/* new_sp */ (void*) gsp->args[1]);
 	__systrap_post_handling(gsp, ret_op, /* do_caller_fixup */ 0);
 }
 

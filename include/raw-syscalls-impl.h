@@ -41,7 +41,9 @@
 #include <sys/types.h>
 
 #if defined(__linux__)
+#ifdef __x86_64__
 #define SYS_sigaction SYS_rt_sigaction
+#endif
 /* Before including stuff,
  * rename the kernel's distinct struct types,
  * to avoid conflict with glibc. */
@@ -336,10 +338,52 @@ struct ibcs_sigframe
 	struct __asm_siginfo info; // FIXME: this is wrong on i386
 };
 
-#if 0
-void __assert_fail(const char *assertion, const char *file,
-                   unsigned int line, const char *function) __attribute__((noreturn));
+/* Because a raw syscall might zap the stack, syscall-performing code should
+ * avoid creating a local variable to hold the precalculated trap length. Use
+ * these macros to calculate trap length at the point of use. Problem:
+ * struct ibcs_sigframe is opaque to external callers, but syscall-replacing
+ * clients really need access to it. Well, specifically they need access to
+ * a struct mcontext, since the rest is arch-specific and we should be able
+ * to hide it from them for the most part. Let' see if we can make that work. */
+#define trap_site(mctxt) ((mctxt)->MC_REG_IP)
+#ifndef __i386__
+#define trap_len(mctxt) 2 /* FIXME: x86_64-specific */
+#else /* i386 / sysinfo -specific stuff */
+#define trap_site_sysinfo_offset(mctxt) ((intptr_t)(trap_site(mctxt)) - (intptr_t)(fake_sysinfo))
+#define trap_site_is_in_fake_vdso(mctxt) (trap_site_sysinfo_offset(mctxt) >= 0 && \
+   trap_site_sysinfo_offset(mctxt) < KERNEL_VSYSCALL_MAX_SIZE)
+#define trap_len(mctxt) ( \
+    (trap_site_is_in_fake_vdso(mctxt)) ? (2 + sysinfo_int80_offset - trap_site_sysinfo_offset(mctxt)) : 2 \
+)
 #endif
+
+extern inline void
+__attribute__((always_inline,gnu_inline))
+fixup_sigframe_for_return(struct ibcs_sigframe *p_frame, long int ret, unsigned instr_len, void *maybe_new_sp)
+{
+	/* Copy the return value of the emulated syscall into the trapping context, and
+	 * resume from *after* the faulting instruction.
+	 *
+	 * Writing through p_frame is undefined behaviour in C, or at least, gcc optimises
+	 * it away for me. So do it in volatile assembly. */
+
+	// set the return value
+	// HACK: it's in the same place as the syscall number
+	__asm__ volatile ("mov %1, %0"
+		 : "=m"(p_frame->uc.uc_mcontext.MC_REG(syscallnumreg, SYSCALLNUMREG))
+		 : "r"(ret) : "memory");
+	// adjust the saved program counter to point past the trapping instr
+	__asm__ volatile ("mov %1, %0"
+		: "=m"(p_frame->uc.uc_mcontext.MC_REG_IP)
+		: "r"(p_frame->uc.uc_mcontext.MC_REG_IP + instr_len) : "memory");
+	if (maybe_new_sp)
+	{
+		__asm__ volatile ("mov %1, %0"
+			: "=m"(p_frame->uc.uc_mcontext.MC_REG_SP)
+			: "r"(maybe_new_sp) : "memory");
+	}
+}
+
 // FIXME: utility code: prototypes belong here?
 unsigned long read_hex_num(const char **p_c, const char *end);
 

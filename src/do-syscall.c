@@ -21,7 +21,7 @@ __libsystrap_noop_post_handling(struct generic_syscall *gsp, long int ret, _Bool
 		fixup_sigframe_for_return(
 			gsp->saved_context,
 			ret,
-			instr_len((unsigned char *) gsp->saved_context->uc.uc_mcontext.MC_REG_IP, (unsigned char *) -1),
+			trap_len(&gsp->saved_context->uc.uc_mcontext),
 			NULL
 		);
 	}
