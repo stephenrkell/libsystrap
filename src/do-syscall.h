@@ -294,6 +294,7 @@ do_generic_syscall_and_resume(struct generic_syscall *gsp)
 	 * rsp immediately after return, then jump straight to pretcode,
 	 * which does the sigret. Will it work? Yes, it seems to. */
 	uintptr_t *cur_stack_low;
+	void *swizzled_bp = NULL; // see below
 #if defined(__x86_64__)
 	__asm__ volatile ("movq %%rsp, %0" : "=rm"(cur_stack_low) : : );
 #elif defined(__i386__)
@@ -301,10 +302,21 @@ do_generic_syscall_and_resume(struct generic_syscall *gsp)
 #else
 #error "Unsupported architecture."
 #endif
-	uintptr_t *p_src_end = (uintptr_t *)((char*) gsp->saved_context + sizeof (struct ibcs_sigframe));
-	/* FIXME: check we are still in bounds of the new stack. */
-	uintptr_t *p_dest = (uintptr_t *) new_top_of_stack - (p_src_end - cur_stack_low);
-	long delta_nbytes = (intptr_t) p_dest - (intptr_t) new_top_of_stack;
+	/* There may be stuff on the sigframe above the struct ibcs_sigframe.
+	 * We use the saved esp to work out how much to copy.
+	 * The idea is that after sigreturn, esp == new_top_of_stack
+	 * and eip == the instruction after the trapping clone. */
+	uintptr_t *p_src_end = (uintptr_t*) (gsp->saved_context->uc.uc_mcontext.MC_REG_SP);
+
+	assert((uintptr_t) gsp > (uintptr_t) cur_stack_low);
+	assert((uintptr_t) p_src_end > (uintptr_t) cur_stack_low);
+	assert((uintptr_t) p_src_end - (uintptr_t) cur_stack_low < 0x10000u);
+	uintptr_t *p_dest_start = (uintptr_t *) new_top_of_stack - (p_src_end - cur_stack_low);
+	uintptr_t *p_dest = p_dest_start;
+	long delta_nbytes = (uintptr_t) p_dest - (uintptr_t) cur_stack_low;
+	/* FIXME: check we are still in bounds of the new stack. I guess it
+	 * should be doing MAP_GROWSDOWN...? But maybe we need to copy in
+	 * reverse order? */
 	for (uintptr_t *p_src = cur_stack_low; p_src != p_src_end; ++p_src, ++p_dest)
 	{
 		*p_dest = *p_src;
@@ -315,10 +327,18 @@ do_generic_syscall_and_resume(struct generic_syscall *gsp)
 		 * is useful here? */
 		if (*p_src < (uintptr_t) p_src_end && *p_src >= (uintptr_t) cur_stack_low)
 		{
+			// delta_nbytes is defined by the equation:
 			// srcval + delta_nbytes = destval
 			*p_dest += delta_nbytes;
+			/* ebp is the stack pointer stored at the lowest address on the
+			 * current stack. Oh, wait. I think we are changing that
+			 * in this code. In fact so is p_src... also such a pointer. */
+			if (!swizzled_bp) swizzled_bp = (void*)(*p_dest); // MONSTER HACK
 		}
 	}
+	assert(swizzled_bp);
+	assert((uintptr_t) swizzled_bp < (uintptr_t) new_top_of_stack);
+	assert((uintptr_t) swizzled_bp >= (uintptr_t) p_dest_start);
 	/* After the syscall we're already using the new stack, so make it right. */
 	gsp->args[1] = (uintptr_t)(void*)(p_dest - 1);
 	/* We have to use one big asm in order to keep stuff
@@ -343,16 +363,26 @@ do_generic_syscall_and_resume(struct generic_syscall *gsp)
 	 * If we didn't zap the stack, we restore the old %ebp by popping.
 	 */
 	long int ret_op = (long int) gsp->syscall_number;
-	struct generic_syscall *swizzled_gsp = (struct generic_syscall *)((uintptr_t) gsp + delta_nbytes);
-	uintptr_t swizzled_bp;
-#if defined(__x86_64__)
-	__asm__ volatile ("movq %%rbp, %0" : "=m"(swizzled_bp) : : );
-#elif defined(__i386__)
-	__asm__ volatile ("movl %%ebp, %0" : "=m"(swizzled_bp) : : );
-#else
-#error "Unsupported architecture."
-#endif
-	swizzled_bp += delta_nbytes;
+	// struct generic_syscall *swizzled_gsp = (struct generic_syscall *)((uintptr_t) gsp + delta_nbytes);
+	//void *swizzled_bp = (struct generic_syscall *)((uintptr_t) gsp + delta_nbytes);
+	/* To get %ebp and then swizzle it, one would think
+	 * we could simply use inline asm, or
+	 * we could maybe use __builtin_frame_address(0).
+	 * However, if we use either of these
+	 * here, GCC will deem our constraints later to be insoluble.
+	 * At first I thought it was snooping on our use of %ebp/%rbp in
+	 * assembly. But that's not the case... it is happy with our clobber/
+	 * restore of %ebp in the assembly below. I even tried raw binary
+	 * instructions to disguise access to %ebp/%rbp, to no avail.
+	 * It seems the problem is triggered if swizzled_bp is the output of
+	 * *any* asm or builtin, even 'nop' like this.
+	 *__asm__ ("nop" : "=r"(swizzled_bp) : : );
+	 * We work around this in a very sneaky way. Our current
+	 * %ebp is a fixed offset from the lowest stack address currently
+	 * saved on the stack (assuming none of our locals points to a local).
+	 * So when we do a copy-and-relocate of the stack (above), we
+	 * snarf the first pointer we relocate.*/
+
 	__asm__ volatile (
 		  "mov %[arg0], %%"stringifx(argreg0)" \n\
 		   mov %[arg1], %%"stringifx(argreg1)" \n\
@@ -376,10 +406,11 @@ do_generic_syscall_and_resume(struct generic_syscall *gsp)
 		   PERFORM_SYSCALL
 		   /* Immediately test: did our stack actually get zapped? */
 		   "cmpl %%esp, %%"stringifx(argreg1)"\n"
-		   "jne .L001$ \n" // FIXME make temporary label
-		   /* Our old stack is gone. We've already put swizzled_bp in ebp where it belongs. */
+		   "je .L001$ \n" // FIXME make temporary label
+		   /* When we take this jump, our old stack is gone. We've already put swizzled_bp
+		    * in ebp where it belongs. */
 		   /* There is no need to pop the saved %ebp; our old stack is really gone!
-		    * But note that the compiler-generated code may still want %ebp,
+		    * But note that the compiler-generated code may still need %ebp,
 		    * to refer to our locals. That's why we swizzled it.
 		    * It should also be the case that our new gsp equals the old gsp plus delta_nbytes.
 		    * But we can't assert that because we no longer have the old gsp.
@@ -389,26 +420,26 @@ do_generic_syscall_and_resume(struct generic_syscall *gsp)
 		    * and will reload it later if it's needed in a register. Of course it
 		    * will be reloading the new, swizzled version, but that is all transparent
 		    * to the compiler. */
-		   "jmp .L002$ \n" // FIXME make temporary label
-		".L001$:\n"
+		   /* The swizzled bp is critical, because if we're the child:
+		    *
+		    * (1) we can't safely use anything that might have been spilled to the old stack.
+		    *
+		    * (2 we can't look at the old sigframe, even via its absolute ptr, because
+		    *    the other thread might have finished with it and cleaned up.
+		    *
+		    * Instead, use the copy we put in the new stack. This is all hidden from
+		    * the compiler, who thinks we haven't touched our bp.
+		    *
+		    * So the following code should work automagically through our swizzled ebp, since
+		    * that's where we get our locals, including gsp. That, in turn, was swizzled
+		    * above when we copied the stack.
+		    */
 		   "pop %%ebp\n"
 	#else
 	#error "Unsupported architecture."
 	#endif
 		".L002$:\n"
 		   "nop\n"
-		/* At this point, if we're the child:
-		 *
-		 * (1) we can't safely use anything that might have been spilled to the stack.
-		 *
-		 * (2 we can't look at the old sigframe, even via its absolute ptr, because
-		 *    the other thread might have finished with it and cleaned up.
-		 *    Instead, use the copy we put in the new stack.
-		 */
-#if defined(__i386__)
-#elif defined(__x86_64__)
-		/* FIXME: Shuffle regs. WHY?? */
-#endif
 		  : [ret]  "+a" (ret_op), [gsp] "=m"(gsp)  /* gsp is a fake output, i.e. a clobber */
 		  : [swizzled_bp] "m" (swizzled_bp)        /* swizzled_bp is an input */
 		  , [arg0] "m" ((long int) gsp->args[0])
@@ -419,10 +450,16 @@ do_generic_syscall_and_resume(struct generic_syscall *gsp)
 		  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%"stringifx(argreg2),
 		    "%"stringifx(argreg3), "%"stringifx(argreg4), DO_SYSCALL_CLOBBER_LIST(5)
 	);
-
+	// FIXME: can we do this fixup before the clone, but
+	// after the stack copy. We just fix up the copied context
+	// on the stack, speculatively. Might be cleaner and fit with our
+	// "walk the stack and fix up saved BPs only" idea, i.e. minimise
+	// how many on-stack pointers have to work to get us to the sigreturn.
 	fixup_sigframe_for_return(gsp->saved_context, /*new_top_of_stack - sizeof (struct ibcs_sigframe), */
 		ret_op, trap_len(&gsp->saved_context->uc.uc_mcontext),
-		/* new_sp */ (void*) gsp->args[1]);
+		/* new_sp: we have a new sp only if we're the child.
+		 * We can detect that using ret_op i.e. clone()'s return value. */
+		(ret_op == 0) ? (void*) gsp->args[1] : NULL);
 	__systrap_post_handling(gsp, ret_op, /* do_caller_fixup */ 0);
 }
 

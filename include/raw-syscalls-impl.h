@@ -30,10 +30,10 @@
 /* Define some generic register aliases */
 #if defined(__x86_64__)
 #define MC_REG_IP MC_REG(rip, RIP)
-#define MC_REG_SP MC_REG(rip, RSP)
+#define MC_REG_SP MC_REG(rsp, RSP)
 #elif defined(__i386__)
 #define MC_REG_IP MC_REG(eip, EIP)
-#define MC_REG_SP MC_REG(eip, ESP)
+#define MC_REG_SP MC_REG(esp, ESP)
 #else
 #error "Unrecognised architecture"
 #endif
