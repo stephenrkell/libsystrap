@@ -134,7 +134,7 @@ void init_fds(void)
 	 * be open at process start. We fdopen it to get a FILE object. */
 	if (trace_fd >= 0)
 	{
-		if (fcntl(F_GETFD, trace_fd) != -1)
+		if (fcntl(trace_fd, F_GETFD) != -1)
 		{
 			debug_printf(0, "fd %d is open; outputting traces there.\n", trace_fd);
 			traces_out = fdopen(trace_fd, "a");

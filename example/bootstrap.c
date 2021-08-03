@@ -9,12 +9,17 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <sys/syscall.h>
+#include <ctype.h>
+#include <errno.h>
+#include <dirent.h>
 #include <string.h> // for memcpy
 #include "dso-meta.h" // includes link.h
 #include "systrap.h"
 #include "vas.h"
 #include "trace-syscalls.h" // FIXME: move us out of example/ into src/
 
+int openat(int dirfd, const char *pathname, int flags, ...);
+int open(const char *pathname, int flags, ...);
 /* Replacement syscalls for
  *
  * - in-process bootstrapping of instrumentation
@@ -47,8 +52,8 @@
 #define REPLACE(name) \
 /* we expect a name_args and name_ret_t... */ \
 /* ... name_args is a higher-order macro expandable with expand_name, above, and friends... */ \
-static void replacement_ ## name (struct generic_syscall *s, post_handler *post) __attribute__((unused)); \
-static void replacement_ ## name (struct generic_syscall *s, post_handler *post) \
+void replacement_ ## name (struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden"))); \
+void replacement_ ## name (struct generic_syscall *s, post_handler *post) \
 { \
 	name ## _args(init_from_generic, ;); \
 	name ## _ret_t ret = bootstrap_ ## name( name ## _args(expand_name, comma) ); \
@@ -61,7 +66,7 @@ __asm__( ".pushsection __replaced_syscalls,\"aw\", @progbits\n"\
   ASMPTR " replacement_" #name "\n"\
   ".popsection\n"\
 );
-#define bootstrap_proto(n) n ## _ret_t bootstrap_ ## n( n ## _args (expand_name_and_type, comma) )
+#define bootstrap_proto(n) __attribute__((visibility("hidden"))) n ## _ret_t  bootstrap_ ## n( n ## _args (expand_name_and_type, comma) )
 // count argv entries, not including terminator
 #ifdef CHAIN_LOADER
 #include "chain.h"
@@ -72,17 +77,232 @@ static unsigned argv_count(char *const *argv)
 	return n;
 }
 
+/* For some reason this doesn't always inline, so we need to macroify it. */
+// static char **(__attribute__((always_inline)) realloca_argv_with_prefix)(
+//	char *const *argv, char *const *pre_argv
+//)
+#define realloca_argv_with_prefix(argv, pre_argv) \
+({ \
+	unsigned count = argv_count(argv); \
+	unsigned n_pre = argv_count(pre_argv); \
+	char **new_argv = alloca((argv_count(argv) + n_pre + 1) * sizeof (char*)); \
+	memcpy(new_argv, pre_argv, n_pre * sizeof (char*)); \
+	memcpy(new_argv + n_pre, argv, (count + /* include NULL */ 1) * sizeof (char*)); \
+	/*return*/ new_argv; \
+})
+
+/* To expand argv across #!-lines and the like, we want to
+ * be careful about race conditions. One rule of thumb is
+ * never to open the same file twice... so if we open a file
+ * and then want to exec it, exec /proc/self/fds/n instead,
+ * and use '*at()' calls so that relative paths are resolved
+ * consistently. Probably we want *always* to exec something
+ * in /proc/self/fds/n, because there will be some binary
+ * formats the kernel is happy to execute but we don't want
+ * to, at least not without warning, because if they're not
+ * ELF then we can't chain-load them and won't provide whatever
+ * added value our client is there for.
+ *
+ * When we exec something under /proc, we leave its "real" name
+ * in argv[0].
+ *
+ * Some special cases we can easily support:
+ *
+ * non-ELF files that are registered with binfmt-misc
+ *
+ * non-ELF files whose format we recognise: run them with /bin/sh
+ * ...
+ * an empty file: we just run this with /bin/sh, no special case
+ */
+
+int recursively_resolve_elf_and_execveat(
+   int dirfd, const char *filename,
+   char *const *argv, char *const *envp
+)
+{
+	if (0 != strcmp(filename, argv[0]))
+	{
+		debug_printf(0, "Warning: execing inconsistent filename and argv[0]: \"%s\" vs \"%s\"\n",
+			filename, argv[0]);
+	}
+	int fd = openat(dirfd, filename, O_RDONLY);
+	if (fd == -1) return -ENOENT;
+	/* We snarf the proc-based filename of the thing we opened, because
+	 * it is an actually race-free identifier for that thing. We will
+	 * substitute it later. */
+	unsigned sz = sizeof "/proc/NNNNNNNNNN/fd/MMMMMMMMMM";
+	char proc_filename_buf[sz];
+	int ret = snprintf(proc_filename_buf, sz, "/proc/%d/fd/%d", getpid(), fd);
+	assert(ret > 0);
+	/* From now on, we use only the proc-resolved names, except for being friendly. */
+	const char *friendly_filename = filename;
+	char *const *friendly_argv = argv;
+	filename = proc_filename_buf;
+	char *hacked_argv_head[] = {
+		proc_filename_buf, // e.g. "/proc/self/fd/NN" where fd NN is a shell script
+		NULL
+	};
+	char **hacked_argv = realloca_argv_with_prefix(
+		argv + 1, hacked_argv_head
+	);
+	{
+	char *const *argv = hacked_argv;
+	// is it an ELF file?
+	char eident[EI_NIDENT];
+	char *pos = eident;
+	ssize_t nread;
+	while (-1 != (nread = read(fd, pos, sizeof eident - (pos - eident))))
+	{
+		pos += nread;
+		if (nread == 0) break; // EOF
+		if (nread == sizeof eident)
+		{
+			if (0 == memcmp(eident, "\177ELF", 4))
+			{
+				// we got an ELF file, so let's try
+				char *elf_prefix_argv[] = {
+					OUR_LDSO_NAME,
+					NULL
+				};
+				char **new_argv = realloca_argv_with_prefix(
+					argv, elf_prefix_argv
+				);
+				return syscall(/*__NR_execveat*/ 358, dirfd, new_argv[0], new_argv, envp, 0);
+			}
+		}
+	}
+	assert(pos <= &eident[EI_NIDENT]);
+	// if we got here, it's not an ELF file, but...
+	if ((pos - eident) >= 3 && 0 == memcmp(eident, "#!", 2))
+	{
+		// it's telling us the interpreter to use
+		// we need to read a whole line, maybe longer than the ELF ident
+		char *buf = eident;
+		unsigned bufsz = EI_NIDENT;
+		char *newlinepos = &buf[2] - 1;
+		ssize_t nread = EI_NIDENT;
+		/* pos <= &eident[EI_NIDENT] , and is the furthest that we've read. */
+		// search forwards, growing the buffer
+		// and filling it from the file as necessary
+		while (*++newlinepos != '\n')
+		{
+			if (newlinepos == pos)
+			{
+				// run out of chars read, but have we run out of buffer?
+				if (pos == buf + bufsz)
+				{
+					// grow the buffer
+					char *newbuf = alloca(4 * bufsz);
+					bufsz *= 4;
+					memcpy(newbuf, buf, pos - buf);
+					pos = newbuf + (pos - buf);
+					newlinepos = newbuf + (newlinepos - buf);
+					buf = newbuf;
+				}
+				// read into the space
+				assert(pos < buf + bufsz);
+				nread = read(fd, pos, bufsz - (pos - buf));
+				if (nread == 0)
+				{
+					// we hit EOF before we found a newline, so it's not a valid #! file
+					goto not_hashbang;
+				}
+				// OK, the extent of our valid read buffer has grown
+				pos += nread;
+				assert(newlinepos < pos);
+			}
+		}
+		assert(newlinepos);
+		assert(newlinepos < pos);
+		assert(*newlinepos == '\n');
+		// now we've found a newline; also need to word-split the #! line
+		// Linux only permits one argument here, so it's a bit easier
+		char *execfnpos = buf + 2;
+		// skip over space between "#!" and the filename
+		while (isspace(*execfnpos)) { ++execfnpos; assert(execfnpos < pos); }
+		char *argpos = execfnpos;
+		// now search forward for an actual space, or newline
+		while (!isspace(*argpos)) { ++argpos; assert(argpos < pos); }
+		assert(isspace(*argpos));
+		if (argpos != newlinepos)
+		{
+			// we found a space after the exec filename and before the newline
+			char *notspacepos = argpos;
+			while (isspace(*notspacepos) && *notspacepos != '\n')
+			{ ++notspacepos; assert(notspacepos < pos); }
+			if (*notspacepos != '\n')
+			{
+				// we found an arg -- clobber the data to ensure termination
+				argpos = notspacepos;
+				char *arg_endpos = argpos;
+				while (!isspace(*arg_endpos)) ++arg_endpos;
+				*arg_endpos = '\0';
+			}
+			else
+			{
+				// there was no arg
+				argpos = newlinepos;
+			}
+		}
+		// else we didn't really find a space after the filename
+		unsigned max_filename_len = argpos - execfnpos;
+		char interp_filename[max_filename_len + 1 /* terminator */];
+		memcpy(interp_filename, execfnpos, argpos - execfnpos);
+		char *execfn_endpos = argpos;
+		// can safely step backwards -- will hit '#!' before start of buffer
+		while (isspace(*(execfn_endpos - 1))) --execfn_endpos;
+		interp_filename[execfn_endpos - execfnpos] = '\0';
+
+		char *prefix[] = {
+			interp_filename, // snarfed from the file
+			(argpos && argpos != newlinepos) ? argpos : NULL,
+			NULL
+		};
+		// The interpreters prefix is what we previously accumulated.
+		// We just expanded that with the desired interpreter filename...
+		// ... read from the file itself. So far, so filenamey.
+		char **new_argv = realloca_argv_with_prefix(
+			argv, prefix
+		);
+		/* What does our recursive invocation need to do? Now that we
+		 * have unwrapped the target file and snarfed its interpreter
+		 */
+		// ... BUT we also resolved 'filename' a.k.a. argv[0]. We don't
+		// want to racily allow that to be reinterpreted. Instead we
+		// substitute the proc buf where 'filename' was previously.
+		/* We want to replace argv[0] with the proc filename that
+		 * we calculated at the beginning. For constness reasons, we
+		 * instead allocate a new argv. */
+		return recursively_resolve_elf_and_execveat(
+			dirfd, new_argv[0],
+			new_argv, envp
+		);
+	}
+not_hashbang:
+	// if we got here, it's not an ELF file and not '#!'
+	// FIXME: try the registered binfmt-misc handlers
+	return -ENOEXEC;
+	/* NOTE: I was wondering how to get the behaviour of running a file
+	 * as a shell script when it has no hash-bang and is not a recognised
+	 * binary format... since that turns *any file* into something we can
+	 * try running using the /bin/sh interpreter, making ENOEXEC useless.
+	 * But I believe that this behaviour is actually implemented by the
+	 * shell, not by execve(), and is tried precisely when execve returns
+	 * -ENOEXEC. So we don't need to emulate that here. */
+	} // end argv fake-block
+}
+
 #define execve_ret_t int
 #define execve_args(v, sep) \
     v(const char *, filename, 0) sep   v(char *const *, argv, 1) sep \
     v(char *const *, envp, 2)
 bootstrap_proto(execve)
 {
-	unsigned count = argv_count(argv);
-	char **new_argv = alloca((argv_count(argv) + 2) * sizeof (char*));
-	new_argv[0] = OUR_LDSO_NAME;
-	memcpy(new_argv + 1, argv, (count + 1) * sizeof (char*));
-	return execve(OUR_LDSO_NAME, new_argv, envp);
+	int dirfd = open(".", O_RDONLY|O_DIRECTORY);
+	return recursively_resolve_elf_and_execveat(
+		dirfd, filename,
+		argv, envp
+	);
 }
 REPLACE(execve)
 
@@ -92,13 +312,10 @@ REPLACE(execve)
     v(char *const *, argv, 2) sep  v(char *const *, envp, 3)
 bootstrap_proto(execveat)
 {
-	unsigned count = argv_count(argv);
-	char **new_argv = alloca((argv_count(argv) + 2) * sizeof (char*));
-	new_argv[0] = OUR_LDSO_NAME;
-	memcpy(new_argv + 1, argv, (count + 1) * sizeof (char*));
-	/* FIXME: Linux has an execveat syscall but there's no wrapper.
-	 * I'm not even sure the prototype is right. */
-	return syscall(/*__NR_execveat*/ 358, dirfd, OUR_LDSO_NAME, new_argv, envp);
+	return recursively_resolve_elf_and_execveat(
+		dirfd, filename,
+		argv, envp
+	);
 }
 REPLACE(execveat)
 #endif /* CHAIN_LOADER */

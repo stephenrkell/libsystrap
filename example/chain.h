@@ -1,6 +1,8 @@
 #ifndef CHAIN_H_
 #define CHAIN_H_
 
+#define DONALD_NAME "trace-syscalls-ld"
+
 #include "chain-decls.h"
 #include "donald.h"
 
