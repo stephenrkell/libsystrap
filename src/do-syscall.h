@@ -396,9 +396,7 @@ do_generic_syscall_and_resume(struct generic_syscall *gsp)
 		   /* Immediately test: did our stack actually get zapped? */
 		   /* FIXME: what about UNFIX_STACK_ALIGNMENT messing with %rsp? */
 		   "cmpq %%rsp, %%"stringifx(argreg1)"\n"
-		   "jne .L001$ \n" // FIXME make temporary label
-		   "jmp .L002$ \n" // FIXME make temporary label
-		".L001$:\n"
+		   "je .L001$ \n" // FIXME make temporary label
 		   "pop %%rbp\n"
 	#elif defined(__i386__)
 		  "push %%ebp\n\
@@ -438,7 +436,7 @@ do_generic_syscall_and_resume(struct generic_syscall *gsp)
 	#else
 	#error "Unsupported architecture."
 	#endif
-		".L002$:\n"
+		".L001$:\n"
 		   "nop\n"
 		  : [ret]  "+a" (ret_op), [gsp] "=m"(gsp)  /* gsp is a fake output, i.e. a clobber */
 		  : [swizzled_bp] "m" (swizzled_bp)        /* swizzled_bp is an input */
