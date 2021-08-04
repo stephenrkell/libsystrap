@@ -91,6 +91,9 @@ static unsigned argv_count(char *const *argv)
 	/*return*/ new_argv; \
 })
 
+#define PROC_BUF_SZ(longest_pid, longest_fd) \
+     sizeof "/proc/" #longest_pid "/fd/" #longest_fd
+
 /* To expand argv across #!-lines and the like, we want to
  * be careful about race conditions. One rule of thumb is
  * never to open the same file twice... so if we open a file
@@ -122,7 +125,7 @@ int recursively_resolve_elf_and_execveat(
 {
 	if (0 != strcmp(filename, argv[0]))
 	{
-		debug_printf(0, "Warning: execing inconsistent filename and argv[0]: \"%s\" vs \"%s\"\n",
+		debug_printf(1, "execing inconsistent filename and argv[0]: \"%s\" vs \"%s\"\n",
 			filename, argv[0]);
 	}
 	int fd = openat(dirfd, filename, O_RDONLY);
@@ -130,13 +133,14 @@ int recursively_resolve_elf_and_execveat(
 	/* We snarf the proc-based filename of the thing we opened, because
 	 * it is an actually race-free identifier for that thing. We will
 	 * substitute it later. */
-	unsigned sz = sizeof "/proc/NNNNNNNNNN/fd/MMMMMMMMMM";
+	unsigned sz = PROC_BUF_SZ(self, INT_MAX);
 	char proc_filename_buf[sz];
-	int ret = snprintf(proc_filename_buf, sz, "/proc/%d/fd/%d", getpid(), fd);
+	//int ret = snprintf(proc_filename_buf, sz, "/proc/%d/fd/%d", getpid(), fd);
+	int ret = snprintf(proc_filename_buf, sz, "/proc/self/fd/%d", fd);
 	assert(ret > 0);
 	/* From now on, we use only the proc-resolved names, except for being friendly. */
-	const char *friendly_filename = filename;
-	char *const *friendly_argv = argv;
+	const char *friendly_filename __attribute__((unused)) = filename;
+	char *const *friendly_argv  __attribute__((unused)) = argv;
 	filename = proc_filename_buf;
 	char *hacked_argv_head[] = {
 		proc_filename_buf, // e.g. "/proc/self/fd/NN" where fd NN is a shell script
@@ -167,7 +171,52 @@ int recursively_resolve_elf_and_execveat(
 				char **new_argv = realloca_argv_with_prefix(
 					argv, elf_prefix_argv
 				);
-				return syscall(/*__NR_execveat*/ 358, dirfd, new_argv[0], new_argv, envp, 0);
+				assert(0 == strcmp(new_argv[0], OUR_LDSO_NAME));
+				/* We don't *have* to set argv[0] equal to filename...
+				 * it's supposed to be "what the program thinks it's called",
+				 * so do a sneaky switcheroo. Though hmm, this creates
+				 * a bogus overall command line, e.g.
+
+				 ["./truemk", "/proc/self/fd/6", "-qf", "/proc/self/fd/5"]
+
+				 * ... because './truemk' is standing in for OUR_LDSO_NAME.
+				 * Is this really adding value anywhere? I guess tools like
+				 * 'ps' like to use argv[0]? If so we could make it say
+				 * things like 'truemk [interpreted]' ? exename will point
+				 * to the interpreter and the rest of argv will make up
+				 * a sane invocation. Not all process-introspecting clients
+				 * will know how to decode this, of course, so this may be
+				 * too cute. We ourselves use argv[0] when we should perhaps
+				 * use exename... the former has the benefit that it's in the
+				 * address space, whereas exename may need a readlink(). */
+				// FIXME: we could perhaps record the number of arguments
+				// that come from interpreters, vs the program itself
+				// e.g. above would be 3, because program's args start after
+				// "/proc/self/fd/5" (and happen to be empty, here).
+				// Then make it say "[interpreted 3]" or whatever.
+				// NOTE: on startup, it's tempting to say: when we see a
+				// /proc/self/fd/NN argument, that we're sure was put there by
+				// us, to rewrite it (assuming it readlinks to a named file).
+				// But that's bad! The whole point of passing the fds is that
+				// it should see the same file we saw (not just file name).
+				// THOUGH I guess it only matters if we do some
+				// access-control-style checks on those files and so care
+				// about avoiding races... otherwise probably benign.
+				char *fake_argv0 = friendly_argv[0];
+				char *found;
+				if (NULL != (found = strrchr(fake_argv0, '/')))
+				{
+					const char to_append[] = " [interpreted]";
+					unsigned sz = strlen(found+1) + sizeof to_append + 1;
+					char *buf = alloca(sz);
+					buf[0] = '\0';
+					strcat(buf, found+1);
+					strcat(buf, to_append);
+					fake_argv0 = buf;
+				}
+				new_argv[0] = fake_argv0;
+				return syscall(/*__NR_execveat*/ 358, dirfd,
+					/* filename is always us */ OUR_LDSO_NAME, new_argv, envp, 0);
 			}
 		}
 	}
@@ -264,17 +313,14 @@ int recursively_resolve_elf_and_execveat(
 		char **new_argv = realloca_argv_with_prefix(
 			argv, prefix
 		);
-		/* What does our recursive invocation need to do? Now that we
-		 * have unwrapped the target file and snarfed its interpreter
-		 */
-		// ... BUT we also resolved 'filename' a.k.a. argv[0]. We don't
-		// want to racily allow that to be reinterpreted. Instead we
-		// substitute the proc buf where 'filename' was previously.
-		/* We want to replace argv[0] with the proc filename that
-		 * we calculated at the beginning. For constness reasons, we
-		 * instead allocate a new argv. */
+		char *new_filename = new_argv[0];
+		// HACK-y idea: put the friendly name in argv[0].
+		// CARE: will this end up in an argv[1] or later position,
+		// where it's not valid... maybe? NO if we get things right,
+		// because we'll take the filename from 'filename', not argv[0]
+		new_argv[0] = friendly_argv[0];
 		return recursively_resolve_elf_and_execveat(
-			dirfd, new_argv[0],
+			dirfd, new_filename,
 			new_argv, envp
 		);
 	}
@@ -298,7 +344,7 @@ not_hashbang:
     v(char *const *, envp, 2)
 bootstrap_proto(execve)
 {
-	int dirfd = open(".", O_RDONLY|O_DIRECTORY);
+	int dirfd = open(".", O_RDONLY|O_DIRECTORY|O_CLOEXEC);
 	return recursively_resolve_elf_and_execveat(
 		dirfd, filename,
 		argv, envp
@@ -388,7 +434,7 @@ bootstrap_proto(mmap)
 		/* OK, we've mapped something. */
 		if (fd == -1) goto no_file;
 		// by the way, what's the filename?
-		char buf[sizeof "/proc/0000000000/fd/0000000000"];
+		char buf[PROC_BUF_SZ(PID_MAX_LIMIT, INT_MAX)];
 		int ret = snprintf(buf, sizeof buf, "/proc/%d/fd/%d", getpid(), fd);
 		char buf2[/*PATH_MAX*/ 4096];
 		if (ret > 0)
