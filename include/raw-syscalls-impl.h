@@ -38,7 +38,11 @@
 #error "Unrecognised architecture"
 #endif
 
+/* sys/types.h, but working around musl's paren-light style */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wparentheses"
 #include <sys/types.h>
+#pragma GCC diagnostic pop
 
 #if defined(__linux__)
 #ifdef __x86_64__
