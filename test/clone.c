@@ -5,6 +5,7 @@
 #include <sched.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <stdio.h>
 
 static int the_function(void *arg)
 {
@@ -19,8 +20,11 @@ int main(void)
 	void *the_stack = mmap(NULL, 4096, PROT_READ|PROT_WRITE,
 		MAP_PRIVATE|MAP_ANONYMOUS|MAP_GROWSDOWN, -1, 0);
 	if (the_stack == MAP_FAILED) exit(1);
-	the_stack = (void*)((uintptr_t) the_stack + (4096 & 0xfff0));
-
+	the_stack = (void*)((uintptr_t) the_stack + (4096 - sizeof (void*)));
+	fprintf(stdout, "Cloning a thread to run %p using new 4kB stack with topmost address %p\n",
+		the_function,
+		the_stack);
+	fflush(stdout);
 	int tid = clone(the_function,
 		the_stack,
 		flags,
