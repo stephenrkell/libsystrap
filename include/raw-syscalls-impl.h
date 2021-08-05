@@ -38,6 +38,14 @@
 #error "Unrecognised architecture"
 #endif
 
+#if defined(__i386__)
+/* sys/types.h, but working around musl's paren-light style */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wparentheses"
+#include <sys/types.h>
+#pragma GCC diagnostic pop
+#endif
+
 #if defined(__linux__)
 #ifdef __x86_64__
 #define SYS_sigaction SYS_rt_sigaction
