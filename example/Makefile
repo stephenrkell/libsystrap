@@ -25,6 +25,8 @@ CONTRIB := $(srcroot)/contrib
 CONFIG ?= $(CONTRIB)/config.mk
 DONALD ?= $(srcroot)/contrib/donald
 
+CFLAGS += -DOUR_LDSO_DIR="\"$(shell pwd)/\""
+
 default: trace-syscalls.so trace-syscalls-ld.so
 
 $(CONTRIB)/config.mk:

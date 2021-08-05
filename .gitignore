@@ -15,3 +15,11 @@ example/trace-syscalls.so.map
 lib/libsystrap.a
 src/libsystrap.a
 test/clone
+test/core
+test/gettimeofday
+test/hello
+test/true-execve
+test/truemk-execve
+test/truesh-execve
+src/objs_list
+*.a

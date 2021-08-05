@@ -1,0 +1,5 @@
+#! /usr/bin/make -qf
+
+# I depend on me
+.PHONY: default
+default: $(lastword $(MAKEFILE_LIST))
