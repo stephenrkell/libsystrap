@@ -5,7 +5,12 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <stdio.h>
+/* sys/types.h, but working around musl's paren-light style */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wparentheses"
 #include <sys/types.h>
+#pragma GCC diagnostic pop
+
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <link.h>

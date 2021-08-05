@@ -68,7 +68,11 @@ struct __libc_timespec;
 struct __libc_timeval;
 #define itimerval __libc_itimerval
 #define itimerspec __libc_itimerspec
+/* sys/types.h, but working around musl's paren-light style */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wparentheses"
 #include <sys/types.h>
+#pragma GCC diagnostic pop
 #include <sys/time.h>
 #undef timezone
 #undef timespec
