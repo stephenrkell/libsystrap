@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 
+// we need ibcs_sigframe, so we need the asm ucontext stuff
 #include "raw-syscalls-impl.h" /* always include raw-syscalls first, and let it do the asm includes */
 
 #include <stdio.h>
@@ -204,9 +205,7 @@ bootstrap_proto(mmap)
 			for (ElfW(Phdr) *p = &phdrs[0]; p < &phdrs[ehdr.e_phnum]; ++p)
 			{
 				if (p->p_type != PT_LOAD) continue;
-				_Bool offset_matches = (
-					((ROUND_DOWN(p->p_offset, page_size)) / page_size)
-					 == pgoffset);
+				_Bool offset_matches = ((ROUND_DOWN(p->p_offset, page_size)) == offset);
 				if (offset_matches)
 				{
 					// what if there are two mappings with the same offset/pgoffset?
