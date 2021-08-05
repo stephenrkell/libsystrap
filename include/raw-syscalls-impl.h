@@ -38,8 +38,6 @@
 #error "Unrecognised architecture"
 #endif
 
-#include <sys/types.h>
-
 #if defined(__linux__)
 #ifdef __x86_64__
 #define SYS_sigaction SYS_rt_sigaction
@@ -49,11 +47,47 @@
  * to avoid conflict with glibc. */
 #define AVOID_LIBC_SIGNAL_H_
 
-#define timezone __asm_timezone
-#define timespec __asm_timespec
-#define timeval __asm_timeval
-#define itimerval __asm_itimerval
-#define itimerspec __asm_itimerspec
+/* sys/time.h (which later code wants to include)
+ * conflicts with linux/time.h, which asm/signal.h includes :-(
+ * linux/time.h #defines ITIMER_* to their literal values,
+ * but sys/time.h wants to define an enum using the tokens
+ * as the enumerators. So if we're not careful we'll get "0 = 0"
+ * coming out in the enum. We need to include sys/time.h first.
+ * sys/time.h also defines (by inclusion) struct timeval, which
+ * Linux wants to define. */
+// #define timezone __asm_timezone
+// #define timespec __asm_timespec
+// #define timeval __asm_timeval
+// #define itimerval __asm_itimerval
+// #define itimerspec __asm_itimerspec
+#define timezone __libc_timezone
+struct __libc_timezone;
+#define timespec __libc_timespec
+struct __libc_timespec;
+#define timeval __libc_timeval
+struct __libc_timeval;
+#define itimerval __libc_itimerval
+#define itimerspec __libc_itimerspec
+#include <sys/types.h>
+#include <sys/time.h>
+#undef timezone
+#undef timespec
+#undef timeval
+#undef itimerval
+#undef itimerspec
+#undef _STRUCT_TIMESPEC
+#undef _STRUCT_TIMEVAL
+/* Now we've got all the usual sys time stuff, __libc_-prefixed.
+ * And linux/time.h wants to define its own version. */
+#include <linux/time.h>
+#define __asm_timezone timezone
+#define __asm_timespec timespec
+#define __asm_timeval timeval
+#define __asm_itimerval itimerval
+#define __asm_itimerspec itimerspec
+#undef ITIMER_REAL
+#undef ITIMER_VIRTUAL
+#undef ITIMER_PROF
 #define sigset_t __asm_sigset_t
 #define sigaction __asm_sigaction
 #define siginfo __asm_siginfo
@@ -64,14 +98,7 @@
 #define stack_t __asm_stack_t
 #define ucontext __asm_ucontext
 #define pid_t __kernel_pid_t
-/* sys/time.h (which later code wants to include)
- * conflicts with linux/time.h, which asm/signal.h includes :-( */
-#undef ITIMER_REAL
-#undef ITIMER_VIRTUAL
-#undef ITIMER_PROF
-#undef _STRUCT_TIMESPEC
-#include <linux/time.h>
-#include <asm/signal.h>
+#include <asm/signal.h> /* is going to include linux/time.h, so we did it above */
 #include <asm/sigcontext.h>
 #include <asm/siginfo.h>
 #include <asm/ucontext.h>
@@ -85,6 +112,7 @@
 #undef timeval
 #undef itimerval
 #undef itimerspec
+
 #undef sigset_t
 #undef sigaction
 #undef siginfo
