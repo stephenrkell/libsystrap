@@ -39,8 +39,10 @@ CFLAGS += $(LIBC_CFLAGS)
 CFLAGS += -DSYSTRAP_DEFINE_FILE
 CFLAGS += -I$(XED_DIR)/include
 
+ifneq ($(MAKECMDGOAL),clean)
 ifeq ($(LIBRUNT_DIR),)
 $(error Please install the librunt source tree and set LIBRUNT_DIR to point to it)
+endif
 endif
 
 ifeq ($(realpath $(srcroot)/lib/libsystrap.a),)
