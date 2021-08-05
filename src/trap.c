@@ -20,6 +20,7 @@
  */
 
 #define _GNU_SOURCE
+#include "raw-syscalls-impl.h"
 /* Don't use C library calls from this code! We run before the
  * C library is initialised. Also, the definitions in asm/ conflict
  * with some libc headers, particularly typedefs related to signal
@@ -200,6 +201,15 @@ void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *e
 	static struct link_map *ld_so_link_map;
 	if (!ld_so_link_map)
 	{
+		/* NOTE: sometimes our own code will need to call into the dynamic
+		 * linker, e.g. to call __tls_get_addr. So if we're walking the 
+		 * dynamic linker, leave it executable.
+		 *
+		 * If we are a preload library, this isn't really an extra
+		 * security weakness because our own code is in the same boat.
+		 *
+		 * If we *are* the dynamic linker, this problem goes away, because
+		 * we never take away our own permissions. */
 		ld_so_link_map = get_highest_loaded_object_below(__tls_get_addr);
 	}
 	debug_printf(1, "_r_debug is at %p\n", &_r_debug);
@@ -214,12 +224,6 @@ void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *e
 	
 	if (!is_writable)
 	{
-		/* NOTE: sometimes our own code will need to call into the dynamic
-		 * loader, e.g. to call __tls_get_addr. So if we're walking the 
-		 * dynamic loader, leave it executable. This isn't really an extra
-		 * security weakness because our own code is in the same boat. 
-		 * When we *are* the dynamic loader (emerald-style), this problem
-		 * will go away, though our own code will be larger. */
 		int ret = raw_mprotect(begin_page, end_page - begin_page,
 			PROT_READ | PROT_WRITE | (range_is_in_ld_so ? PROT_EXEC : 0));
 
