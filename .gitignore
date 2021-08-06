@@ -26,4 +26,4 @@ src/objs_list
 *.stamp
 test/x86_64/getpid
 test/x86_64/true
-
+contrib/host-includes
