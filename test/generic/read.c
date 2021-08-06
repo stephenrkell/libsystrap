@@ -5,7 +5,7 @@
 	"cc" /*, "memory" */
 int _start (void)
 {
-        char *f = "test-src/shakespeare.txt";
+        char *f = "shakespeare.txt";
         char tab[10] = {0};
 
         long int ret;

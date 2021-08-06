@@ -1,14 +1,26 @@
-CFLAGS += -g
+ARCH ?= $(shell gcc -print-multiarch | sed 's/-.*//' )
 
-default: hello true getpid time read write
+# We have various subdirs:
+# $(ARCH): arch-specific programs that exercise the tracing example client
+# generic: portable programs that exercise the tracing example client
+# client: tests that exercise the libsystrap API
+# support: tests that sanity-check the supporting libraries (libx86decode, ...)
 
-true getpid time read write: LDFLAGS += -Wl,-nostdlib -nostartfiles -ffreestanding
+# Since the tracing example client now has two forms -- preload and chain-load --
+# we run the tracing tests against both of those.
+# TODO: once the tracer is more mature, we want to cross-check its traces
+# against those from strace.
 
-x86-decode: CFLAGS += -I../libsystrap -std=gnu11
-x86-decode: LDLIBS += ../libsystrap/x86_decode.o -ludis86
+.PHONY: default
+default: generic-recursive $(ARCH)-recursive
 
-x86-operands: LDLIBS += -L../libsystrap -lsystrap
-x86-operands: CFLAGS += -I../libsystrap
+.PHONY: generic-recursive x86_64-recursive i386-recursive
+generic-recursive x86_64-recursive i386-recursive: %-recursive:
+	MODE=chain $(MAKE) -C $*
+	MODE=preload $(MAKE) -C $*
 
-segv: LDLIBS += -L../libsystrap -lsystrap
-segv: CFLAGS += -I../libsystrap
+.PHONY: client-recursive support-recursive
+client-recursive:
+	$(MAKE) -C client
+support-recursive:
+	$(MAKE) -C support
