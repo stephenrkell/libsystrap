@@ -18,6 +18,7 @@ test/generic/clone
 core
 test/generic/gettimeofday
 test/generic/hello
+test/generic/time
 test/generic/true-execve
 test/generic/truemk-execve
 test/generic/truesh-execve
