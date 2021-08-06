@@ -484,7 +484,10 @@ bootstrap_proto(mmap)
 			{
 				if (p->p_type != PT_LOAD) continue;
 				_Bool offset_matches = ((ROUND_DOWN(p->p_offset, page_size)) == offset);
-				if (offset_matches)
+				unsigned offset_delta = p->p_offset - ROUND_DOWN(p->p_offset, page_size);
+				unsigned long vmemsz = ROUND_UP(p->p_memsz + offset_delta, page_size);
+				_Bool vsize_matches = (vmemsz == length);
+				if (offset_matches && (!matched || vsize_matches))
 				{
 					// what if there are two mappings with the same offset/pgoffset?
 					if (matched) match_is_unique = 0;
