@@ -157,7 +157,11 @@ void init_fds(void)
 }
 
 void __init_libc(char **envp, char *pn); // musl-internal API
-
+/* The preload lib needs to refrain from clobbering the TLS pointer,
+ * as the 'real' C library has already set it up. Confusingly perhaps,
+ * donald defines __wrap___init_tp(), so we put our even faker version
+ * in a separate file (fake-tls.o). */
+// void __wrap___init_tp() {}
 static void startup(void) __attribute__((constructor(101)));
 static void startup(void)
 {
