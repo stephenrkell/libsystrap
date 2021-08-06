@@ -24,3 +24,10 @@ client-recursive:
 	$(MAKE) -C client
 support-recursive:
 	$(MAKE) -C support
+
+.PHONY: clean
+clean:
+	for d in generic x86_64 i386 support client; do \
+            $(MAKE) -C $$d clean; \
+        done
+

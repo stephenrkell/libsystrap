@@ -4,6 +4,10 @@ default: $(foreach t,x86-decode x86-operands,run-$(t).stamp)
 run-%.stamp: %
 	./$* && touch $@
 
+.PHONY: clean
+clean:
+	rm -f x86-decode x86-operands *.stamp
+
 CFLAGS += -g -fPIC
 
 # support tests

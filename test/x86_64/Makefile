@@ -9,6 +9,8 @@ srcroot := $(realpath $(dir $(realpath $(THIS_MAKEFILE)))/../..)
 $(info srcroot is $(srcroot))
 
 include $(srcroot)/test/rules.mk
+clean::
+	rm -f true getpid
 
 ifeq ($(MODE),preload)
 PREFIX := LD_PRELOAD=$(srcroot)/example/trace-syscalls.so
