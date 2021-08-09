@@ -135,74 +135,27 @@ void walk_instructions(unsigned char *pos, unsigned char *end,
 	}
 }
 
-struct instr_ { unsigned len; uint8_t bytes[]; };
-#define def_instr_seq(name, bytes...) static const struct instr_ name = \
-{ (sizeof ((uint8_t[]) { bytes })/sizeof(uint8_t)), { bytes } };
-
-#if defined(__x86_64__)
-#define instr_seqs(m) \
-  m(CLONE_EAX,     0xb8, /* 0x38 */ __NR_clone,                    0, 0, 0 ) \
-  m(SIGRETURN_EAX, 0xb8, /* 0x0f */ __NR_rt_sigreturn,             0, 0, 0 ) \
-  m(CLONE_RAX,     0x48, 0xc7, 0xc0, /* 0x38 */ __NR_clone,        0, 0, 0 ) \
-  m(SIGRETURN_RAX, 0x48, 0xc7, 0xc0, /* 0x0f */ __NR_rt_sigreturn, 0, 0, 0 )
-#elif defined(__i386__)
-#define instr_seqs(m) \
-  m(CLONE_EAX,        0xc7, 0xc0, /* 0x78 */ __NR_clone,        0, 0, 0 ) \
-  m(RT_SIGRETURN_EAX, 0xc7, 0xc0, /* 0xad */ __NR_rt_sigreturn, 0, 0, 0 ) \
-  m(SIGRETURN_EAX,    0xc7, 0xc0, /* 0x77 */ __NR_sigreturn,    0, 0, 0 )
-#else
-#error "Unsupported architecture."
-#endif
-
-#define addrof_instr_seq(name, bytes...) \
-  &(name),
-instr_seqs(def_instr_seq)
-const struct instr_ *instr_seqs[] = { instr_seqs(addrof_instr_seq) NULL };
-
 static void instruction_cb(unsigned char *pos, unsigned len, void *arg)
 {
 	if (is_syscall_instr(pos, pos + len))
 	{
-		/* FIXME HACK: Syscall 15 (sigreturn) must never be instrumented
-		 * because it would create another signal frame.
-		 * For now, just check that the previous instruction is not
-		 * "mov $0xf,%rax".
-		 * This hack is a bit unsafe and not portable at all !!!
-		 * A better way to do this would be to do a simple analysis of constant
-		 * values for each function and to only instrument syscalls if needed */
-		/* Seems like we need to do the same for syscall 56 (clone)...
-		 * We REALLY want a way to accurately remove harmful instrumentations. */
-		const struct instr_ **blinstr = &instr_seqs[0];
-		for (; *blinstr; ++blinstr)
-		{
-			int match = 1;
-			for (int i = 1; i <= (*blinstr)->len; i++)
-			{
-				if (pos[-i] != (*blinstr)->bytes[(*blinstr)->len-i])
-				{
-					match = 0;
-					break;
-				}
-			}
-			if (match) return;
-		}
 		replace_syscall_with_ud2(pos, len);
 	}
 }
 
 void *__tls_get_addr(); // in ld.so
 
-void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *end_instr_pos, 
+void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *end_instr_pos,
 	_Bool is_writable, _Bool is_readable)
 {
 	const void *begin_page = ROUND_DOWN_PTR_TO_PAGE((const void *) begin_instr_pos);
 	const void *end_page = ROUND_UP_PTR_TO_PAGE((const void *) end_instr_pos);
-	
+
 	static struct link_map *ld_so_link_map;
 	if (!ld_so_link_map)
 	{
 		/* NOTE: sometimes our own code will need to call into the dynamic
-		 * linker, e.g. to call __tls_get_addr. So if we're walking the 
+		 * linker, e.g. to call __tls_get_addr. So if we're walking the
 		 * dynamic linker, leave it executable.
 		 *
 		 * If we are a preload library, this isn't really an extra
@@ -214,14 +167,14 @@ void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *e
 	}
 	debug_printf(1, "_r_debug is at %p\n", &_r_debug);
 	debug_printf(1, "We think ld.so's link map is at %p, base %p, filename %s\n",
-		ld_so_link_map, 
+		ld_so_link_map,
 		ld_so_link_map ? (void*) ld_so_link_map->l_addr : (void*) -1,
 		ld_so_link_map ? ld_so_link_map->l_name : "(can't deref null)");
-	
+
 	struct link_map *range_link_map = get_highest_loaded_object_below(begin_instr_pos);
-	_Bool range_is_in_ld_so = (ld_so_link_map && range_link_map && 
+	_Bool range_is_in_ld_so = (ld_so_link_map && range_link_map &&
 		ld_so_link_map == range_link_map);
-	
+
 	if (!is_writable)
 	{
 		int ret = raw_mprotect(begin_page, end_page - begin_page,
@@ -231,24 +184,24 @@ void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *e
 		assert(ret == 0 || (intptr_t) begin_page < 0);
 		if (ret != 0 && (intptr_t) begin_page < 0)
 		{
-			/* vdso/vsyscall handling: since we can't rewrite the instructions on these 
-			 * pages, instead we should execute-protect them. Then, when we take a trap, 
+			/* vdso/vsyscall handling: since we can't rewrite the instructions on these
+			 * pages, instead we should execute-protect them. Then, when we take a trap,
 			 * we need to emulate the instructions there. FIXME: implement this. */
 
 			debug_printf(1, "Couldn't rewrite nor protect vdso mapping at %p\n", begin_page);
 			return;
 		}
 	}
-	/* What to do about byte sequences that look like syscalls 
-	 * but are "in the middle" of instructions? 
-	 * How do we know where to *start* parsing an instruction stream? 
-	 * 
+	/* What to do about byte sequences that look like syscalls
+	 * but are "in the middle" of instructions?
+	 * How do we know where to *start* parsing an instruction stream?
+	 *
 	 * For now, we
 	 * - start parsing at the beginning only
 	 * - do fixups
 	 * - then do another pass where we detect remaining syscall-instruction-alikes
 	 * - ... and warn if we see any
-	 * 
+	 *
 	 * What about ud2-alikes that don't correspond to replaced instructions?
 	 * No problem: we just need to remember which sites we replaced.
 	 * If we hit a ud2 that's not at such a site, we just do ud2.
@@ -257,10 +210,14 @@ void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *e
 	// char debug_buf[line_end_pos - line_begin_pos + 1];
 	// strncpy(debug_buf, line_begin_pos, line_end_pos - line_begin_pos);
 	// debug_buf[sizeof debug_buf - 1] = '\0';
-	// // assert that line_end_pos 
+	// // assert that line_end_pos
 	debug_printf(1, "Scanning for syscall instructions within %p-%p (%s)\n",
 		begin_instr_pos, end_instr_pos, /*debug_buf */ "FIXME: reinstate debug printout");
-
+	/* If our range contains a signal restorer, it will do a sigreturn.
+	 * We don't want to trap this.
+	 * So we need to figure out where the libc's restorer is, and skip over it.
+	 * We leave this mostly as the client's business. Instead we allow the client
+	 * to define a __systrap_skip_ranges[]. */
 	walk_instructions(begin_instr_pos, end_instr_pos, instruction_cb, NULL);
 	/* Now the paranoid second scan: check for in-betweens. */
 	unsigned char *instr_pos = (unsigned char *) begin_page; // start from the real beginning
@@ -269,7 +226,7 @@ void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *e
 		if (is_syscall_instr(instr_pos, end_instr_pos))
 		{
 			debug_printf(1, "Warning: after instrumentation, bytes at %p "
-				"could make a syscall on violation of control flow integrity\n", 
+				"could make a syscall on violation of control flow integrity\n",
 				instr_pos);
 		}
 		++instr_pos;
@@ -278,13 +235,12 @@ void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *e
 	// restore original perms
 	if (!is_writable)
 	{
-		int ret = raw_mprotect(begin_page, end_page - begin_page, 
+		int ret = raw_mprotect(begin_page, end_page - begin_page,
 			(is_readable ? PROT_READ : 0)
 		|                  PROT_EXEC
 		);
 		assert(ret == 0);
 	}
-	
 }
 
 void trap_one_executable_region_given_shdrs(unsigned char *begin,
@@ -296,8 +252,8 @@ void trap_one_executable_region_given_shdrs(unsigned char *begin,
 	// it's executable; scan for syscall instructions
 	unsigned char *begin_instr_pos;
 	unsigned char *end_instr_pos;
-	/* An executable mapping might include some non-instructions 
-	 * that will cause our instruction walker to get misaligned. 
+	/* An executable mapping might include some non-instructions
+	 * that will cause our instruction walker to get misaligned.
 	 * Instead, we would like to walk the *sections* individually,
 	 * then re-traverse the whole thing. So we mmap the section
 	 * header table. PROBLEM: we can't re-open a file that is
@@ -321,8 +277,8 @@ void trap_one_executable_region_given_shdrs(unsigned char *begin,
 	 * over zero instructions. This "no instructions found" usually happens
 	 * for ld.so whose text segment has been remapped RW and written to by
 	 * the ld.so bootstrap phase. This means it gets split into two /proc
-	 * lines, only one of which contains any instructions, so we hit the 
-	 * "no instructions" case for the second one. Note that we will do a 
+	 * lines, only one of which contains any instructions, so we hit the
+	 * "no instructions" case for the second one. Note that we will do a
 	 * "paranoid scan" anyway. */
 
 	if (first_section_start && (unsigned char *) first_section_start <= end)
@@ -431,10 +387,11 @@ void install_sigill_handler(void)
 #else
 #error "Unsupported architecture."
 #endif
-
+	// remember we are kernel-level asm sigaction, so no sigset_t
 	struct __asm_sigaction action = {
 		.sa_handler = &handle_sigill,
-		.sa_flags = SA_RESTORER | SA_NODEFER
+		.sa_flags = SA_RESTORER | SA_NODEFER,
+		.sa_mask = (__asm_sigset_t) -1
 		#ifndef __FreeBSD__
 		, .sa_restorer = sigill_restorer
 		#endif

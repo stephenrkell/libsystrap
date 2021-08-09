@@ -42,6 +42,10 @@ extern const char *syscall_names[SYSCALL_MAX + 1] __attribute__((weak));
 void handle_sigill(int n) __attribute__((visibility("hidden")));
 void handle_sigill(int n)
 {
+	/* FIXME: CHECK whether this is one of our trap sites!
+	 * If it isn't, and if the user has their own sigill handler
+	 * (which we stashed somewhere rather than actually allowing
+	 * to be installed) we need to tail-call that.*/
 	unsigned long *frame_base = __builtin_frame_address(0);
 	struct ibcs_sigframe *p_frame = (struct ibcs_sigframe *) (frame_base + 1);
 #if defined(__i386__)
@@ -79,6 +83,35 @@ void handle_sigill(int n)
 	assert(syscall_num < SYSCALL_MAX);
 	_handle_sigill_debug_printf(1, " which we think is syscall %s/%d\n",
 		&syscall_names[0] ? syscall_names[syscall_num] : "(names not linked in)", syscall_num);
+
+	if (syscall_num == __NR_sigreturn ||
+	    syscall_num == __NR_rt_sigreturn)
+	{
+		/* We can't trap sigreturn. But also, we can't easily know at load time
+		 * which syscall sites are going to do sigreturn. (Some static analysis
+		 * could figure that out, but we're not clever enough yet.)
+		 *
+		 * So the approach for now is: untrap the site, then immediately resume
+		 * without advancing the program context. It will proceed with the
+		 * sigreturn as if we never trapped it.
+		 *
+		 * This is potentially unsound, e.g. if it does sigreturn via syscall()
+		 * (which would be whacked, but anyway) as it would untrap a generic
+		 * syscall site, missing future syscalls. So we still need that clever
+		 * static analysis, or a sigreturn-from-userspace, or a sandboxed
+		 * "process supervisor" that can somehow do the sigreturn, or... some
+		 * better solution.
+		 */
+		void *addr = (void*) p_frame->uc.uc_mcontext.MC_REG_IP;
+		_handle_sigill_debug_printf(1, "Untrapping sigreturn site %p\n", addr);
+		unsigned page_size = MIN_PAGE_SIZE; // FIXME: use actual page size from auxv
+		int ret = raw_mprotect((void*)RELF_ROUND_DOWN_(addr, page_size), page_size, PROT_WRITE);
+		assert(ret == 0);
+		replace_instruction_with(addr, 2 /* FIXME */, (unsigned char []) { 0xcd, 0x80 }, 2);
+		ret = raw_mprotect((void*)RELF_ROUND_DOWN_(addr, page_size), page_size, PROT_READ|PROT_EXEC);
+		assert(ret == 0);
+		return;
+	}
 
 	/* FIXME: check whether this syscall creates executable mappings; if so,
 	 * we make them nx, do the rewrite, then make them x. */
