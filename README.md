@@ -90,7 +90,7 @@ available under the terms of the GNU Lesser General Public License
 version 3. See the files LICENSE.lgpl3 and LICENSE.gpl3.
 
 would like to discuss alternative licensing arrangements, please
-contact the principal author, Stephen Kell <s.r.kell@kent.ac.uk>.
+contact the principal author, Stephen Kell <srk31@srcf.ucam.org>.
 
 Note that a few specific files are under different licensing terms. This
 is clearly stated at the top of the file. Currently the paths of these

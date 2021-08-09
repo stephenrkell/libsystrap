@@ -76,6 +76,7 @@ C_SRC := $(wildcard *.c)
 C_DEPS := $(patsubst %.c,.%.d,$(C_SRC))
 DEPS := $(C_DEPS)
 LOCAL_OBJS := $(filter-out pre-entry.o,$(filter-out write-footprints.o,$(patsubst %.c,%.o,$(C_SRC))))
+$(info LOCAL_OBJS is $(LOCAL_OBJS))
 
 $(DEPS): .%.d: %.c
 	$(CC) -MG -MM $(CFLAGS) $+ > "$@" || rm -f "$@"
@@ -138,8 +139,13 @@ trace-syscalls.so trace-syscalls-ld.so: LDFLAGS += -Wl,-Map,$@.map
 # don't re-export symbols from any archives we link in
 trace-syscalls.so trace-syscalls-ld.so: LDFLAGS += \
       -Wl,--exclude-libs=ALL
-# we define our own, simpler __init_tp -- DOESN'T WORK but we can use musl's
+
+# To avoid clashing implementations of TLS,
+# we define our own, simpler __init_tp -- wrapping DOESN'T WORK...
 trace-syscalls.so trace-syscalls-ld.so: LDFLAGS += -Wl,--wrap,__init_tp
+# ... we can just use musl's for -ld.so, but for preload we need more.
+trace-syscalls.so: LDFLAGS += -Wl,-z,muldefs -Wl,--defsym,__init_tp=__wrap___init_tp
+
 # we insert our startup logic by wrapping enter()
 trace-syscalls-ld.so: LDFLAGS += -Wl,--wrap,enter -Wl,--wrap,load_one_phdr \
 -Wl,--defsym,__wrap___runt_files_notify_load=__runt_files_notify_load \
@@ -149,7 +155,7 @@ trace-syscalls-ld.so: LDLIBS += -Bstatic \
   $(LIBRUNT_DIR)/lib/librunt_preload.a \
   $(LIBC_A)
 
-trace-syscalls.so: trace-syscalls.o syscall-names.o dlmalloc.a
+trace-syscalls.so: trace-syscalls.o syscall-names.o dlmalloc.a fake-tls.o
 
 trace-syscalls.so: $(srcroot)/lib/libsystrap.a
 	$(CC) -shared -static-libgcc \
@@ -172,7 +178,7 @@ $(LDSO_OBJS): CFLAGS += -DDONALD_NAME=\"trace-syscalls-ld\" \
 bootstrap.o: CFLAGS += -DCHAIN_LOADER
 
 # FIXME: localize all global symbols except maybe _start?
-trace-syscalls-ld.so: trace-syscalls-ld.lds $(LDSO_OBJS) $(LOCAL_OBJS) dynamic-list
+trace-syscalls-ld.so: trace-syscalls-ld.lds $(LDSO_OBJS) $(filter-out fake-tls.o,$(LOCAL_OBJS)) dynamic-list
 	$(CC) $(CFLAGS) -fuse-ld=bfd \
             -Bsymbolic -nostdlib -nostartfiles -static-libgcc -shared -o "$@" \
             $(filter-out dynamic-list,$(filter-out %.lds,$+)) \

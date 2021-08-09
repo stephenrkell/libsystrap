@@ -124,6 +124,16 @@ static unsigned argv_count(char *const *argv)
  * an empty file: we just run this with /bin/sh, no special case
  */
 
+#ifndef __NR_execveat
+#if defined(__i386__)
+#define __NR_execveat 358
+#elif defined(__x86_64__)
+#define __NR_execveat 322
+#else
+#error "Unknown architecture and no __NR_execveat"
+#endif
+#endif
+
 int recursively_resolve_elf_and_execveat(
    int dirfd, const char *filename,
    char *const *argv, char *const *envp
@@ -221,7 +231,7 @@ int recursively_resolve_elf_and_execveat(
 					fake_argv0 = buf;
 				}
 				new_argv[0] = fake_argv0;
-				return syscall(/*__NR_execveat*/ 358, dirfd,
+				return syscall(__NR_execveat, dirfd,
 					/* filename is always us */ OUR_LDSO_NAME, new_argv, envp, 0);
 			}
 		}
@@ -474,7 +484,10 @@ bootstrap_proto(mmap)
 			{
 				if (p->p_type != PT_LOAD) continue;
 				_Bool offset_matches = ((ROUND_DOWN(p->p_offset, page_size)) == offset);
-				if (offset_matches)
+				unsigned offset_delta = p->p_offset - ROUND_DOWN(p->p_offset, page_size);
+				unsigned long vmemsz = ROUND_UP(p->p_memsz + offset_delta, page_size);
+				_Bool vsize_matches = (vmemsz == length);
+				if (offset_matches && (!matched || vsize_matches))
 				{
 					// what if there are two mappings with the same offset/pgoffset?
 					if (matched) match_is_unique = 0;

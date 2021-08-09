@@ -33,7 +33,9 @@ else
 #instr.o: CFLAGS += -DUSE_OPDIS
 endif
 
-CFLAGS += -I/usr/include/$(shell $(CC) -dumpmachine)
+# LIBC_CFLAGS is now expected to be self-sufficient
+# e.g. using musl we should be able to build without pulling in ambient glibc stuff
+CFLAGS += -nostdinc $(LIBC_CFLAGS)
 
 C_SRC := $(wildcard *.c)
 CC_SRC := $(wildcard *.cc)
