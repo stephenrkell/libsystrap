@@ -391,7 +391,7 @@ void install_sigill_handler(void)
 	struct __asm_sigaction action = {
 		.sa_handler = &handle_sigill,
 		.sa_flags = SA_RESTORER | SA_NODEFER,
-		.sa_mask = (__asm_sigset_t) -1
+		.sa_mask = ((__asm_sigset_t) -1) & ~(1ul<<(SIGILL-1))
 		#ifndef __FreeBSD__
 		, .sa_restorer = sigill_restorer
 		#endif

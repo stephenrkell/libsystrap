@@ -84,9 +84,11 @@ void handle_sigill(int n)
 	_handle_sigill_debug_printf(1, " which we think is syscall %s/%d\n",
 		&syscall_names[0] ? syscall_names[syscall_num] : "(names not linked in)", syscall_num);
 
-	if (syscall_num == __NR_sigreturn ||
-	    syscall_num == __NR_rt_sigreturn)
-	{
+	if (syscall_num == __NR_rt_sigreturn
+#ifdef __i386__
+	    || syscall_num == __NR_sigreturn
+#endif
+	) {
 		/* We can't trap sigreturn. But also, we can't easily know at load time
 		 * which syscall sites are going to do sigreturn. (Some static analysis
 		 * could figure that out, but we're not clever enough yet.)
