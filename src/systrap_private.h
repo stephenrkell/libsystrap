@@ -2,6 +2,7 @@
 #define SYSTRAP_PRIVATE_H_
 
 extern int systrap_debug_level __attribute__((visibility("hidden")));
+extern _Bool is_ud2(const unsigned char *ins) __attribute__((visibility("hidden")));
 
 #ifdef SYSTRAP_DEFINE_FILE
 struct _IO_FILE;

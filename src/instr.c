@@ -13,7 +13,8 @@
 #define THREAD
 #endif
 
-static _Bool is_ud2(const unsigned char *ins)
+__attribute__((visibility("hidden")))
+_Bool is_ud2(const unsigned char *ins)
 {
 	return ins[0] == 0x0f && ins[1] == 0x0b;
 }

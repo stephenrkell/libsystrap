@@ -1,5 +1,5 @@
 .PHONY: default
-default: $(foreach t,hello time truemk-execve truesh-execve,run-$(t)-$(MODE).stamp)
+default: $(foreach t,hello time truemk-execve truesh-execve sigreturn,run-$(t)-$(MODE).stamp)
 
 # FIXME: we skip 'read' and 'write' as they exit nonzero even on success
 
@@ -37,3 +37,4 @@ time: LDLIBS += $(LDSO)
 hello: hello.c
 truemk-execve: truemk-execve.c
 truesh-execve: truesh-execve.c
+sigreturn: sigreturn.c

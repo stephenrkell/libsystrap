@@ -74,7 +74,7 @@ unsigned long read_hex_num(const char **p_c, const char *end)
 }
 
 void replace_instruction_with(unsigned char *pos, unsigned len,
-		unsigned char *replacement, unsigned replacement_len)
+		unsigned char const *replacement, unsigned replacement_len)
 {
 	assert(len >= replacement_len);
 	unsigned char *begin = pos;

@@ -19,7 +19,7 @@ void trap_one_executable_region_given_shdrs(unsigned char *begin,
 void walk_instructions(unsigned char *pos, unsigned char *end,
 	void (*cb)(unsigned char *pos, unsigned len, void *arg), void *arg);
 void replace_instruction_with(unsigned char *pos, unsigned len,
-		unsigned char *replacement, unsigned replacement_len);
+		unsigned char const *replacement, unsigned replacement_len);
 void replace_syscall_with_ud2(unsigned char *pos, unsigned len);
 
 /* really funky clients, e.g. a ld.so, might not run their own constructor, so ... */
