@@ -58,21 +58,26 @@ build-eglibc: $(EGLIBC_DIR)/libc/build/Makefile
 	CFLAGS="-g -O1 -fPIC -DPIC" CPPFLAGS="" $(MAKE) -C $(EGLIBC_DIR)/libc/build
 
 .PHONY: build-musl
-build-musl: musl/libc/libc.a
+build-musl: musl/libc/libc.a host-includes
 musl/config.mak:
-	cd musl && ./configure
+	cd musl && CFLAGS=-g ./configure
 
 musl/libc/libc.a: musl/config.mak
 	$(MAKE) -C musl
 
+host-includes:
+	mkdir -p $@ && ln -sf -t $@ /usr/include/linux /usr/include/asm-generic /usr/include/$(shell gcc -print-multiarch)/asm
+
 ifeq ($(KERNEL),Linux)
 CONFIG_MK += \nLIBC_A := $(realpath $(dir $(THIS_MAKEFILE)))/musl/lib/libc.a\n
+CONFIG_MK += \nLIBC_CFLAGS := -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/arch/$(shell gcc -print-multiarch | sed 's/-.*//') -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/arch/generic -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/obj/include -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/include -I$(realpath $(dir $(THIS_MAKEFILE)))/host-includes \n
 else
 ifeq ($(KERNEL),FreeBSD) # FIXME: check this
 CONFIG_MK += \nLIBC_A := /usr/lib/libc_pic.a\n
+CONFIG_MK += \nLIBC_CFLAGS :=
 endif
 endif
-varlist += LIBC_A
+varlist += LIBC_A LIBC_CFLAGS
 
 # ----------------------------we need some instruction decoder or other
 
@@ -138,7 +143,7 @@ install-binutils: build-binutils
 
 .PHONY: build-xed
 build-xed: $(MBUILD_DIR)
-	cd xed && ./mfile.py install --install-dir=build --no-encoder --extra-flags='-fPIC'
+	cd xed && ./mfile.py install --install-dir=build --no-encoder --extra-flags='-fPIC -ffreestanding'
 
 CONFIG_MK +=\nXED_DIR ?= $(CONTRIB)/xed/build\n
 CONFIG_MK +=\nXED_A ?= $(CONTRIB)/xed/build/lib/libxed.a\n

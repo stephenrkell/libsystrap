@@ -5,7 +5,10 @@ struct __asm_sigaction;
 struct user_desc;
 struct __asm_timespec;
 struct stat;
-extern void restore_rt(void) __asm__("__restore_rt"); /* in restorer.c */
+#ifdef __i386__
+extern void __restore(void); /* in restorer.c */
+#endif
+extern void __restore_rt(void); /* in restorer.c */
 
 void raw_exit(int status) __attribute__((noreturn));
 int raw_open(const char *pathname, int flags, int mode) __attribute__((noinline));
@@ -34,6 +37,10 @@ void *raw_mremap(void *old_address, size_t old_size,
                     size_t new_size, int flags, void *new_address) __attribute__((noinline));
 int raw_rt_sigaction(int signum, const struct __asm_sigaction *act,
 		     struct __asm_sigaction *oldact) __attribute__((noinline));
+#ifdef __i386__
+int raw_sigaction(int signum, const struct __asm_sigaction *act,
+		     struct __asm_sigaction *oldact) __attribute__((noinline));
+#endif
 void *raw_mremap(void *old_address, size_t old_size,
     size_t new_size, int flags, void *new_address) __attribute__((noinline));
 void *raw_brk(void *addr) __attribute__((noinline));

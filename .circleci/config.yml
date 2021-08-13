@@ -1,0 +1,57 @@
+version: 2.0
+jobs:
+  build:
+    docker:
+      - image: ubuntu:18.04
+    steps:
+      - run:
+          name: Install dependencies
+          command: |
+            apt update
+            apt install -y \
+              libelf-dev libdw-dev binutils-dev \
+              autoconf automake libtool pkg-config autoconf-archive \
+              g++ python3 python \
+              make git gawk gdb wget \
+              libunwind-dev libc6-dev-i386 zlib1g-dev libc6-dbg
+      - checkout
+      - run:
+          name: Update submodules
+          command: git submodule update --init --recursive
+      - run:
+          name: Build submodules
+          command: make -C contrib -j 2
+      - run:
+          name: Build project
+          command: |
+            . contrib/env.sh
+            make -j 2
+      - persist_to_workspace:
+          root: /root
+          paths: project
+  test:
+    requires:
+      - build
+    docker:
+      - image: ubuntu:18.04
+    steps:
+      - run:
+          name: Install dependencies
+          command: |
+            apt update
+            apt install -y ca-certificates make build-essential g++ autoconf automake libtool \
+              libelf-dev python3 python git gawk python3-distutils libunwind-dev
+      - attach_workspace:
+          at: /root
+      - run:
+          name: Run tests (sequentially for now)
+          command: make -C /root/project/test -j 1
+
+workflows:
+  version: 2
+  default:
+    jobs:
+      - build
+      - test:
+          requires:
+            - build

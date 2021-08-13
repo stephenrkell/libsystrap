@@ -1,7 +1,8 @@
 #ifndef SYSTRAP_PRIVATE_H_
 #define SYSTRAP_PRIVATE_H_
 
-extern int debug_level __attribute__((visibility("hidden")));
+extern int systrap_debug_level __attribute__((visibility("hidden")));
+extern _Bool is_ud2(const unsigned char *ins) __attribute__((visibility("hidden")));
 
 #ifdef SYSTRAP_DEFINE_FILE
 struct _IO_FILE;
@@ -9,8 +10,6 @@ typedef struct _IO_FILE FILE;
 #endif
 /* Don't declare stderr ourselves; e.g. in FreeBSD it's really called __stderrp. */
 /* extern FILE *stderr; */
-extern FILE **p_err_stream;
-extern FILE *our_fake_stderr;
 
 extern char *getenv (const char *__name);
 extern int atoi (const char *__nptr);
@@ -24,13 +23,9 @@ int vfprintf(FILE *stream, const char *format, va_list args);
 int fflush(FILE *stream);
 
 #define debug_printf(lvl, fmt, ...) do { \
-    if ((lvl) <= debug_level) { \
-      if (!p_err_stream || !*p_err_stream) { \
-          p_err_stream = &our_fake_stderr; \
-          *p_err_stream = fdopen(2, "w"); \
-      } \
-      fprintf(*p_err_stream, fmt, ## __VA_ARGS__ ); \
-      fflush(*p_err_stream); \
+    if ((lvl) <= systrap_debug_level) { \
+      fprintf(stderr, fmt, ## __VA_ARGS__ ); \
+      fflush(stderr); \
     } \
   } while (0)
 

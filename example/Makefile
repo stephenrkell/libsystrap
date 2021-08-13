@@ -3,12 +3,31 @@ srcroot := $(realpath $(dir $(THIS_MAKEFILE)))/..
 
 SYS := $(shell uname -s | tr A-Z a-z )
 
-LD_SO ?= /lib64/ld-linux-x86-64.so.2  # HACK: sysdep
+ARCH ?= $(shell gcc -print-multiarch | sed 's/-.*//' )
+ifeq ($(ARCH),i386)
+LD_SO ?= /lib/ld-linux.so.2
+else
+ifeq ($(ARCH),x86_64)
+LD_SO ?= /lib64/ld-linux-x86-64.so.2
+endif
+endif
+
+ifeq ($(LD_SO),)
+$(error Could not determine ld.so pathname (from architecture $(ARCH)).)
+endif
+
+UNWIND_MACHINE ?= $(ARCH)
+ifeq ($(UNWIND_MACHINE),i386)
+UNWIND_MACHINE := x86
+endif
 
 CONTRIB := $(srcroot)/contrib
 CONFIG ?= $(CONTRIB)/config.mk
+DONALD ?= $(srcroot)/contrib/donald
 
-default: trace-syscalls.so
+CFLAGS += -DOUR_LDSO_DIR="\"$(shell pwd)/\""
+
+default: trace-syscalls.so trace-syscalls-ld.so
 
 $(CONTRIB)/config.mk:
 	$(MAKE) -C $(CONTRIB)
@@ -18,10 +37,14 @@ LIBC_A ?= /usr/lib/libc_pic.a
 endif
 include $(CONFIG)
 
+CFLAGS += $(LIBC_CFLAGS)
 CFLAGS += -DSYSTRAP_DEFINE_FILE
+CFLAGS += -I$(XED_DIR)/include
 
+ifneq ($(MAKECMDGOAL),clean)
 ifeq ($(LIBRUNT_DIR),)
 $(error Please install the librunt source tree and set LIBRUNT_DIR to point to it)
+endif
 endif
 
 ifeq ($(realpath $(srcroot)/lib/libsystrap.a),)
@@ -30,7 +53,9 @@ endif
 
 CFLAGS += -g 
 CFLAGS += -Wall -Wno-unused-label -Wno-comment
+ifeq ($(DEBUG),)
 CFLAGS += -O2
+endif
 CFLAGS += -fPIC
 CFLAGS += -ffreestanding -fno-omit-frame-pointer
 CFLAGS += -I$(srcroot)/include
@@ -42,10 +67,16 @@ syscall-names.o: $(SYS)-syscall-macros.h
 # for dlmalloc.c
 vpath %.c $(srcroot)/contrib
 
+# for donald things
+vpath %.c $(DONALD)/src
+vpath %.h $(DONALD)/src
+CFLAGS += -I$(DONALD)/src
+
 C_SRC := $(wildcard *.c)
 C_DEPS := $(patsubst %.c,.%.d,$(C_SRC))
 DEPS := $(C_DEPS)
-OBJS := $(patsubst %.c,%.o,$(C_SRC))
+LOCAL_OBJS := $(filter-out pre-entry.o,$(filter-out write-footprints.o,$(patsubst %.c,%.o,$(C_SRC))))
+$(info LOCAL_OBJS is $(LOCAL_OBJS))
 
 $(DEPS): .%.d: %.c
 	$(CC) -MG -MM $(CFLAGS) $+ > "$@" || rm -f "$@"
@@ -63,7 +94,7 @@ dlmalloc.a: dlmalloc.o
 
 # This is a quick but incomplete way to build a number->name mapping
 linux-syscall-macros.h:
-	( /usr/bin/cpp -E -dM -o - /usr/include/asm/unistd.h </dev/null | \
+	( /usr/bin/cpp -E -dM -o - /usr/include/`gcc -print-multiarch`/asm/unistd.h </dev/null | \
            grep '#define *__NR_' | sort | uniq | \
            sed -r 's/^#define *__NR_([^[:blank:]]*)[[:blank:]]*([0-9]*)/#ifdef SYS_\1\nSYSCALL(\1, \2)\n#endif/') > "$@" || (rm -f "$@"; false)
 freebsd-syscall-macros.h:
@@ -78,41 +109,100 @@ syscall-macros.h: $(SYS)-syscall-macros.h
 # functions we might want to call from the debugger are actually linked in
 trace-syscalls.so: LDLIBS := -Bstatic \
 	$(srcroot)/lib/libsystrap.a \
-	-Wl,--whole-archive $(LIBRUNT_DIR)/lib/librunt_preload.a -Wl,--no-whole-archive
+	-Wl,--whole-archive $(LIBRUNT_DIR)/lib/librunt_preload.a -Wl,--no-whole-archive \
+	-ldl
 
+# FIXME: what's the right way to pull in libgcc.a? It seems that
+# the compiler should do it for us, but for some reason it doesn't.
 trace-syscalls.so: LDLIBS += \
 	dlmalloc.a \
 	$(LD_SO) \
-	$(LIBC_A) -lunwind-x86_64 -lunwind -lgcc_s -lpthread
+	$(LIBC_A) -lunwind-$(UNWIND_MACHINE) -lunwind -lpthread -lgcc
 
 # we used to insist -Wl,--hash-style=sysv here, but relf.h now groks GNU-style
+trace-syscalls.so trace-syscalls-ld.so: LDFLAGS += \
+-fno-lto -nostdlib -Wl,--no-as-needed
 trace-syscalls.so: LDFLAGS += \
--fno-lto -nostdlib -Wl,--no-as-needed \
--Wl,--defsym,__private_strdup=strdup -Wl,--defsym,__private_malloc=malloc \
+-Wl,--defsym,__private_malloc=malloc \
 -Wl,--defsym,__private_free=free \
 -Wl,--defsym,__wrap___runt_files_notify_load=__runt_files_notify_load \
--Wl,--defsym,__wrap___runt_files_metadata_by_addr=__runt_files_metadata_by_addr
+-Wl,--defsym,__wrap___runt_files_metadata_by_addr=__runt_files_metadata_by_addr \
+-Wl,--defsym,__private_strdup=strdup
 # hmm -- is this necessary now? FIXME: CHECK
 trace-syscalls.so: LDFLAGS += \
 -Wl,--defsym,stat=raw_stat
-# for debugging, output a map file
-trace-syscalls.so: LDFLAGS += \
-  -Wl,-Map,trace-syscalls.map
 # don't use lazy binding -- it's bad if we've removed exec permission
-trace-syscalls.so: LDFLAGS += \
-	-Wl,-z,now -fno-lto -Wl,--exclude-libs=ALL
+trace-syscalls.so trace-syscalls-ld.so: LDFLAGS += \
+	-Wl,-z,now
+# generate a map file, for debugging
+trace-syscalls.so trace-syscalls-ld.so: LDFLAGS += -Wl,-Map,$@.map
+# don't re-export symbols from any archives we link in
+trace-syscalls.so trace-syscalls-ld.so: LDFLAGS += \
+      -Wl,--exclude-libs=ALL
 
-trace-syscalls.so: trap-syscalls.o syscall-names.o dlmalloc.a
+# To avoid clashing implementations of TLS,
+# we define our own, simpler __init_tp -- wrapping DOESN'T WORK...
+trace-syscalls.so trace-syscalls-ld.so: LDFLAGS += -Wl,--wrap,__init_tp
+# ... we can just use musl's for -ld.so, but for preload we need more.
+trace-syscalls.so: LDFLAGS += -Wl,-z,muldefs -Wl,--defsym,__init_tp=__wrap___init_tp
+
+# we insert our startup logic by wrapping enter()
+trace-syscalls-ld.so: LDFLAGS += -Wl,--wrap,enter -Wl,--wrap,load_one_phdr \
+-Wl,--defsym,__wrap___runt_files_notify_load=__runt_files_notify_load \
+-Wl,--wrap,__runt_files_metadata_by_addr
+trace-syscalls-ld.so: LDLIBS += -Bstatic \
+  $(srcroot)/src/libsystrap.a \
+  $(LIBRUNT_DIR)/lib/librunt_preload.a \
+  $(LIBC_A)
+
+trace-syscalls.so: trace-syscalls.o syscall-names.o dlmalloc.a fake-tls.o
 
 trace-syscalls.so: $(srcroot)/lib/libsystrap.a
-	$(CC) -shared -Bsymbolic \
+	$(CC) -shared -static-libgcc \
 		-fuse-ld=gold \
-		-Wl,-h,$@ \
+		-Wl,-soname=$@ \
 		-o "$@" $(filter-out %.a,$+) \
 		$(LDFLAGS) $(LDLIBS)
 
+LDSO_OBJS := premain.o main.o entry.o load.o pre-entry.o
+# ask for a spare .dynamic slot
+trace-syscalls-ld.so: LDFLAGS += -Wl,--spare-dynamic-tags=5
+
+$(LDSO_OBJS): CFLAGS += -DDONALD_NAME=\"trace-syscalls-ld\" \
+  -DCHAIN_LOADER \
+  -DCHAIN_LOADER_COVER_TRACKS_DECLS='$(shell cat chain-decls.h)' \
+  -DCHAIN_LOADER_COVER_TRACKS='frob_dynamic(base_addr, inferior_dynamic_vaddr, phdrs, ehdr.e_phnum); \
+    set_inferior_metadata(&ehdr, shdrs, phdrs, base_addr); \
+    create_fake_vdso(p_auxv); '
+
+bootstrap.o: CFLAGS += -DCHAIN_LOADER
+
+# FIXME: localize all global symbols except maybe _start?
+trace-syscalls-ld.so: trace-syscalls-ld.lds $(LDSO_OBJS) $(filter-out fake-tls.o,$(LOCAL_OBJS)) dynamic-list
+	$(CC) $(CFLAGS) -fuse-ld=bfd \
+            -Bsymbolic -nostdlib -nostartfiles -static-libgcc -shared -o "$@" \
+            $(filter-out dynamic-list,$(filter-out %.lds,$+)) \
+            $(LDFLAGS) $(LDLIBS) -lgcc -Wl,-Bsymbolic \
+            -T $(filter %.lds,$+) -Wl,-soname=ld-linux.so.2 \
+            -Wl,--dynamic-list,dynamic-list
+
+# There is no way to make _DYNAMIC a dynamic symbol.
+# A bit of a HACK, but we look for _init and _fini to find our own load address
+# (in find_r_debug()), so try to export them.
+dynamic-list:
+	printf '{ etext; _init; _fini; };\n' >$@ || (rm -f $@; false)
+
+trace-syscalls-ld.lds: $(shell which ld) $(THIS_MAKEFILE)
+	USE_LD=ld.bfd $(CC) -fuse-ld=bfd -nostdlib -nostartfiles -shared \
+      -Wl,--verbose 2>&1 |  \
+        LC_ALL=C \
+          sed -e '/^=========/,/^=========/!d;/^=========/d'    \
+              -e 's/\. = .* + SIZEOF_HEADERS;/& _begin = . - SIZEOF_HEADERS;/' \
+              -e 's/\. = DATA_SEGMENT_ALIGN.*/. = DATA_SEGMENT_ALIGN (CONSTANT (COMMONPAGESIZE), CONSTANT (COMMONPAGESIZE));/' \
+          > "$@" || (rm -f $@; false)
+
 .PHONY: clean
 clean:
-	rm -f trace-syscalls.so
+	rm -f trace-syscalls.so trace-syscalls-ld.so
 	rm -f *.o *.a
 	rm -f .*.d
