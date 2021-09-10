@@ -1,7 +1,7 @@
 #include <stddef.h>
 #include <sys/syscall.h>
 
-#define SYSCALL(nam, num) \
+#define SYSCALL(nam) \
 [SYS_ ## nam] = #nam,
 
 const char *syscall_names[] = {
