@@ -80,7 +80,10 @@ struct file_metadata temporary_file_metadata = {
 };
 
 /* This gets called from the CHAIN_LOADER macro-inserted call in main.c...
- * see Makefile. */
+ * see Makefile.
+ *
+ * The purpose of this code is to set the *executable's* DT_DEBUG entry
+ * to point to the *inferior ld.so*'s struct r_debug. */
 void frob_dynamic(uintptr_t inferior_load_addr, uintptr_t inferior_dynamic_vaddr,
 	ElfW(Phdr) *phdrs, unsigned phnum)
 {
