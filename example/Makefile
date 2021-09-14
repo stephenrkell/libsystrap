@@ -1,6 +1,9 @@
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 srcroot := $(realpath $(dir $(THIS_MAKEFILE)))/..
 
+.PHONY: default
+default: trace-syscalls.so trace-syscalls-ld.so
+
 SYS := $(shell uname -s | tr A-Z a-z )
 
 ARCH ?= $(shell gcc -print-multiarch | sed 's/-.*//' )
@@ -55,14 +58,11 @@ endif
 endif
 
 CFLAGS += -DOUR_LDSO_DIR="\"$(shell pwd)/\""
-
-default: trace-syscalls.so trace-syscalls-ld.so
-
 CFLAGS += $(LIBC_CFLAGS)
 CFLAGS += -DSYSTRAP_DEFINE_FILE
 CFLAGS += -I$(XED_DIR)/include
 
-CFLAGS += -g 
+CFLAGS += -g
 CFLAGS += -Wall -Wno-unused-label -Wno-comment
 ifeq ($(DEBUG),)
 CFLAGS += -O2
@@ -217,3 +217,4 @@ clean:
 	rm -f trace-syscalls.so trace-syscalls-ld.so
 	rm -f *.o *.a
 	rm -f .*.d
+	rm -f syscall-macros.h $(SYS)-syscall-macros.h
