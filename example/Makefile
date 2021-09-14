@@ -21,35 +21,46 @@ ifeq ($(UNWIND_MACHINE),i386)
 UNWIND_MACHINE := x86
 endif
 
-CONTRIB := $(srcroot)/contrib
-CONFIG ?= $(CONTRIB)/config.mk
-DONALD ?= $(srcroot)/contrib/donald
+# How should we get our config?
+# If we don't have one in srcroot, use contrib/
+ifneq ($(realpath $(srcroot)/config.mk),)
+include $(srcroot)/config.mk
+else
+include $(srcroot)/contrib/config.mk
+$(srcroot)/contrib/config.mk:
+	$(MAKE) -C $(srcroot)/contrib config.mk
+endif
+
+ifneq ($(MAKECMDGOAL),clean)
+
+ifeq ($(LIBRUNT_DIR),)
+$(error Please install the librunt source tree and set LIBRUNT_DIR to point to it)
+endif
+ifeq ($(XED_DIR),)
+$(error Please set XED_DIR)
+endif
+ifeq ($(DONALD),)
+$(error Please set DONALD or make $(srcroot)/config.mk do so)
+endif
+ifeq ($(SYS),freebsd)
+LIBC_A ?= /usr/lib/libc_pic.a
+endif
+ifeq ($(LIBC_A),)
+$(error Please set LIBC_A to point to a position-independent libc archive)
+endif
+ifeq ($(realpath $(srcroot)/lib/libsystrap.a),)
+$(error Please build libsystrap first)
+endif
+
+endif
 
 CFLAGS += -DOUR_LDSO_DIR="\"$(shell pwd)/\""
 
 default: trace-syscalls.so trace-syscalls-ld.so
 
-$(CONTRIB)/config.mk:
-	$(MAKE) -C $(CONTRIB)
-
-ifeq ($(SYS),freebsd)
-LIBC_A ?= /usr/lib/libc_pic.a
-endif
-include $(CONFIG)
-
 CFLAGS += $(LIBC_CFLAGS)
 CFLAGS += -DSYSTRAP_DEFINE_FILE
 CFLAGS += -I$(XED_DIR)/include
-
-ifneq ($(MAKECMDGOAL),clean)
-ifeq ($(LIBRUNT_DIR),)
-$(error Please install the librunt source tree and set LIBRUNT_DIR to point to it)
-endif
-endif
-
-ifeq ($(realpath $(srcroot)/lib/libsystrap.a),)
-$(error Please build libsystrap first)
-endif
 
 CFLAGS += -g 
 CFLAGS += -Wall -Wno-unused-label -Wno-comment
@@ -96,7 +107,7 @@ dlmalloc.a: dlmalloc.o
 linux-syscall-macros.h:
 	( /usr/bin/cpp -E -dM -o - /usr/include/`gcc -print-multiarch`/asm/unistd.h </dev/null | \
            grep '#define *__NR_' | sort | uniq | \
-           sed -r 's/^#define *__NR_([^[:blank:]]*)[[:blank:]]*([0-9]*)/#ifdef SYS_\1\nSYSCALL(\1, \2)\n#endif/') > "$@" || (rm -f "$@"; false)
+           sed -r 's/^#define *__NR_([^[:blank:]]*)[[:blank:]]*([0-9]*)/#ifdef SYS_\1\nSYSCALL(\1)\n#endif/') > "$@" || (rm -f "$@"; false)
 freebsd-syscall-macros.h:
 	cat /usr/include/sys/syscall.h | grep 'SYS_[a-z][A-Za-z0-9_]*' | cut -f2 | \
     sed 's/SYS_\(.*\)/SYSCALL(\1)/' > "$@" || (rm -f "$@"; false)
