@@ -171,6 +171,10 @@ varlist += LIBRUNT_CFLAGS LIBRUNT_LDFLAGS LIBRUNT_DIR
 CONFIG_MK +=\nLIBX86EMULATE_DIR ?= $(realpath $(CONTRIB)/libx86emulate)\n
 varlist += LIBX86EMULATE_DIR
 
+# ----------------------------donald
+CONFIG_MK +=\nDONALD ?= $(realpath $(CONTRIB))/donald\n
+varlist += DONALD
+
 # ----------------------------config.mk
 
 # If the user nukes a sub-config.mk that our config.mk depends on,
