@@ -14,7 +14,10 @@ include $(CONFIG)
 
 # we link with the librunt archive
 CFLAGS += -DIN_LIBRUNT_DSO
-
+# musl has 'int' for line number, unlike glibc... librunt can hack around for us
+# FIXME: should be a configure-time thing perhaps? in which repo?
+# Problem is that configure might not see same libc headers as we plumb through here.
+CFLAGS += -DASSERT_FAIL_LINE_SIGNED
 CFLAGS += -DSYSTRAP_DEFINE_FILE
 CFLAGS += -I$(srcroot)/include
 CFLAGS += -g
