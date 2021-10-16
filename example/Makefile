@@ -60,6 +60,7 @@ endif
 CFLAGS += -DOUR_LDSO_DIR="\"$(shell pwd)/\""
 CFLAGS += $(LIBC_CFLAGS)
 CFLAGS += -DSYSTRAP_DEFINE_FILE
+CFLAGS += -DASSERT_FAIL_LINE_SIGNED   # see note in src/Makefile
 CFLAGS += -I$(XED_DIR)/include
 
 CFLAGS += -g
