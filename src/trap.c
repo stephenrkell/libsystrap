@@ -265,9 +265,13 @@ void trap_one_executable_region_given_shdrs(unsigned char *begin,
 		uintptr_t ret = find_section_boundary((uintptr_t) begin - laddr, SHF_EXECINSTR, 0,
 			shdrs, nshdr, NULL);
 		if (ret && ret != (uintptr_t)-1) first_section_start = (const void *) laddr + ret;
+		else debug_printf(5, "in executable mapping %p-%p, could not get last section boundary\n",
+			begin, end);
 		ret = find_section_boundary((uintptr_t) end - laddr, SHF_EXECINSTR, 1,
 			shdrs, nshdr, NULL);
 		if (ret && ret != (uintptr_t) -1) last_section_end = (const void *) laddr + ret;
+		else debug_printf(5, "in executable mapping %p-%p, could not get first section boundary\n",
+			begin, end);
 	}
 
 	/* These might return respectively (void*)-1 and (void*)0, to signify
