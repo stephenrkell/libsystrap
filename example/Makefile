@@ -176,15 +176,14 @@ trace-syscalls.so: $(srcroot)/lib/libsystrap.a
 		-o "$@" $(filter-out %.a,$+) \
 		$(LDFLAGS) $(LDLIBS)
 
-LDSO_OBJS := premain.o main.o entry.o load.o pre-entry.o
+LDSO_OBJS := premain.o main.o entry.o load.o pre-entry.o debug.o
 # ask for a spare .dynamic slot
 trace-syscalls-ld.so: LDFLAGS += -Wl,--spare-dynamic-tags=5
 
 $(LDSO_OBJS): CFLAGS += -DDONALD_NAME=\"trace-syscalls-ld\" \
   -DCHAIN_LOADER \
   -DCHAIN_LOADER_COVER_TRACKS_DECLS='$(shell cat chain-decls.h)' \
-  -DCHAIN_LOADER_COVER_TRACKS='frob_dynamic(base_addr, inferior_dynamic_vaddr, phdrs, ehdr.e_phnum); \
-    set_inferior_metadata(&ehdr, shdrs, phdrs, base_addr); \
+  -DCHAIN_LOADER_COVER_TRACKS='set_inferior_metadata(&ehdr, shdrs, phdrs, base_addr, created_dt_debug); \
     create_fake_vdso(p_auxv); '
 
 bootstrap.o: CFLAGS += -DCHAIN_LOADER
