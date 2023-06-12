@@ -33,8 +33,7 @@ include $(srcroot)/contrib/config.mk
 $(srcroot)/contrib/config.mk:
 	$(MAKE) -C $(srcroot)/contrib config.mk
 endif
-
-ifneq ($(MAKECMDGOAL),clean)
+ifneq ($(MAKECMDGOALS),clean)
 
 ifeq ($(LIBRUNT_DIR),)
 $(error Please install the librunt source tree and set LIBRUNT_DIR to point to it)
@@ -188,6 +187,7 @@ $(LDSO_OBJS): CFLAGS += -DDONALD_NAME=\"trace-syscalls-ld\" \
 
 bootstrap.o: CFLAGS += -DCHAIN_LOADER
 
+DYNAPPEND ?= $(shell which dynappend)
 # FIXME: localize all global symbols except maybe _start?
 trace-syscalls-ld.so: trace-syscalls-ld.lds $(LDSO_OBJS) $(filter-out fake-tls.o,$(LOCAL_OBJS)) dynamic-list
 	$(CC) $(CFLAGS) -fuse-ld=bfd \
@@ -196,6 +196,7 @@ trace-syscalls-ld.so: trace-syscalls-ld.lds $(LDSO_OBJS) $(filter-out fake-tls.o
             $(LDFLAGS) $(LDLIBS) -lgcc -Wl,-Bsymbolic \
             -T $(filter %.lds,$+) -Wl,-soname=ld-linux.so.2 \
             -Wl,--dynamic-list,dynamic-list
+	if [ -n "$(DYNAPPEND)" ]; then $(DYNAPPEND) $@ 21 ; fi # DT_DYNAMIC
 
 # There is no way to make _DYNAMIC a dynamic symbol.
 # A bit of a HACK, but we look for _init and _fini to find our own load address

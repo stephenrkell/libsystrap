@@ -90,8 +90,10 @@ void set_inferior_metadata(ElfW(Ehdr) *ehdr, ElfW(Shdr) *shdrs, ElfW(Phdr) *phdr
 	assert(found_debug);
 	assert(found_debug == created_dt_debug);
 
-	// the r_debug is an offset relative to *our* base address, not the inferior's
-	struct r_debug *r = (struct r_debug *)((uintptr_t) &_begin + created_dt_debug->d_un.d_ptr);
+	/* In our loader's _DYNAMIC as we create it initially, the r_debug is already
+	 * a pointer to the inferior ld.so's. It will never get ADJUST_DYN_INFO'd
+	 * by the ld.so because that ld.so does not know that our _DYNAMIC exists. */
+	struct r_debug *r = (struct r_debug *)(/*(uintptr_t) &_begin +*/ created_dt_debug->d_un.d_ptr);
 	assert(r);
 	/* Now we are writing into the inferior ld.so's _r_debug.
 	 * Initially we use a temporary link map that contains
