@@ -50,10 +50,6 @@ int raw_set_thread_area(struct user_desc *u_info) __attribute__((noinline));
 int raw_arch_prctl(int code, unsigned long addr) __attribute__((noinline));
 
 /* Some utilities for our clients. */
-#define write_string(s) raw_write(2, (s), sizeof (s) - 1)
-#define write_chars(s, t)  raw_write(2, s, t - s)
-#define write_ulong(a)   raw_write(2, fmt_hex_num((a)), 18)
-const char *fmt_hex_num(unsigned long n);
 int sleep_quick(int n);
 
 struct generic_syscall;

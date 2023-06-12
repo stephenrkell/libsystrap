@@ -327,9 +327,17 @@ struct __libc_timeval;
 	do { ((cond) ? ((void) 0) : (__assert_fail("Assertion failed: \"" stringify((cond)) "\"", __FILE__, __LINE__, __func__ ))); }  while (0)
 #endif
 
+/* We must have librunt for these, after fmt_hex_num was moved there. */
+#ifndef write_string
 #define write_string(s) raw_write(2, (s), sizeof (s) - 1)
+#endif
+#ifndef write_chars
 #define write_chars(s, t)  raw_write(2, s, t - s)
+#endif
+const char *fmt_hex_num(unsigned long n) __attribute__((visibility("hidden")));
+#ifndef write_ulong
 #define write_ulong(a)   raw_write(2, fmt_hex_num((a)), 18)
+#endif
 
 #define DO_EXIT_SYSCALL(exitcode) \
 	long retcode = (exitcode); \
