@@ -5,8 +5,10 @@ TOPDIR := $(realpath $(dir $(THIS_MAKEFILE)))
 # allow a config.mk at top level to override that in contrib
 toplevel_config := $(wildcard $(TOPDIR)/config.mk)
 # $(info toplevel_config is $(toplevel_config))
+ifneq ($(toplevel_config),)
 CONFIG ?= $(toplevel_config)
 export CONFIG
+endif
 
 .PHONY: default
 default: all
