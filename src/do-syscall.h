@@ -60,11 +60,11 @@ __systrap_post_handling(struct generic_syscall *gsp, long int ret, _Bool do_call
  * struct fields are ignored by the corresponding do_syscallN calls,
  * so that wouldn't happen anyway. Oh well... it's briefer too. */
 #define MKGS0(op)                         { NULL, op }
-#define MKGS1(op, a1)                     { NULL, op, { (long) a1 } }
-#define MKGS2(op, a1, a2)                 { NULL, op, { (long) a1, (long) a2 } }
-#define MKGS3(op, a1, a2, a3)             { NULL, op, { (long) a1, (long) a2, (long) a3 } }
-#define MKGS4(op, a1, a2, a3, a4)         { NULL, op, { (long) a1, (long) a2, (long) a3, (long) a4 } }
-#define MKGS5(op, a1, a2, a3, a4, a5)     { NULL, op, { (long) a1, (long) a2, (long) a3, (long) a4, (long) a5 } }
+#define MKGS1(op, a1)                     { NULL, op, { (long) a1, NULL, NULL, NULL, NULL, NULL } }
+#define MKGS2(op, a1, a2)                 { NULL, op, { (long) a1, (long) a2, NULL, NULL, NULL, NULL } }
+#define MKGS3(op, a1, a2, a3)             { NULL, op, { (long) a1, (long) a2, (long) a3, NULL, NULL, NULL } }
+#define MKGS4(op, a1, a2, a3, a4)         { NULL, op, { (long) a1, (long) a2, (long) a3, (long) a4, NULL, NULL } }
+#define MKGS5(op, a1, a2, a3, a4, a5)     { NULL, op, { (long) a1, (long) a2, (long) a3, (long) a4, (long) a5, NULL } }
 #define MKGS6(op, a1, a2, a3, a4, a5, a6) { NULL, op, { (long) a1, (long) a2, (long) a3, (long) a4, (long) a5, (long) a6 } }
 
 extern inline long int 
