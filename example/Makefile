@@ -80,6 +80,7 @@ vpath %.c $(srcroot)/contrib
 
 # for donald things
 vpath %.c $(DONALD)/src
+vpath %.S $(DONALD)/src
 vpath %.h $(DONALD)/src
 CFLAGS += -I$(DONALD)/src
 
@@ -175,7 +176,7 @@ trace-syscalls.so: $(srcroot)/lib/libsystrap.a
 		-o "$@" $(filter-out %.a,$+) \
 		$(LDFLAGS) $(LDLIBS)
 
-LDSO_OBJS := premain.o main.o entry.o load.o pre-entry.o debug.o
+LDSO_OBJS := premain.o main.o entry.o load.o pre-entry.o debug.o start.o
 # ask for a spare .dynamic slot
 trace-syscalls-ld.so: LDFLAGS += -Wl,--spare-dynamic-tags=5
 
