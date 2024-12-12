@@ -29,4 +29,5 @@ run-getpid-%.stamp: getpid
 
 # freestanding assembly tests -- these use a non-PIC idiom
 true getpid: LDFLAGS += -no-pie -nostartfiles -nostdlib
-true getpid: LDLIBS += /lib64/ld-linux-x86-64.so.2
+# HACK: until glibc bug 25486 is fixed, we have to add -lc
+true getpid: LDLIBS += /lib64/ld-linux-x86-64.so.2 -Wl,--no-as-needed -lc

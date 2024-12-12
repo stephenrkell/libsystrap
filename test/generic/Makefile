@@ -26,10 +26,9 @@ endif
 CFLAGS += -g -fPIC
 
 # freestanding C tests (not hello)
-time read write: LDFLAGS += -nostdlib -nostartfiles -ffreestanding
-
-time: LDFLAGS += -no-pie
-time: LDLIBS += $(LDSO)
+time read write: LDFLAGS += -nostdlib -nostartfiles -ffreestanding -no-pie
+# while glibc bug 25486 is unresolved, we need to link in libc as well as just the ld.so :-(
+time read write: LDLIBS += $(LDSO) -Wl,--no-as-needed -lc
 
 # without this, for some reason 'make' doesn't find the recipe for hello
 # ... I guess it has a depth limit on searching for not-yet-existing files
