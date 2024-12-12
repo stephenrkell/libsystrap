@@ -41,6 +41,17 @@ int enumerate_operands(unsigned const char *ins, unsigned const char *end,
 		int */*p_fromreg1*/, int */*p_fromreg2*/, void */*arg*/),
 	void *arg
 	);
+struct decoded_insn_info {
+	unsigned char len;
+	struct relocatable_field_info {
+		unsigned char reloc_type;
+		unsigned char fieldoff_nbits;
+		unsigned char fieldlen_nbits;
+	} relocatable_fields[2];
+};
+struct decoded_insn_info
+instr_len_extended(unsigned const char *ins, unsigned const char *end)
+__attribute__((visibility("protected")));
 
 #ifdef __cplusplus
 } /* end extern "C" */

@@ -423,7 +423,9 @@ unsigned long
 __attribute__((visibility("protected")))
 instr_len(unsigned const char *ins, unsigned const char *end)
 {
-	// don't let the decoders see ud2
+	/* Don't let the decoders see ud2, because they may barf, i.e. they may
+	 * have different answers to the following philosophical question:
+	 * is "defined to be an undefined instruction" a defined instruction? */
 	if (end - ins > 1 && is_ud2(ins)) return 2;
 	
 	int len = 1;
@@ -467,6 +469,28 @@ instr_len(unsigned const char *ins, unsigned const char *end)
 #endif
 	if (!got_len) { /* we could warn here */ }
 	return len;
+}
+
+/* This is a HACK to let us (in liballocs/allocsld) memcpy_and_relocate an
+ * instruction with a PC32 field */
+struct decoded_insn_info
+__attribute__((visibility("protected")))
+instr_len_extended(unsigned const char *ins, unsigned const char *end)
+{
+	struct decoded_insn_info ret = (struct decoded_insn_info) {
+		.len = instr_len(ins, end)
+	};
+	/* FIXME: highly sysdep */
+	if (ret.len == 7 && ins[0] == 0x48 && ins[1] == 0x8b)
+	{
+		//  48 8b 0d 09 8b 02 00    mov    0x28b09(%rip),%rcx
+		ret.relocatable_fields[0] = (struct relocatable_field_info) {
+			.reloc_type = R_X86_64_PC32,
+			.fieldoff_nbits = 24,
+			.fieldlen_nbits = 32
+		};
+	}
+	return ret;
 }
 
 int is_sysenter_instr(unsigned const char *ins, unsigned const char *end)
