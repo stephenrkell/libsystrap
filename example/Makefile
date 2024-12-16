@@ -84,7 +84,7 @@ vpath %.S $(DONALD)/src
 vpath %.h $(DONALD)/src
 CFLAGS += -I$(DONALD)/src
 
-C_SRC := $(wildcard *.c)
+C_SRC := $(filter-out %.inc.c,$(wildcard *.c))
 C_DEPS := $(patsubst %.c,.%.d,$(C_SRC))
 DEPS := $(C_DEPS)
 LOCAL_OBJS := $(filter-out pre-entry.o,$(filter-out write-footprints.o,$(patsubst %.c,%.o,$(C_SRC))))
@@ -182,9 +182,8 @@ trace-syscalls-ld.so: LDFLAGS += -Wl,--spare-dynamic-tags=5
 
 $(LDSO_OBJS): CFLAGS += -DDONALD_NAME=\"trace-syscalls-ld\" \
   -DCHAIN_LOADER \
-  -DCHAIN_LOADER_COVER_TRACKS_DECLS='$(shell cat chain-decls.h)' \
-  -DCHAIN_LOADER_COVER_TRACKS='set_inferior_metadata(&ehdr, shdrs, phdrs, base_addr, created_dt_debug); \
-    create_fake_vdso(p_auxv); '
+  -DCHAIN_LOADER_COVER_TRACKS_H='"$(shell pwd)/chain-decls.h"' \
+  -DCHAIN_LOADER_COVER_TRACKS_INC='"$(shell pwd)/chain.inc.c"'
 
 bootstrap.o: CFLAGS += -DCHAIN_LOADER
 
