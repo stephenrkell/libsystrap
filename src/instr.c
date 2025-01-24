@@ -75,17 +75,14 @@ static int instr_len_udis86(unsigned char *ins, unsigned char *end)
 #endif
 #ifdef USE_XED
 _Bool xed_done_init __attribute__((visibility("hidden"))) = 0;
-static int instr_len_xed(unsigned char *ins, unsigned char *end)
+xed_decoded_inst_t *do_xed_decode(unsigned char *ins, unsigned char *end, xed_decoded_inst_t *p_xedd)
 {
     if (!xed_done_init)
     {
         xed_tables_init();
         xed_done_init = 1;
     }
-
-    xed_decoded_inst_t xedd;
-    xed_decoded_inst_zero(&xedd);
-    xed_decoded_inst_set_mode(&xedd,
+    xed_decoded_inst_set_mode(p_xedd,
 #if defined(__x86_64__)
 			XED_MACHINE_MODE_LONG_64,
 			XED_ADDRESS_WIDTH_64b
@@ -96,13 +93,20 @@ static int instr_len_xed(unsigned char *ins, unsigned char *end)
 #error "Unrecognised x86 architecture."
 #endif
     );
-
-    xed_error_enum_t xed_error = xed_decode(&xedd, ins, end-ins);
-    if (xed_error == XED_ERROR_NONE)
-    {
-        return xed_decoded_inst_get_length(&xedd);
-    }
-    else return -1;
+    xed_error_enum_t xed_error = xed_decode(p_xedd, ins, end-ins);
+    if (xed_error == XED_ERROR_NONE) return p_xedd;
+    return NULL;
+}
+static int instr_len_xed(unsigned char *ins, unsigned char *end)
+{
+	/* FIXME: use xed_ild_decode -- should be faster */
+	/* Explicitly zero the struct to avoid the xed zero call -- this is a HACK
+	 * because I've seen the xedd zero call to an out-of-DSO memset, and that will
+	 * not work during systrapping. We should be self-contained of course. */
+	xed_decoded_inst_t xedd = (struct xed_decoded_inst_s) { ._decoded_length = 0 };
+	xed_decoded_inst_t *decoded = do_xed_decode(ins, end, &xedd);
+	if (decoded) return xed_decoded_inst_get_length(decoded);
+    return -1;
 }
 #endif
 #ifdef USE_X86_DECODE
@@ -481,6 +485,30 @@ instr_len_extended(unsigned const char *ins, unsigned const char *end)
 		.len = instr_len(ins, end)
 	};
 	/* FIXME: highly sysdep */
+#ifdef USE_XED
+	/* How can we figure out the relocatable fields using xed? */
+	/* HACK: manual zeroing. See comment elsewhere for the other similar 'xedd'. */
+	xed_decoded_inst_t xedd = (struct xed_decoded_inst_s) { ._decoded_length = 0 };
+	xed_decoded_inst_t *decoded = do_xed_decode(ins, end, &xedd);
+	if (!decoded) return ret; // length==-1 signals error
+	unsigned nfields_used = 0;
+#if 0 /* We need to test this */
+	if (decoded->_operands.disp_width > 0)
+	{
+		/* OK, we think we have a relative displacement */
+		ret.relocatable_fields[nfields_used++] = (struct relocatable_field_info) {
+			.reloc_type = (decoded->_operands.disp_width == 4) ? R_X86_64_PC32 :
+			              (decoded->_operands.disp_width == 2) ? R_X86_64_PC16 :
+			              (decoded->_operands.disp_width == 1) ? R_X86_64_PC8 :
+			              (decoded->_operands.disp_width == 8) ? R_X86_64_PC64 : 0,
+			.fieldoff_nbits = /* hmm, now we need the *offset* in the encoded insn */ 24 /* FIXME */,
+			.fieldlen_nbits = 8 * decoded->_operands.disp_width
+		};
+	}
+#else
+
+#endif /* new xed-based operand code */
+#endif /* USE_XED */
 	if (ret.len == 7 && ins[0] == 0x48 && ins[1] == 0x8b)
 	{
 		//  48 8b 0d 09 8b 02 00    mov    0x28b09(%rip),%rcx
@@ -489,6 +517,11 @@ instr_len_extended(unsigned const char *ins, unsigned const char *end)
 			.fieldoff_nbits = 24,
 			.fieldlen_nbits = 32
 		};
+#ifdef USE_XED
+        write_string("Saw 48 8b instruction with disp_width ");
+        write_ulong((unsigned long) decoded->_operands.disp_width);
+        write_string("\n");
+#endif
 	}
 	return ret;
 }
