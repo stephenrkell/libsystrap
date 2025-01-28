@@ -8,7 +8,7 @@ jobs:
           name: Install dependencies
           command: |
             apt update
-            apt install -y \
+            DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt install -y \
               libelf-dev libdw-dev binutils-dev \
               autoconf automake libtool pkg-config autoconf-archive \
               g++ python3 python \
