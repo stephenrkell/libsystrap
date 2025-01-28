@@ -145,6 +145,9 @@ install-binutils: build-binutils
 build-xed: $(MBUILD_DIR)
 	cd xed && ./mfile.py install --install-dir=build --no-encoder --extra-flags='-fPIC -ffreestanding'
 
+clean::
+	cd xed && ./mfile.py clean || true
+
 CONFIG_MK +=\nXED_DIR ?= $(CONTRIB)/xed/build\n
 CONFIG_MK +=\nXED_A ?= $(CONTRIB)/xed/build/lib/libxed.a\n
 varlist += XED_DIR XED_A
