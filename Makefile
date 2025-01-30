@@ -16,6 +16,12 @@ default: all
 .PHONY: all
 all: src lib example
 
+.PHONY: clean
+clean:
+	$(MAKE) -C example clean
+	$(MAKE) -C lib clean
+	$(MAKE) -C src clean
+
 .PHONY: run-tests
 run-tests: test
 	$(MAKE) -C test checkrun
