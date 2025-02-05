@@ -3,7 +3,7 @@ CONTRIB := $(realpath $(dir $(THIS_MAKEFILE)))
 
 KERNEL ?= $(shell uname -s)
 
-.PHONY: default build
+.PHONY: default build clean
 default: build config.mk $(CONTRIB)/env.sh
 
 include config.mk

@@ -10,7 +10,9 @@ CONFIG ?= $(CONTRIB)/config.mk
 $(CONTRIB)/config.mk:
 	$(MAKE) -C $(CONTRIB)
 
+ifneq ($(MAKECMDGOALS),clean)
 include $(CONFIG)
+endif
 
 # we link with the librunt archive
 CFLAGS += -DIN_LIBRUNT_DSO
