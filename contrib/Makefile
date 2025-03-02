@@ -68,6 +68,9 @@ musl/libc/libc.a: musl/config.mak
 host-includes:
 	mkdir -p $@ && ln -sf -t $@ /usr/include/linux /usr/include/asm-generic /usr/include/$(shell gcc -print-multiarch)/asm
 
+clean::
+	$(MAKE) -C musl clean
+
 ifeq ($(KERNEL),Linux)
 CONFIG_MK += \nLIBC_A := $(realpath $(dir $(THIS_MAKEFILE)))/musl/lib/libc.a\n
 CONFIG_MK += \nLIBC_CFLAGS := -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/arch/$(shell gcc -print-multiarch | sed 's/-.*//') -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/arch/generic -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/obj/include -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/include -I$(realpath $(dir $(THIS_MAKEFILE)))/host-includes \n
