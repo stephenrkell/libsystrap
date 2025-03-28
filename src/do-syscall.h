@@ -42,6 +42,43 @@ zaps_stack(struct generic_syscall *gsp, void **p_new_sp)
 		*p_new_sp = (void*) gsp->args[1];
 		return 1;
 	}
+#ifdef __NR_clone3
+	else if (gsp->syscall_number == __NR_clone3)
+	{
+		struct clone_args {
+			unsigned long long flags;		/* Flags bit mask */
+			unsigned long long pidfd;		/* Where to store PID file descriptor
+											(pid_t *) */
+			unsigned long long child_tid;	/* Where to store child TID,
+											in child's memory (pid_t *) */
+			unsigned long long parent_tid; /* Where to store child TID,
+											in parent's memory (int *) */
+			unsigned long long exit_signal;/* Signal to deliver to parent on
+											child termination */
+			unsigned long long stack;		/* Pointer to lowest byte of stack */
+			unsigned long long stack_size; /* Size of stack */
+			unsigned long long tls;		/* Location of new TLS */
+			unsigned long long set_tid;	/* Pointer to a pid_t array
+											(since Linux 5.5) */
+			unsigned long long set_tid_size; /* Number of elements in set_tid
+											(since Linux 5.5) */
+			unsigned long long cgroup;		/* File descriptor for target cgroup
+											of child (since Linux 5.7) */
+		};
+		struct clone_args *args = (struct clone_args *) gsp->args[0];
+		if (args->stack)
+		{
+			/* From the manual page clone(2):
+			   "The stack for the child process is specified via cl_args.stack, which points to the
+			   lowest  byte of the stack area, and cl_args.stack_size, which specifies the size of
+			   the stack in bytes." */
+			*p_new_sp = (void*)(
+				(unsigned long long) args->stack + args->stack_size
+			);
+			return 1;
+		}
+	}
+#endif
 	return 0;
 #endif
 }
