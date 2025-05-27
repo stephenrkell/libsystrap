@@ -2,20 +2,25 @@ THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 CONTRIB := $(realpath $(dir $(THIS_MAKEFILE)))
 
 KERNEL ?= $(shell uname -s)
+$(info Building for kernel: $(KERNEL))
 
-.PHONY: default build clean
-default: build config.mk $(CONTRIB)/env.sh
+.PHONY: default clean
+default: build.stamp config.mk $(CONTRIB)/env.sh
 
 include config.mk
 
 ifeq ($(KERNEL),Linux)
-build: build-xed build-musl build-librunt
+build.stamp: build-xed build-musl build-librunt
 else
 ifeq ($(KERNEL),FreeBSD)
-build: build-udis86
+build.stamp: build-udis86
 $(error FIXME: make xed build on FreeBSD)
 endif
 endif
+	touch $@
+
+clean::
+	rm -f build.stamp
 
 # don't remove intermediates
 .SECONDARY:
