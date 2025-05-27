@@ -9,138 +9,53 @@ default: build config.mk $(CONTRIB)/env.sh
 include config.mk
 
 ifeq ($(KERNEL),Linux)
-build: build-xed build-musl build-librunt \
-#build-liballocs build-dwarfidl build-libfootprints build-opdis build-binutils build-zlib build-eglibc build-udis86
+build: build-xed build-musl build-librunt
 else
 ifeq ($(KERNEL),FreeBSD)
 build: build-udis86
+$(error FIXME: make xed build on FreeBSD)
 endif
 endif
 
 # don't remove intermediates
 .SECONDARY:
 
-# Things we may need to build
-# libudis86
-# opdis
-# binutils: libiberty, libopcodes, bfd  (for opdis)
-# zlib  (for bfd)
-# eglibc or musl
-# xed
-# mbuild (for xed)
-# librunt
-OPDIS_REPO := https://github.com/mkfs/opdis.git
-UDIS86_REPO := https://github.com/vmt/udis86.git
-ZLIB_DIR := zlib-1.2.8
-ZLIB_TAR := zlib-1.2.8.tar.gz
-# ZLIB_TAR_URL := http://zlib.net/zlib-1.2.8.tar.gz
-# zlib.net removes non-current releases, so use Debian ftp
-ZLIB_TAR_URL := http://cdn-fastly.deb.debian.org/debian/pool/main/z/zlib/zlib_1.2.8.dfsg.orig.tar.gz
-BINUTILS_DIR := binutils-2.26
-BINUTILS_TAR := binutils-2.26.tar.bz2
-BINUTILS_TAR_URL := ftp://ftp.gnu.org/gnu/binutils/binutils-2.26.tar.bz2
 MBUILD_DIR := mbuild
-WGET := wget
 
 # ----------------------------we need some libc or other, to be self-contained
 
-$(EGLIBC_TAR):
-	$(WGET) http://downloads.yoctoproject.org/releases/eglibc/$(EGLIBC_TAR)
-$(EGLIBC_DIR)/libc/configure: $(EGLIBC_TAR)
-	tar -k -xvjf "$<"
-	touch "$@"
-# eglibc is VERY picky about its compiler flags
-$(EGLIBC_DIR)/libc/build/Makefile: $(EGLIBC_DIR)/libc/configure | install-binutils
-	mkdir -p $(EGLIBC_DIR)/libc/build
-	cd $(EGLIBC_DIR)/libc/build && CFLAGS="-g -O1 -fPIC -DPIC" CPPFLAGS="" ../configure --prefix=/usr --with-binutils=$(CONTRIB)/bin # --with-sysroot=$(CONTRIB)
-.PHONY: build-eglibc
-build-eglibc: $(EGLIBC_DIR)/libc/build/Makefile
-	CFLAGS="-g -O1 -fPIC -DPIC" CPPFLAGS="" $(MAKE) -C $(EGLIBC_DIR)/libc/build
-
+# TODO: multiarch musl build. What do we need to do?
+# Possibly simplest:
+# (1) always build in a build dir, not default/top-level
+# (2) name the build dir after the arch
+# (3) on x86-64, special-case an extra -m32 build.
+# We will need to change LIBC_A because there can be more than one of them...
+#    LIBC_A_PATTERN? i.e. we sub in the arch, although it can be a no-op on other arches
 .PHONY: build-musl
-build-musl: musl/libc/libc.a host-includes
+build-musl: musl/libc/libc.a host-includes-$(shell uname -m)
 musl/config.mak:
 	cd musl && CFLAGS=-g ./configure
 
 musl/libc/libc.a: musl/config.mak
 	$(MAKE) -C musl
 
-host-includes:
-	mkdir -p $@ && ln -sf -t $@ /usr/include/linux /usr/include/asm-generic /usr/include/$(shell gcc -print-multiarch)/asm
+host-includes-%:
+	triple="$$( if [ "$*" = "i386" ] && [ "$$(uname -m)" = "x86_64" ]; then gcc -m32 -print-multiarch; else gcc -print-multiarch; fi )"; \
+	mkdir -p $@ && ln -sf -t $@ /usr/include/linux /usr/include/asm-generic /usr/include/$${triple}/asm
 
 clean::
 	$(MAKE) -C musl clean
 
 ifeq ($(KERNEL),Linux)
-CONFIG_MK += \nLIBC_A := $(realpath $(dir $(THIS_MAKEFILE)))/musl/lib/libc.a\n
-CONFIG_MK += \nLIBC_CFLAGS := -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/arch/$(shell gcc -print-multiarch | sed 's/-.*//') -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/arch/generic -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/obj/include -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/include -I$(realpath $(dir $(THIS_MAKEFILE)))/host-includes \n
+CONFIG_MK += \nLIBC_A_PATTERN := $(realpath $(dir $(THIS_MAKEFILE)))/musl/lib/libc.a\n
+CONFIG_MK += \nLIBC_CFLAGS_PATTERN := -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/arch/$${arch} -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/arch/generic -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/obj/include -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/include -I$(realpath $(dir $(THIS_MAKEFILE)))/host-includes-$${arch} \n
 else
 ifeq ($(KERNEL),FreeBSD) # FIXME: check this
-CONFIG_MK += \nLIBC_A := /usr/lib/libc_pic.a\n
-CONFIG_MK += \nLIBC_CFLAGS :=
+CONFIG_MK += \nLIBC_A_PATTERN := /usr/lib/libc_pic.a\n
+CONFIG_MK += \nLIBC_CFLAGS_PATTERN :=
 endif
 endif
-varlist += LIBC_A LIBC_CFLAGS
-
-# ----------------------------we need some instruction decoder or other
-
-$(ZLIB_TAR):
-	$(WGET) -O "$@" $(ZLIB_TAR_URL)
-$(ZLIB_DIR)/configure: $(ZLIB_TAR)
-	tar -k -xvzf "$<"
-	touch "$@"
-$(ZLIB_DIR)/Makefile: $(ZLIB_DIR)/configure
-	cd $(ZLIB_DIR) && CFLAGS="-fPIC -DPIC" ./configure
-.PHONY: build-zlib
-build-zlib: $(ZLIB_DIR)/Makefile
-	$(MAKE) -C $(ZLIB_DIR)
-
-opdis/bootstrap:
-	git clone $(OPDIS_REPO)
-opdis/configure: opdis/bootstrap
-	cd opdis && ./bootstrap
-opdis-build/Makefile: opdis/configure | build-binutils
-	mkdir -p opdis-build
-	cd opdis-build && CPPFLAGS="-I$(CONTRIB)/binutils-2.26/include -I$(CONTRIB)/binutils-build/bfd" CFLAGS="-fPIC -g -I$(CONTRIB)/binutils-2.26/include -I$(CONTRIB)/binutils-build/bfd" LDFLAGS="-L$(CONTRIB)/binutils-build/libiberty -L$(CONTRIB)/binutils-build/bfd -L$(CONTRIB)/binutils-build/intl -L$(CONTRIB)/binutils-build/opcodes" ../opdis/configure
-.PHONY: build-opdis
-build-opdis: opdis-build/Makefile
-	$(MAKE) -C opdis-build
-
-.PHONY: build-udis86
-build-udis86: udis86/Makefile
-	$(MAKE) -C udis86
-udis86/autogen.sh:
-	git clone $(UDIS86_REPO)
-udis86/configure: udis86/autogen.sh
-	cd udis86 && ./autogen.sh
-udis86/Makefile: udis86/configure
-	cd udis86 && CFLAGS=-fPIC ./configure --enable-shared=no --enable-static=yes
-
-$(BINUTILS_TAR):
-	$(WGET) $(BINUTILS_TAR_URL)
-$(BINUTILS_DIR)/configure: $(BINUTILS_TAR)
-	tar -k -xjf "$(BINUTILS_TAR)"
-	touch "$@"
-
-#binutils-build/Makefile: $(BINUTILS_DIR)/configure
-#	mkdir -p binutils-build
-#	cd binutils-build && CFLAGS="-g -O2 -fPIC -DPIC" ../$(BINUTILS_DIR)/configure --prefix=$(CONTRIB) --enable-ld --disable-gold --disable-multilib --disable-bootstrap --without-x --without-system-zlib
-
-# NOT -DPIC because that breaks libintl
-# and don't bother to build the docs
-# yes, MAKEINFO=true actually accomplishes that ¬_¬
-binutils-build/Makefile: $(BINUTILS_DIR)/configure
-	mkdir -p binutils-build
-	cd binutils-build && CFLAGS="-g -O2 -fPIC" ../$(BINUTILS_DIR)/$*/configure --prefix=$(CONTRIB) --without-included-gettext --disable-bootstrap --enable-ld --disable-gold --without-x --with-sysroot=$(CONTRIB)
-
-# gah binutils
-.PHONY: build-binutils
-build-binutils: binutils-build/Makefile
-	$(MAKE) -C binutils-build MAKEINFO=/bin/true
-
-.PHONY: install-binutils
-install-binutils: build-binutils
-	$(MAKE) -C binutils-build install MAKEINFO=/bin/true
+varlist += LIBC_A_PATTERN LIBC_CFLAGS_PATTERN
 
 # ----------------------------xed
 
