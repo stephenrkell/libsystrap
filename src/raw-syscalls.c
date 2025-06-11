@@ -146,3 +146,26 @@ int sleep_quick(int n)
 	int ret = raw_nanosleep(&req, NULL);
 	return ret;
 }
+
+long clone3_using_clone(struct clone_args *cl_args, size_t size, struct ibcs_sigframe *saved_context)
+{
+	/* Build a vanilla clone generic_syscall and let it handle the rest.
+	 * All the hairy stuff is in do-syscall.h. */
+	struct generic_syscall gs = MKGS5(SYS_clone,
+		/* flags */ cl_args->flags | (cl_args->exit_signal & 0xff),
+		/* stack */ (long long) (cl_args->stack ? ((char*) cl_args->stack + cl_args->stack_size - 1) : NULL),
+		/* parent_tid */ (pid_t *) cl_args->parent_tid,
+#if defined(__x86_64__)
+		/* child_tid */ (pid_t *) cl_args->child_tid,
+		/* tls */ cl_args->tls
+#elif defined(__i386__) /* last two arguments are reversed on this arch */
+		/* tls */ cl_args->tls,
+		/* child_tid */ (pid_t *) cl_args->child_tid
+#else
+#error "Unrecognised architecture -- check raw clone() signature on this platform."
+#endif
+		);
+	gs.saved_context = saved_context;
+	//return do_syscall5(&gs);
+	do_generic_syscall_and_resume(&gs);
+}
