@@ -375,8 +375,21 @@ void __libsystrap_force_init(void)
 	startup();
 }
 
+void clone3_emulated_replacement(struct generic_syscall *s, post_handler *post)
+{
+	struct clone_args *cl_args = (struct clone_args *) s->args[0];
+	size_t size = s->args[1];
+	long ret = clone3_using_clone(cl_args, size, s->saved_context);
+	post(s, (long) ret, 1);
+}
+
 void install_sigill_handler(void)
 {
+	/* While we can't handle clone3(), set it to occur using clone(). */
+#ifndef SYS_clone3
+#define SYS_clone3 435
+#endif
+	replaced_syscalls[SYS_clone3] = clone3_emulated_replacement;
 	/* Install our SIGILL (was SIGTRAP, but that interferes with gdb) handler.
 	 * Linux seems to require us to provide a restorer; the code is in restore_rt. */
 #ifndef SA_RESTORER

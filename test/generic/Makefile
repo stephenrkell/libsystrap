@@ -1,5 +1,6 @@
 .PHONY: default
-default: $(foreach t,hello time truemk-execve truesh-execve sigreturn,run-$(t)-$(MODE).stamp)
+ALLTESTS := hello time truemk-execve truesh-execve sigreturn clone
+default: $(foreach t,$(ALLTESTS),run-$(t)-$(MODE).stamp)
 
 # FIXME: we skip 'read' and 'write' as they exit nonzero even on success
 
@@ -10,7 +11,7 @@ $(info srcroot is $(srcroot))
 include $(srcroot)/test/rules.mk
 
 clean::
-	rm -f hello time read write
+	rm -f $(ALLTESTS)
 
 # quick hack to get the dynamic linker path
 LDSO ?= $(shell ldd /bin/true | grep ld-linux | cut -f2 | sed 's/[[:blank:]].*//')
@@ -26,9 +27,9 @@ endif
 CFLAGS += -g -fPIC
 
 # freestanding C tests (not hello)
-time read write: LDFLAGS += -nostdlib -nostartfiles -ffreestanding -no-pie
+$(filter-out clone,$(filter-out hello,$(ALLTESTS))): LDFLAGS += -nostdlib -nostartfiles -ffreestanding -no-pie
 # while glibc bug 25486 is unresolved, we need to link in libc as well as just the ld.so :-(
-time read write: LDLIBS += $(LDSO) -Wl,--no-as-needed -lc
+$(filter-out hello,$(ALLTESTS)): LDLIBS += $(LDSO) -Wl,--no-as-needed -lc
 
 # without this, for some reason 'make' doesn't find the recipe for hello
 # ... I guess it has a depth limit on searching for not-yet-existing files
