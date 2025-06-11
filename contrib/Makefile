@@ -36,24 +36,52 @@ MBUILD_DIR := mbuild
 # (3) on x86-64, special-case an extra -m32 build.
 # We will need to change LIBC_A because there can be more than one of them...
 #    LIBC_A_PATTERN? i.e. we sub in the arch, although it can be a no-op on other arches
+arch := $(shell uname -m)
 .PHONY: build-musl
-build-musl: musl/libc/libc.a host-includes-$(shell uname -m)
-musl/config.mak:
-	cd musl && CFLAGS=-g ./configure
+build-musl: musl/build-$(arch)/lib/libc.a host-includes-$(arch)
+musl/build-$(arch)/config.mak:
+	mkdir -p $(dir $@) && cd $(dir $@) && CFLAGS=-g ../configure
+musl/%/lib/libc.a: musl/%/config.mak
+	$(MAKE) -C musl/$*
 
-musl/libc/libc.a: musl/config.mak
-	$(MAKE) -C musl
+# on x86-64, also build the -m32 version
+# XXX: This is still failing, because we are trying too hard
+# to coerce musl to do the -m32 build... e.g. we are still pulling in
+# 64-bit libgcc, for some reason, and the RANLIB hack does not work (i386-ranlib not found).
+# Does musl support an -m32 build? as opposed to a fully general cross-compilation?
+ifeq ($(arch),x86_64_XXX_DELETE_THIS_TO_RE_ENABLE)
+build-musl: musl/build-i386/lib/libc.a host-includes-i386
+# our CC is probed by the shell snippet, so ensure it's exported... ditto AR, RANLIB
+export CC AR RANLIB
+musl/build-i386/config.mak:
+	mkdir -p $(dir $@) && cd $(dir $@) && \
+ CFLAGS="-g -m32" LDFLAGS="-m32" AR="$${AR}" RANLIB="$${RANLIB}" CC="$${CC:-cc} -m32 -DSYS_socketcall=__NR_socketcall" ../configure --target=i386
+clean::
+	$(MAKE) -C musl/build-i386 clean
+	rm -f musl/build-i386/{Makefile,config.mak}
+endif
 
+# HACK: we rewrite 386 to 686... this should not be necessary, might be Debian-specific?
+# HACK: on my Debian system I have /usr/i686-linux-gnu/include but /usr/include/x86_64-linux-gnu
+# and no /usr/x86_64-linux-gnu/include... this is very unsatisfying.
 host-includes-%:
 	triple="$$( if [ "$*" = "i386" ] && [ "$$(uname -m)" = "x86_64" ]; then gcc -m32 -print-multiarch; else gcc -print-multiarch; fi )"; \
-	mkdir -p $@ && ln -sf -t $@ /usr/include/linux /usr/include/asm-generic /usr/include/$${triple}/asm
+	mkdir -p $@ && for d in /usr/include/linux \
+ /usr/include/asm-generic \
+ /usr/$$( echo "$${triple}" | sed 's/386/686/')/include/asm; do \
+     echo "Expecting to use system include dir $${d}, so symlinking to it"; \
+     { test -e "$$d" && ln -s -t $@ "$$d"; } || \
+      { d="$$(echo "$$d" | sed "s^/usr/$${triple}/include^/usr/include/$${triple}^" )"; test -e "$$d" \
+       && echo "Fell back to $$d" && ln -s -t $@ "$$d"; }  ; \
+done
 
 clean::
-	$(MAKE) -C musl clean
+	$(MAKE) -C musl/build-$(arch) clean
+	rm -f musl/build-$(arch)/{Makefile,config.mak}
 
 ifeq ($(KERNEL),Linux)
-CONFIG_MK += \nLIBC_A_PATTERN := $(realpath $(dir $(THIS_MAKEFILE)))/musl/lib/libc.a\n
-CONFIG_MK += \nLIBC_CFLAGS_PATTERN := -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/arch/$${arch} -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/arch/generic -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/obj/include -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/include -I$(realpath $(dir $(THIS_MAKEFILE)))/host-includes-$${arch} \n
+CONFIG_MK += \nLIBC_A_PATTERN := $(realpath $(dir $(THIS_MAKEFILE)))/musl/build-$(shell uname -m)/lib/libc.a\n
+CONFIG_MK += \nLIBC_CFLAGS_PATTERN := -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/arch/$${arch} -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/arch/generic -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/build-$(shell uname -m)/obj/include -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/include -I$(realpath $(dir $(THIS_MAKEFILE)))/host-includes-$${arch} \n
 else
 ifeq ($(KERNEL),FreeBSD) # FIXME: check this
 CONFIG_MK += \nLIBC_A_PATTERN := /usr/lib/libc_pic.a\n
