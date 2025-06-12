@@ -212,7 +212,6 @@ do_syscall6(struct generic_syscall *gsp)
 	return ret_op;
 }
 
-
 /* At least clone(), and perhaps other system calls, will zap the stack.
  * This is a problem for us, because of our long return path.
  * Our normal return path is
@@ -237,6 +236,83 @@ do_syscall6(struct generic_syscall *gsp)
  * Complication 1: when copying the stack, we also have to fix up stack-internal
  * pointers so that they point into the new stack.
  */
+__attribute__((used,noinline))
+#if defined(__i386__)
+__attribute__((regparm(3)))
+#endif
+static void *copy_to_new_stack(
+#if defined(__x86_64__)
+	/* rdi */ unsigned long flags_unused,
+	/* rsi */ uintptr_t new_stack,
+	/* rdx */ int *parent_tid_unused,
+	/* rcx */ uintptr_t sp_on_clone,
+	/* r8 */  struct generic_syscall *gsp
+#elif defined(__i386__)
+	/* eax */ unsigned long syscall_num_unused /* syscall num from eax */,
+	/* edx */ int *parent_tid_unused,
+	/* ecx */ uintptr_t new_stack
+#else
+#error "Unrecognised architecture."
+#endif
+)
+{
+#if defined(__i386__)
+	uintptr_t sp_on_clone = ((uintptr_t) __builtin_frame_address()) - sizeof (long);
+#endif
+	uintptr_t *copysrc_start = (uintptr_t*) sp_on_clone;
+	uintptr_t *copysrc_end = (uintptr_t*) (gsp->saved_context->uc.uc_mcontext.MC_REG_SP);
+	size_t nwords_to_copy = copysrc_end - copysrc_start;
+	size_t nbytes_to_copy = sizeof (*copysrc_start) * nwords_to_copy;
+
+	/* Sanity: we expect the syscall ctxt block to be on *this* stack, so above current esp.
+	 * FIXME: tighter check, and hard-abort if it fails (even when NDEBUG). */
+	assert((uintptr_t) gsp > (uintptr_t) copysrc_start);
+	/* Sanity: the block runs in the direction we expect, i.e. upwards */
+	assert((uintptr_t) copysrc_end > (uintptr_t) copysrc_start);
+	/* Sanity: we are not copying implausibly much. */
+	assert((uintptr_t) copysrc_end - (uintptr_t) copysrc_start < 0x10000u);
+
+	/* The new stack region has to match the alignment of the old stack region,
+	 * i.e. corresponding addresses have to be congruent modulo ALIGN.
+	 * If it doesn't, adjust destination downwards. */
+	uintptr_t *copydest_end = (uintptr_t *) new_stack;
+	uintptr_t *copydest_start = (uintptr_t *) new_stack - nwords_to_copy;
+#define ALIGN 64
+	if (   (uintptr_t) copydest_end % ALIGN
+		!= (uintptr_t) copysrc_end % ALIGN)
+	{
+		ssize_t difference = (uintptr_t) copydest_end % ALIGN
+		 - (uintptr_t) copysrc_end % ALIGN;
+		assert(0 == difference % sizeof (uintptr_t));
+		copydest_start -= difference / sizeof (uintptr_t);
+		copydest_end -= difference / sizeof (uintptr_t);
+		assert((uintptr_t) copydest_end % ALIGN == (uintptr_t) copysrc_end % ALIGN);
+	}
+	long fixup_delta_nbytes = (uintptr_t) copydest_end - (uintptr_t) copysrc_end;
+
+	/* We shouldn't be copying more than a page (-epsilon) of stuff, because
+	 * we can't know that the cloning code has allocated more stack than that. */
+	assert(nbytes_to_copy < MIN_PAGE_SIZE - sizeof (void*));
+	/* Do the copy */
+	memcpy(copydest_start, copysrc_start, nbytes_to_copy);
+	/* Do the fixup pass */
+	uintptr_t *p_dest = copydest_start;
+	for (uintptr_t *p_src = copysrc_start; p_src != copysrc_end; ++p_src, ++p_dest)
+	{
+		/* Relocate any word we copy if it's a stack address. HMM.
+		 * FIXME: use the struct sigframe structure to identify what to fix up, i.e.
+		 * only a statically enumerated set of words need fixing up in this way.
+		 * For now, we take any word that looks like a pointer within the copied region.
+		 *
+		 * TODO: within the copied region, where is the sigframe? I think we should
+		 * probably take this explicitly as an argument. */
+		if (*p_src < (uintptr_t) copysrc_end && *p_src >= (uintptr_t) copysrc_start)
+		{
+			*p_dest += fixup_delta_nbytes;
+		}
+	}
+	return (void*) copydest_start;
+}
 extern inline void
 do_syscall_and_resume(struct generic_syscall *sys)
 __attribute__((always_inline,gnu_inline));
@@ -288,18 +364,19 @@ do_generic_syscall_and_resume(struct generic_syscall *gsp)
 		return;
 	}
 
-#if defined(__x86_64__)
-#define STACK_ALIGN 16
-#elif defined(__i386__)
-#define STACK_ALIGN 4
-#else
-#error "Unsupported architecture."
-#endif
 	assert(new_top_of_stack);
 	// we should have a new top of stack
 	assert(gsp->args[1] /* a.k.a. 'stack' argument to raw clone() syscall */);
 	// our new stack should be aligned
-	assert(0 == (uintptr_t) new_top_of_stack % STACK_ALIGN);
+	assert(0 == (uintptr_t) new_top_of_stack %
+#if defined(__x86_64__)
+		16
+#elif defined(__i386__)
+		4
+#else
+#error "Unsupported architecture."
+#endif
+	);
 	// the stack should have been aligned at the trap site
 	// assert(0 == (uintptr_t) gsp->saved_context->uc.uc_mcontext.MC_REG_SP % STACK_ALIGN);
 	/* HMM. Actually it might not be! So what can we do?
@@ -337,7 +414,7 @@ __  X|________|<-- sp at clone() site                 Y.________ <--stack limit!
  ||  |  . . . | sigframe stuff                         |  . . . | COPY of sigframe stuff
 Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved ip = clone site (AGAIN; YES)
  |v  | . . .  |\ us a.k.a. handle_sigill               | . . .  |\  COPY of us
- v___|__-_-_-_|/ <-- sp at time of syscall             |__-_-_-_|/ <-- hacked sp we gave to clone()
+ v___|__-_-_-_|/ <-- sp at time of syscall             |__-_-_-_|/ <-- hacked sp we give to clone()
 
                       ... the - - -  data might not be copied so had better not be important!
 
@@ -346,7 +423,7 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 	 *
 	 * Q. How do we fix up the rip?
 	 * A. We don't! The raw clone does not take a new code address.
-	 *    Instead it's the job of the surrounding code, executing in the
+	 *    Instead it's the job of the invoking code, executing in the
 	 *    child context, to jump to the new thread's code. In glibc and the like
 	 *    there is a wrapper function, with a different signature, which performs this.
 	 *    As long as we return the right return value (0 in the child) and the right
@@ -366,8 +443,11 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 	 *
 	 *    and then we add X-Z, i.e. the current SP, when we are in the inline assembly,
 	 *    to set the new stack argument to its final desired value of Y-Z.
-	 *
-	 * PROBLEM: when we pre-copy the stack, we can only copy using an approximation of Z,
+	 */
+#if 0 /* no longer needed? */
+	uintptr_t breadcrumb = (uintptr_t) gsp->args[1] - (uintptr_t) gsp->saved_context->uc.uc_mcontext.MC_REG_SP;
+#endif
+	/* PROBLEM: when we pre-copy the stack, we can only copy using an approximation of Z,
 	 * which I have labelled Z' above. If any late adjustments to the calling SP allocate
 	 * more stack storage, this will not be copied over. TODO: fix this by doing the copy
 	 * in an out-of-line function that we call from the inline asm.
@@ -384,9 +464,10 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 	 * misalignment, and adjust argreg1 (the 'new stack' register) if needed, just for
 	 * the clone(), then adjust it back afterwards. We can test the alignment using our
 	 * breadcrumb B, i.e. we can check before or after we add back %rsp. NOTE that we don't
-	 * also adjust %rsp. There's no need; the value of argreg1 matters only in the child.
-	 * Also if we did adjust %rsp and *then* turned the breadcrumb back into the real new_sp,
-	 * it would be misaligned again because this would amount to a double adjustment.
+	 * also align %rsp in the inline assembly sequence. There's no need; the value of argreg1
+	 * matters only in the child. Also if we did adjust %rsp and *then* turned the breadcrumb
+	 * back into the real new_sp, it would be misaligned again because this would amount to a
+	 * double adjustment.
 	 *
 	 * If I do the misalign hack below, I still get a misaligned
 	 * child stack, which is surprising.
@@ -395,142 +476,15 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 	 * So I've clearly broken something there too.
 	 */
 
-	/* Start of copy: our current sp, rounded up to the relevant alignment.
-	 * XXX: aligning the stack pointer here is not useful, because (on x86_64)
-	 * nothing stops the compiler from pushing an odd number of words between
-	 * here and the clone. Really we have to align the stack downwards and
-	 * remember how much we aligned it by, and then do the reverse afterwards. */
-	uintptr_t *copysrc_start = (uintptr_t*) ROUND_UP_PTR(STACK_ALIGN, (uintptr_t) orig_sp);
-	/* The saved syscall context's esp, which it expects to be zapped.
-	 * Anything here or earlier on the stack is irrelevant post-zap. */
-	uintptr_t *copysrc_end = (uintptr_t*) (gsp->saved_context->uc.uc_mcontext.MC_REG_SP);
-
-	/* Sanity: we expect the syscall ctxt block to be on *this* stack, so above current esp.
-	 * FIXME: tighter check, and hard-abort if it fails (even when NDEBUG). */
-	assert((uintptr_t) gsp > (uintptr_t) copysrc_start);
-	/* Sanity: the block runs in the direction we expect, i.e. upwards */
-	assert((uintptr_t) copysrc_end > (uintptr_t) copysrc_start);
-	/* Sanity: we are not copying implausibly much. */
-	assert((uintptr_t) copysrc_end - (uintptr_t) copysrc_start < 0x10000u);
-	size_t length_of_stack_to_copy = copysrc_end - copysrc_start;
-
-	uintptr_t *copydest_start = (uintptr_t *) new_top_of_stack - length_of_stack_to_copy;
-	uintptr_t *p_dest = copydest_start;
-	long fixup_delta = (uintptr_t) p_dest - (uintptr_t) copysrc_start;
-	unsigned nbytes = (uintptr_t) copysrc_end - (uintptr_t) copysrc_start;
-	/* We shouldn't be copying more than a page (-epsilon) of stuff, because
-	 * we can't know that the cloning code has allocated more stack than that. */
-	assert(nbytes < MIN_PAGE_SIZE - sizeof (void*));
-	memcpy(p_dest, copysrc_start, nbytes);
-	for (uintptr_t *p_src = copysrc_start; p_src != copysrc_end; ++p_src, ++p_dest)
-	{
-		// *p_dest = *p_src;
-		/* Relocate any word we copy if it's a stack address. HMM.
-		 * I suppose we don't use any large integers that aren't addresses?
-		 * We should really walk this buffer like it's a real stack, and
-		 * fix up only saved sp/bp values. Perhaps __builtin_frame_address
-		 * is useful here? */
-		if (*p_src < (uintptr_t) copysrc_end && *p_src >= (uintptr_t) copysrc_start)
-		{
-			// fixup_delta is defined by the equation:
-			// srcval + fixup_delta = destval
-			uintptr_t existing_word = *p_src;
-			uintptr_t new_word = existing_word + fixup_delta;
-			*p_dest = new_word;
-			/* To what value do we need to swizzle the BP?
-			 * Here we take the lowest-addressed stored pointer in need of fixup...
-			 * we just take its fixed-up value.
-			 * That seems fragile and perhaps wrong.
-			 *
-			 * Surely we know the delta directly?
-			 * There are TWO deltas.
-			 * One is the inter-stack distance, fixup_delta.
-			 *
-			 * Another is the intra-stack distance,
-			 * i.e. from new_sp (high) to
-			 * the place where we set the stack when we actually resume (lower)
-			 *
-			 * ebp is the stack pointer stored at the lowest address on the
-			 * current stack. Oh, wait. I think we are changing that
-			 * in this code. In fact so is p_src... also such a pointer. */
-			if (!swizzled_bp)
-			{
-				swizzled_bp = (void*)(*p_dest); // MONSTER HACK
-				// REMEMBER this hack was necessary because if we read ebp in this
-				// function, or use __builtin_frame_address,
-				// GCC refuses to solve our ASM constraints.
-				// BREAK debugger here and check that BP matches (uintptr_t) new_word - fixup_delta
-			}
-		}
-	}
-	swizzled_bp = (void*)((uintptr_t) orig_bp + fixup_delta);
+	/* Pre-calculate the child's ("swizzled") BP, i.e. the equivalent place on the new stack.
+	*  We will pre-emptively put this in the actual BP register just before we do the clone,
+	 * because the compiler-generated code later in this function might need to reference the BP.
+	 * In the parent, our assembly will restore the real (unswizzled) BP. */
+	swizzled_bp = (void*)((uintptr_t) orig_bp +
+		(uintptr_t) new_top_of_stack - (uintptr_t) gsp->saved_context->uc.uc_mcontext.MC_REG_SP);
 	assert(swizzled_bp);
 	assert((uintptr_t) swizzled_bp < (uintptr_t) new_top_of_stack);
-	assert((uintptr_t) swizzled_bp >= (uintptr_t) copydest_start);
-	/* After the syscall we'll be using the new stack ourselves for a bit. So
-	 * initially we need the SP somewhat below the actual requested user SP. Then
-	 * it'll get popped back to the SP the user really wanted. (CARE about stack
-	 * growth direction: it grows to lower addresses, but we copied low-to-high.)
-	 *
-	 * PROBLEM: how far below? We can only compute it now assuming that our
-	 * SP doesn't change between here and the syscall site, i.e. is still copysrc_start.
-	 * But it might change!
-	 *
-	 * Put differently, we want to write
-
-	long int intra_stack_fixup =
-		gsp->saved_context->uc.uc_mcontext.MC_REG_SP // The (higher) stack pointer at the trap site
-			-
-		CURRENT_SP                    //The (low) stack pointer as we have it, %[er]sp
-	;
-	gsp->args[1] -= intra_stack_fixup; // subtract a positive number
-
-	 * but that's not robust, because sp might change (copysrc_start isn't reliable,
-	 * i.e. we have no CURRENT_SP as we would like it above).
-	 * CURRENT_SP could be called "parent_sp_at_syscall_time".
-	 *
-	 * Instead, we put something 'fake' in gsp->args[1]
-	 * that we then *add/subtract SP* during the inline assembly.
-	 * During the inline assembly, we are in control of the stack pointer
-	 * all the way up to the syscall site.
-	 *
-	 * What is the fake thing we put there? In short, it's the real new SP we want
-	 * *minus* the stack pointer at the time of the syscall. These are on different
-	 * stacks, so this could be a really wacky number!
-	 *
-	 * Let's call 'syscall_arg1' the new SP we really want in the child. We know:
-	 *
-	 * syscall_arg1 = new_sp_on_resume - (parent_sp_at_trap - parent_sp_at_syscall_time)
-	 *
-	 * and we want to set fake_arg1 s.t. we can add the stack pointer to it. We know:
-	 *
-	 * fake_arg1 + parent_sp_at_syscall_time = syscall_arg1       # we will add SP to the fake
-	 *
-	 * so
-	 *
-	 * fake_arg1 = syscall_arg1 - parent_sp_at_syscall_time
-	 * fake_arg1 = new_sp_on_resume - (parent_sp_at_trap - parent_sp_at_syscall_time) - parent_sp_at_syscall_time
-	 * fake_arg1 = new_sp_on_resume - parent_sp_at_trap
-	 *
-	 * Q. Where do we pull this fake value out of gsp->args[1]?
-	 * A. in the use of %[arg1] below... we mov it in the argreg.
-	 * 
-	 * NOTE: we are ONLY updating the copy on the PARENT on-stack gsp.
-	 *
-	 * When we resume from our sigframe in the child, and pass our
-	 * new stack pointer (see below), we do NOT need to perform
-	 * the reverse adjustment.
-	 * WHY NOT? I had written:
-	 * "In the child, the copy we took above of gsp->args[1], as part of
-	 * our memcpy, was correctly fixed up to point into the new stack."
-	 * XXX: was it? If we could do that, why do we need this fakery?
-	 * XXX: perhaps this copy could be wrong, but it just doesn't get used?
-	 * Although we do copy the gsp onto the new stack, we don't use its arg
-	 * values on the resume path... only pretcode I think.
-	 */
-	// FIXME: should have used 'unsigned int'
-	//*(uintptr_t *)(&gsp->args[1]) -= (uintptr_t) gsp->saved_context->uc.uc_mcontext.MC_REG_SP;
-	uintptr_t breadcrumb = (uintptr_t) gsp->args[1] - (uintptr_t) gsp->saved_context->uc.uc_mcontext.MC_REG_SP;
+	assert((uintptr_t) swizzled_bp >= (uintptr_t) new_top_of_stack - MIN_PAGE_SIZE);
 
 	/* We have to use one big asm in order to keep stuff
 	 * in registers long enough to call our helper.
@@ -561,43 +515,76 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		   mov %[arg3], %%"stringifx(argreg3)" \n\
 		   mov %[arg4], %%"stringifx(argreg4)"  \n"
 	#if defined(__x86_64__)
-		  "push %%rbp                           # we will restore the old BP in the parent... \n\
-		   mov %[swizzled_bp], %%rbp            # ... but use this swizzled one in the child \n"
+		  "mov %[gsp],  %%r11 \n" /* put gsp in r11 */
+		  "push %%rbp                           # we will restore the old BP in the parent... \n"
+#if 0
+		  "mov %[swizzled_bp], %%rbp            # ... but use this swizzled one in the child \n"
+#endif
 		   /* begin PERFORM_SYSCALL replacement */
-		  "add %%rsp,  %%"stringifx(argreg1)" \n" /* make non-fake arg1 out of fake one...
-		    By now, argreg1 is either 
-		       - new_stack - Z - 8     (if Z is congruent to 8 modulo 16)  or
-		       - new_stack - Z         (if Z divides by 16)
-		    ... and in the first case, we will immediately add back the 8 on the child side
-		    so that the child %rsp == new_stack - Z
-		    where Z is exactly the number of bytes that will be popped off the stack on the
-		    journey though the remainder of this function and the sigreturn.
-		    GAH. Not quite.
-		    What if %rsp is congruent to 8? Then argreg1 is no longer divisible by 16!
-		    Oh, OK. We need to do the adjustment after the breadcrumb fix.
-		 */
-		  "movq %%"stringifx(argreg1)", %%r12 \n\
-		   andq $0xf, %%r12                     # now we have either 8 or 0 in r12 \n"
+#define NO_CLONE_STACK_ALIGN16 /* disabling this does not seem to stop our bad sigframe problem */
+#if !defined(NO_CLONE_STACK_ALIGN16)
+		  "movq %%"stringifx(argreg1)", %%r12 \n"
+		  "andq $0xf, %%r12                     # now we have either 8 or 0 in r12 \n"
 		  "subq %%r12, %%"stringifx(argreg1)"   # fix the *new* stack pointer \n"
+#endif
+		  "movq %%rsp, %%rcx\n"      /* rcx is arg3 of sysv call */
+		  "push %%rax\n"
+		  "push %%rdx\n"
+		  "push %%rsi\n"
+		  "push %%rdi\n"
+		  "push %%r8\n"
+		  "push %%r9\n"
+		  "push %%r10\n"
+		  "push %%r11\n"
+		  "movq %%r11, %%r8\n"       /* r8 is arg4 of sysv call */
+		  "call copy_to_new_stack\n" /* RECEIVES: flags_unused in rdi(sysvargreg0),
+		                                new_stack a.k.a. argreg1 in rsi(sysvargreg1),
+		                                parent_tid_unused in rdx(sysvargreg2),
+		                                rsp_on_clone in rcx(sysvargreg3),
+		                                gsp in r8(sysvargreg4).
+		                                CLOBBERS: rax (syscallno), rcx (unused), rdx (kargreg2), 
+		                                rsi (kargreg1), rdi (kargreg0), r8 (kargreg4), r9 (kargreg5),
+		                                r10 (kargreg3), r11 (holds gsp)
+		                                so we have to reload stuff.
+		                                RETURNS: actual new stack to use */
+		  "pop %%r11\n"
+		  "pop %%r10\n"
+		  "pop %%r9\n"
+		  "pop %%r8\n"
+		  "pop %%rdi\n"
+		  "pop %%rsi\n"
+		  "pop %%rdx\n"
+		  "mov %%rax, %%rsi\n"         /* copy_to_new_stack returned the actual new stack to use */
+		  "pop %%rax\n"
+		  "add %%rsi, %%rbp\n"         /* swizzle bp using the actual dest stack addr we're using */
+		  "sub %%rsp, %%rbp\n"
 		   stringifx(SYSCALL_INSTR) "\n"
 		   /* end PERFORM_SYSCALL replacement */
 		   /* Immediately test: did our stack actually get zapped? */
 		   "cmpq %%rsp, %%"stringifx(argreg1)"\n"
 		   "je .L001$           # if taken, it means we are the child with a new stack \n"
-		   /* When we take the 'je' above, to .001 below, our old stack is gone.
-		    * We've already put swizzled_bp in ebp/rbp where it belongs. The compiler-generated
-		    * code in both parent and child may still need the BP to refer to locals, which is
-		    * why we swizzled it.*/
+		   /* The compiler-generated
+		    * code in both parent and child may still need the BP to refer to locals.
+		    * When we take the 'je' above, to .001 below, our old stack is gone and above we
+		    * preemptively put swizzled_bp in ebp/rbp, having pushed the old ebp/rbp.
+		    * That is correct, for the child, although we must discard the empty slot on
+		    * the new stacks. In the parent, we instead restore the old bp. */
 		   "pop %%rbp           # restore the correct BP \n"
 		   "jmp .L002$ \n"
 		".L001$:\n"
+#ifndef NO_CLONE_STACK_ALIGN16
 		   "addq %%r12, %%rsp   # undo the 16-byte alignment fix we applied earlier, if any (value now in SP, not argreg1!) \n"
+#endif
 		   "addq $0x8, %%rsp    # discard the unwanted saved BP (actually uninitialized/zero in the child) \n"
 		   "jmp .L002$ \n"
 	#elif defined(__i386__)
 		  "push %%ebp\n\
 		   mov %[swizzled_bp], %%ebp \n"
 		  "add %%esp,   %%"stringifx(argreg1)" \n"  /* make non-fake arg1 out of fake one */
+		  "call copy_to_new_stack\n" /* bridge arguments to stack *how*? regparm? gets eax (syscall num), edx (argreg2), ecx (argreg1); those regs are also the only clobbers */
+		        /* FIXME: it needs gsp too
+		         * FIXME: sort out clobbers
+		         * FIXME: test it, you idiot! */
 		   /* begin PERFORM_SYSCALL expansion */
 		   stringifx(SYSCALL_INSTR) "\n"
 		   /* end PERFORM_SYSCALL expansion */
@@ -657,7 +644,7 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 #endif
 		  : [swizzled_bp] "m" (swizzled_bp)        /* swizzled_bp is an input */
 		  , [arg0] "m" ((long int) gsp->args[0])
-		  , [arg1] "m" (/*(long int) gsp->args[1]*/ breadcrumb)
+		  , [arg1] "m" ((long int) gsp->args[1])
 		  , [arg2] "m" ((long int) gsp->args[2])
 		  , [arg3] "m" ((long int) gsp->args[3])
 		  , [arg4] "m" ((long int) gsp->args[4])
