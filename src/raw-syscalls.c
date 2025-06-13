@@ -153,7 +153,7 @@ long clone3_using_clone(struct clone_args *cl_args, size_t size, struct ibcs_sig
 	 * All the hairy stuff is in do-syscall.h. */
 	struct generic_syscall gs = MKGS5(SYS_clone,
 		/* flags */ cl_args->flags | (cl_args->exit_signal & 0xff),
-		/* stack */ (long long) (cl_args->stack ? ((char*) cl_args->stack + cl_args->stack_size - 1) : NULL),
+		/* stack */ (long long) (cl_args->stack ? ((char*) cl_args->stack + cl_args->stack_size) : NULL),
 		/* parent_tid */ (pid_t *) cl_args->parent_tid,
 #if defined(__x86_64__)
 		/* child_tid */ (pid_t *) cl_args->child_tid,

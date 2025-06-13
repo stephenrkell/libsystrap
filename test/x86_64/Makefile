@@ -12,12 +12,14 @@ clean::
 	rm -f true getpid
 
 ifeq ($(MODE),preload)
-PREFIX := LD_PRELOAD=$(srcroot)/example/trace-syscalls.so
+PREFIX := LD_PRELOAD=$(srcroot)/build/$(shell uname -m)/trace-syscalls.so
 else
 ifeq ($(MODE),chain)
-PREFIX := $(srcroot)/example/trace-syscalls-ld.so
+PREFIX := $(srcroot)/build/$(shell uname -m)/trace-syscalls-ld.so
 endif
 endif
+
+CFLAGS += -g
 
 run-%-$(MODE).stamp: %
 	$(PREFIX) ./$* && touch $@

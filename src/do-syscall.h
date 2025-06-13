@@ -274,9 +274,9 @@ static void *copy_to_new_stack(
 
 	/* The new stack region has to match the alignment of the old stack region,
 	 * i.e. corresponding addresses have to be congruent modulo ALIGN.
-	 * If it doesn't, adjust destination downwards. */
+	 * If it doesn't match, adjust destination downwards s.t. it does. */
 	uintptr_t *copydest_end = (uintptr_t *) new_stack;
-	uintptr_t *copydest_start = (uintptr_t *) new_stack - nwords_to_copy;
+	uintptr_t *copydest_start = ((uintptr_t *) new_stack) - nwords_to_copy;
 #define ALIGN 64
 	if (   (uintptr_t) copydest_end % ALIGN
 		!= (uintptr_t) copysrc_end % ALIGN)
@@ -418,9 +418,9 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
                       ... the - - -  data might not be copied so had better not be important!
 
 	 * The idea is that after sigreturn in the child, sp == new_top_of_stack (Y)
-	 * and ip == the instruction after the trapping clone (i.e. same as in the parent).
+	 * and IP == the instruction after the trapping clone (i.e. same as in the parent).
 	 *
-	 * Q. How do we fix up the rip?
+	 * Q. How do we fix up the IP?
 	 * A. We don't! The raw clone does not take a new code address.
 	 *    Instead it's the job of the invoking code, executing in the
 	 *    child context, to jump to the new thread's code. In glibc and the like
@@ -508,23 +508,29 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		   "addq $0x8, %%rsp    # discard the unwanted saved BP (actually uninitialized/zero in the child) \n"
 		   "jmp .L002$ \n"
 	#elif defined(__i386__)
-		  "push %%ebp\n\
-		   mov %[swizzled_bp], %%ebp \n"
-		  "add %%esp,   %%"stringifx(argreg1)" \n"  /* make non-fake arg1 out of fake one */
-		  "call copy_to_new_stack\n" /* bridge arguments to stack *how*? regparm? gets eax (syscall num), edx (argreg2), ecx (argreg1); those regs are also the only clobbers */
-		        /* FIXME: it needs gsp too
-		         * FIXME: sort out clobbers
+		  "push %%ebp\n"        /* See below. We need this to restore BP in the parent... */
+		  "push %%eax\n"
+		  "push %%edx\n"
+		  "push %%ecx\n"
+		  "call copy_to_new_stack\n" /* RECEIVES eax (syscall num), edx (argreg2),
+		                              * ecx (argreg1); those regs are also the only clobbers.
+		                              * FIXME: it needs sp_at_clone and gsp too.
+		         * FIXME: sort out clobbers: syscall num, argreg1, argreg2
 		         * FIXME: test it, you idiot! */
+		  "pop %%ecx\n"
+		  "pop %%edx\n"
+		  "pop %%eax\n"
 		   /* begin PERFORM_SYSCALL expansion */
 		   stringifx(SYSCALL_INSTR) "\n"
 		   /* end PERFORM_SYSCALL expansion */
 		   /* Immediately test: did our stack actually get zapped? */
 		   "cmpl %%esp, %%"stringifx(argreg1)"\n"
 		   "je .L001$ \n"
-		   "pop %%ebp\n"
+		   "pop %%ebp           # restore the correct (parent) BP \n"\n"
 		   "jmp .L002$ \n"
 		".L001$:\n"
-		   "nop \n"
+		   "add $0x4, %%esp    # discard the unwanted saved BP (actually uninitialized/zero in the child) \n"
+		   "jmp .L002$ \n"
 	#else
 	#error "Unsupported architecture."
 	#endif

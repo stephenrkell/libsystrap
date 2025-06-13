@@ -14,15 +14,13 @@
 
 static int the_function(void *arg)
 {
-	(*(int*)arg = 42);
-	/* returning isn't implemented in our faked-up glibc-wrapper-style 'fn'
-	 * implementation, so just spin */
-	for (;;);
+	*(int _Atomic*)arg = 42;
+	for(;;); /* returning is pointless; just wait for the main thread to exit */
 }
 
-int main(void)
+int the_arg = 0;
+void _start(void)
 {
-	int the_arg = 0;
 	unsigned flags = CLONE_VM | CLONE_FILES | CLONE_IO | CLONE_THREAD | CLONE_SIGHAND;
 
 	void *the_stack_base = mmap(NULL, 4096, PROT_READ|PROT_WRITE,
@@ -77,14 +75,18 @@ int main(void)
 #endif
 	/* calling syscall() can never work here, because
 	 * it relies on the stack and we are about to zap it.
-	 * We have to do the syscall in inline asm. */
-	register int tid asm("r12") = SYS_clone3;
-	__asm__ ("syscall" : "+a"(/* initially nr, then... */tid) : /*rdi*/ "D"(&args), /*rsi*/"S"(sizeof args));
-	if (tid == 0)
+	 * We have to do the syscall in inline asm. And since
+     * we want to read nr_tid later, it must be in a register.
+     * The compiler must not try to reload it from the stack. */
+	register int nr_tid asm("r12") = SYS_clone3;
+	__asm__ ("syscall" 
+                       : "+a"(nr_tid)
+	                   : /*rdi*/"D"(&args), /*rsi*/"S"(sizeof args));
+	if (nr_tid == 0)
 	{
-		the_function(&the_arg);
+		the_function(&the_arg); // DOES return
 	}
-	else if (tid != -1) while (the_arg != 42);
+	else if (nr_tid != -1) while (the_arg != 42);
 	else
 	{
 		err(EXIT_FAILURE, "could not clone3()");
