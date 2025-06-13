@@ -393,7 +393,6 @@ do_generic_syscall_and_resume(struct generic_syscall *gsp)
 	 * never signalled!) */
 	uintptr_t *orig_sp;
 	uintptr_t *orig_bp;
-	void *swizzled_bp = NULL; // see below -- this is bp as rewritten to point within the *new* stack
 #if defined(__x86_64__)
 	__asm__ volatile ("movq %%rsp, %0" : "=rm"(orig_sp) : : );
 	__asm__ volatile ("movq %%rbp, %0" : "=rm"(orig_bp) : : );
@@ -436,76 +435,16 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 	 *  Z  , which is the stack depth we are adding with our logic and the sigframe.
 	 *        We need this for setting correctly the new SP in the child, so it can
 	 *        resume through the sigframe machinery. We cannot calculate it easily in C
-	 *        code because the compiler may adjust the stack pointer. Instead we calculate
-	 *        it only in inline asm, having left a useful breadcrumb B.
-	 *
-	 *        B = Y-X
-	 *
-	 *    and then we add X-Z, i.e. the current SP, when we are in the inline assembly,
-	 *    to set the new stack argument to its final desired value of Y-Z.
+	 *        code because the compiler may adjust the stack pointer. Instead we call a
+	 *        helper function from asm, passing the actual %rsp we will use at the clone
+	 *        call. That helper can calculate Z accurately, and is also responsible for
+	 *        generating the final new hacked SP (=Y-Z) we use for the cloned child.
 	 */
-#if 0 /* no longer needed? */
-	uintptr_t breadcrumb = (uintptr_t) gsp->args[1] - (uintptr_t) gsp->saved_context->uc.uc_mcontext.MC_REG_SP;
-#endif
-	/* PROBLEM: when we pre-copy the stack, we can only copy using an approximation of Z,
-	 * which I have labelled Z' above. If any late adjustments to the calling SP allocate
-	 * more stack storage, this will not be copied over. TODO: fix this by doing the copy
-	 * in an out-of-line function that we call from the inline asm.
-	 *
-	 * PROBLEM: we would like Z to be 16-byte-aligned, as it would let us arrange
-	 * that the the child SP is also 16-byte-aligned, which clone() *seems* to need (ASSUMPTION).
-	 * We used to assert that our trap site's SP was 16-byte-aligned.
-	 * That would make it easy to reason that our new stack value is aligned,
-	 * if our old stack is. However, the assertion sometimes fails! It seems it
-	 * is not a requirement, after all, on x86_64 Linux, that rsp be 16-byte-aligned
-	 * on a system call. In any case, Z depends on how many stack slots the compiler uses...
-	 * we can't ensure it will be 16-byte-aligned until we are into the inline assembly.
-	 * So we use a variation of our AND-based stack alignment scheme. We probe for
-	 * misalignment, and adjust argreg1 (the 'new stack' register) if needed, just for
-	 * the clone(), then adjust it back afterwards. We can test the alignment using our
-	 * breadcrumb B, i.e. we can check before or after we add back %rsp. NOTE that we don't
-	 * also align %rsp in the inline assembly sequence. There's no need; the value of argreg1
-	 * matters only in the child. Also if we did adjust %rsp and *then* turned the breadcrumb
-	 * back into the real new_sp, it would be misaligned again because this would amount to a
-	 * double adjustment.
-	 *
-	 * If I do the misalign hack below, I still get a misaligned
-	 * child stack, which is surprising.
-	 * If also I omit to perform the stack alignment around the syscall,
-	 * the dmesg prints out a message about a bad sigframe (in the child).
-	 * So I've clearly broken something there too.
-	 */
-
-	/* Pre-calculate the child's ("swizzled") BP, i.e. the equivalent place on the new stack.
-	*  We will pre-emptively put this in the actual BP register just before we do the clone,
-	 * because the compiler-generated code later in this function might need to reference the BP.
-	 * In the parent, our assembly will restore the real (unswizzled) BP. */
-	swizzled_bp = (void*)((uintptr_t) orig_bp +
-		(uintptr_t) new_top_of_stack - (uintptr_t) gsp->saved_context->uc.uc_mcontext.MC_REG_SP);
-	assert(swizzled_bp);
-	assert((uintptr_t) swizzled_bp < (uintptr_t) new_top_of_stack);
-	assert((uintptr_t) swizzled_bp >= (uintptr_t) new_top_of_stack - MIN_PAGE_SIZE);
 
 	/* We have to use one big asm in order to keep stuff
 	 * in registers long enough to call our helper.
-	 *
 	 * The basic idea is that everything we might need, if
-	 * our stack gets zapped, is copied to the *new* stack
-	 * and addressed via gsp.
-	 *
-	 * Then, the gsp within the new stack is the only thing
-	 * we need to hold on to. Get everything else from that!
-	 * For example the fixed-up stack pointer is stored within
-	 * the gsp structure.
-	 *
-	 * On 32-bit x86, how do we want this to work?
-	 * We have to use %ebp which is the only spare register.
-	 * But logically we have both 'delta' and 'gsp' to transfer.
-	 * We solve this by calculating the swizzled (new-stack) ebp.
-	 * We eagerly put this in %ebp for the call, having pushed
-	 * the old value. If we zapped the stack, then we now have a
-	 * new stack and %ebp is pointing correctly into that.
-	 * If we didn't zap the stack, we restore the old %ebp by popping.
+	 * our stack gets zapped, is copied to the *new* stack.
 	 */
 	long int ret_op = (long int) gsp->syscall_number;
 	__asm__ volatile (
@@ -515,29 +454,20 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		   mov %[arg3], %%"stringifx(argreg3)" \n\
 		   mov %[arg4], %%"stringifx(argreg4)"  \n"
 	#if defined(__x86_64__)
-		  "mov %[gsp],  %%r11 \n" /* put gsp in r11 */
-		  "push %%rbp                           # we will restore the old BP in the parent... \n"
-#if 0
-		  "mov %[swizzled_bp], %%rbp            # ... but use this swizzled one in the child \n"
-#endif
+		  "mov %[gsp],  %%r11 \n"    /* Put gsp in r11, for copy_to_new_stack */
+		  "pushq %%rbp\n"            /* See below. We need this to restore BP in the parent... */
 		   /* begin PERFORM_SYSCALL replacement */
-#define NO_CLONE_STACK_ALIGN16 /* disabling this does not seem to stop our bad sigframe problem */
-#if !defined(NO_CLONE_STACK_ALIGN16)
-		  "movq %%"stringifx(argreg1)", %%r12 \n"
-		  "andq $0xf, %%r12                     # now we have either 8 or 0 in r12 \n"
-		  "subq %%r12, %%"stringifx(argreg1)"   # fix the *new* stack pointer \n"
-#endif
-		  "movq %%rsp, %%rcx\n"      /* rcx is arg3 of sysv call */
-		  "push %%rax\n"
-		  "push %%rdx\n"
-		  "push %%rsi\n"
-		  "push %%rdi\n"
-		  "push %%r8\n"
-		  "push %%r9\n"
-		  "push %%r10\n"
-		  "push %%r11\n"
+		  "movq %%rsp, %%rcx\n"      /* rcx will form arg3 of sysv call, i.e. sp_at_clone */
+		  "pushq %%rax\n"
+		  "pushq %%rdx\n"
+		  "pushq %%rsi\n"
+		  "pushq %%rdi\n"
+		  "pushq %%r8\n"
+		  "pushq %%r9\n"
+		  "pushq %%r10\n"
+		  "pushq %%r11\n"
 		  "movq %%r11, %%r8\n"       /* r8 is arg4 of sysv call */
-		  "call copy_to_new_stack\n" /* RECEIVES: flags_unused in rdi(sysvargreg0),
+		  "callq copy_to_new_stack\n" /* RECEIVES: flags_unused in rdi(sysvargreg0),
 		                                new_stack a.k.a. argreg1 in rsi(sysvargreg1),
 		                                parent_tid_unused in rdx(sysvargreg2),
 		                                rsp_on_clone in rcx(sysvargreg3),
@@ -547,17 +477,19 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		                                r10 (kargreg3), r11 (holds gsp)
 		                                so we have to reload stuff.
 		                                RETURNS: actual new stack to use */
-		  "pop %%r11\n"
-		  "pop %%r10\n"
-		  "pop %%r9\n"
-		  "pop %%r8\n"
-		  "pop %%rdi\n"
-		  "pop %%rsi\n"
-		  "pop %%rdx\n"
-		  "mov %%rax, %%rsi\n"         /* copy_to_new_stack returned the actual new stack to use */
-		  "pop %%rax\n"
-		  "add %%rsi, %%rbp\n"         /* swizzle bp using the actual dest stack addr we're using */
-		  "sub %%rsp, %%rbp\n"
+		  "popq %%r11\n"
+		  "popq %%r10\n"
+		  "popq %%r9\n"
+		  "popq %%r8\n"
+		  "popq %%rdi\n"
+		  "popq %%rsi\n"
+		  "popq %%rdx\n"
+		  "movq %%rax, %%rsi\n"       /* copy_to_new_stack returned the actual new stack to use */
+		  "popq %%rax\n"
+		  "addq %%rsi, %%rbp\n"  /* Swizzle bp to point into the child's stack, and pre-emptively... */
+		  "subq %%rsp, %%rbp\n"  /* set this as the BP. Compiler-generated code later in this function
+		                           might need to reference the BP. In the non-child case we restore the
+		                           parent BP that we pushed above. */
 		   stringifx(SYSCALL_INSTR) "\n"
 		   /* end PERFORM_SYSCALL replacement */
 		   /* Immediately test: did our stack actually get zapped? */
@@ -567,14 +499,12 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		    * code in both parent and child may still need the BP to refer to locals.
 		    * When we take the 'je' above, to .001 below, our old stack is gone and above we
 		    * preemptively put swizzled_bp in ebp/rbp, having pushed the old ebp/rbp.
-		    * That is correct, for the child, although we must discard the empty slot on
-		    * the new stacks. In the parent, we instead restore the old bp. */
-		   "pop %%rbp           # restore the correct BP \n"
+		    * That is correct, for the child, although we must adjust the SP to drop the
+		    * unneeded BP save slot on the new stack. In the parent, we instead use this
+		    * saved value to restore the correct (parent) BP. */
+		   "popq %%rbp           # restore the correct (parent) BP \n"
 		   "jmp .L002$ \n"
 		".L001$:\n"
-#ifndef NO_CLONE_STACK_ALIGN16
-		   "addq %%r12, %%rsp   # undo the 16-byte alignment fix we applied earlier, if any (value now in SP, not argreg1!) \n"
-#endif
 		   "addq $0x8, %%rsp    # discard the unwanted saved BP (actually uninitialized/zero in the child) \n"
 		   "jmp .L002$ \n"
 	#elif defined(__i386__)
@@ -642,8 +572,7 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		 * it needs to reload gsp. And it really does need to reload gsp via BP,
 		 * because that is the only memory that is definitely valid. */
 #endif
-		  : [swizzled_bp] "m" (swizzled_bp)        /* swizzled_bp is an input */
-		  , [arg0] "m" ((long int) gsp->args[0])
+		  : [arg0] "m" ((long int) gsp->args[0])
 		  , [arg1] "m" ((long int) gsp->args[1])
 		  , [arg2] "m" ((long int) gsp->args[2])
 		  , [arg3] "m" ((long int) gsp->args[3])
