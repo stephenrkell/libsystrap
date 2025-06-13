@@ -29,23 +29,6 @@ void __assert_fail() __attribute__((noreturn));
 
 extern uintptr_t our_load_address;
 
-/* HACK: sysdep */
-extern inline _Bool
-__attribute__((always_inline,gnu_inline))
-zaps_stack(struct generic_syscall *gsp, void **p_new_sp)
-{
-#ifdef __FreeBSD__
-	return 0;
-#else
-	if (gsp->syscall_number == __NR_clone && gsp->args[1] /* newstack */ != 0)
-	{
-		*p_new_sp = (void*) gsp->args[1];
-		return 1;
-	}
-	return 0;
-#endif
-}
-
 /* FIX_STACK_ALIGNMENT is in raw-syscalls-impl.h, included above */
 #define PERFORM_SYSCALL	 \
 	  FIX_STACK_ALIGNMENT "  \n\
@@ -212,6 +195,13 @@ do_syscall6(struct generic_syscall *gsp)
 	return ret_op;
 }
 
+__attribute__((always_inline,gnu_inline))
+extern inline long int
+do_real_syscall(struct generic_syscall *gsp)
+{
+	return do_syscall6(gsp);
+}
+
 /* At least clone(), and perhaps other system calls, will zap the stack.
  * This is a problem for us, because of our long return path.
  * Our normal return path is
@@ -313,62 +303,64 @@ static void *copy_to_new_stack(
 	}
 	return (void*) copydest_start;
 }
-extern inline void
-do_syscall_and_resume(struct generic_syscall *sys)
-__attribute__((always_inline,gnu_inline));
 
-extern inline long int
-do_real_syscall(struct generic_syscall *sys)
-__attribute__((always_inline,gnu_inline));
+enum special_syscall
+{
+	NOT_SPECIAL,
+#if defined(__linux__)
+	SPECIAL_SYSCALL_CLONE_NEWSTACK,
+#elif defined(__FreeBSD__)
+#endif
+	SPECIAL_SYSCALL_MAX
+};
+
+extern inline __attribute__((always_inline,gnu_inline))
+enum special_syscall is_special_syscall(struct generic_syscall *gsp)
+{
+	if (gsp->syscall_number == __NR_clone && gsp->args[1] /* newstack */ != 0)
+	{ return SPECIAL_SYSCALL_CLONE_NEWSTACK; }
+	return NOT_SPECIAL;
+}
+
+#ifdef __linux__
+extern inline long
+__attribute__((always_inline,gnu_inline))
+do_clone(struct generic_syscall *gsp);
+#endif
 
 extern inline void
 __attribute__((always_inline,gnu_inline))
-do_generic_syscall_and_resume(struct generic_syscall *gsp)
+do_generic_syscall_and_fixup(struct generic_syscall *gsp)
 {
-	void *new_top_of_stack = NULL;
-	_Bool stack_may_be_zapped = zaps_stack(gsp, &new_top_of_stack);
-
-	/* FIXME: on i386, the effective trap_len is either
-	 * 2 (normally)
-	 * or
-	 * 2 + some delta, if our trap site is the 'sysenter' inside the
-	 * vDSO.
-	 * We detect specially the case where we have a real_sysinfo, a fake_sysinfo,
-	 * a sysenter_offset_in_real_sysinfo,
-	 * and the trap site.
-	 * We fix it up to the first 'nop' after an int 0x80 following the sysenter.
-	 * This is a hack. In principle, the actual resume address is entirely private
-	 * to the kernel. But it seems to work by immediately following the sysenter
-	 * with an int 0x80 and pretending that the user context is that int 0x80.
-	 * So, to the rest of the kernel it looks like that int 0x80 is what caused
-	 * the syscall. See linux's arch/x86/entry/vdso/vma.c... my reading is that the
-	 * the never-used int 0x80 instruction bytes are called the 'landing pad'.
-	 *
-	 * FIXME: actually implement this delta. Weirdly we seem no longer to witness
-	 * the double-trap that was a problem earlier (spurious second syscall with %eax
-	 * equal to the return value of the previous syscall). Debug this. Maybe we're
-	 * just not taking traps from the fake vDSO any more? That's one of the last things
-	 * I fiddled with. But I am seeing exit_group().
-	 *
-	 * OH. It's because we only do *one* such syscall, and GAHAHAHAH. My test case
-	 * is exit, which just does exit_group().
-	 */
-
-	register long ret;
-	if (!stack_may_be_zapped)
+	long ret;
+	switch (is_special_syscall(gsp))
 	{
-		ret = do_real_syscall(gsp);            /* always inlined */
-		fixup_sigframe_for_return(gsp->saved_context, ret,
-			trap_len(&gsp->saved_context->uc.uc_mcontext), NULL);
-		__systrap_post_handling(gsp, ret, /* do_caller_fixup */ 0);
-		return;
+		case NOT_SPECIAL:
+			ret = do_real_syscall(gsp);            /* always inlined */
+			fixup_sigframe_for_return(gsp->saved_context, ret,
+				trap_len(&gsp->saved_context->uc.uc_mcontext), NULL);
+			break;
+#ifdef __linux__
+		case SPECIAL_SYSCALL_CLONE_NEWSTACK:
+			ret = do_clone(gsp); // does its own fixup
+			break;
+#endif
+		
+		default:
+			break;
 	}
+	__systrap_post_handling(gsp, ret, /* do_caller_fixup */ 0);
+}
 
-	assert(new_top_of_stack);
+extern inline long
+__attribute__((always_inline,gnu_inline))
+do_clone(struct generic_syscall *gsp)
+{
 	// we should have a new top of stack
 	assert(gsp->args[1] /* a.k.a. 'stack' argument to raw clone() syscall */);
+	void *post_zap_top_of_stack = (void*) gsp->args[1];
 	// our new stack should be aligned
-	assert(0 == (uintptr_t) new_top_of_stack %
+	assert(0 == (uintptr_t) post_zap_top_of_stack %
 #if defined(__x86_64__)
 		16
 #elif defined(__i386__)
@@ -408,7 +400,7 @@ do_generic_syscall_and_resume(struct generic_syscall *gsp)
 
      our stack                                         new stack
      :   ...  :
-__  X|________|<-- sp at clone() site                 Y.________ <--stack limit! == new_top_of_stack
+__  X|________|<-- sp at clone() site                 Y.________ <--stack limit! == post_zap_top_of_stack
  ^^  | . . .  |\                                       | . . .  |\
  ||  |  . . . | sigframe stuff                         |  . . . | COPY of sigframe stuff
 Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved ip = clone site (AGAIN; YES)
@@ -417,7 +409,7 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 
                       ... the - - -  data might not be copied so had better not be important!
 
-	 * The idea is that after sigreturn in the child, sp == new_top_of_stack (Y)
+	 * The idea is that after sigreturn in the child, sp == post_zap_top_of_stack (Y)
 	 * and IP == the instruction after the trapping clone (i.e. same as in the parent).
 	 *
 	 * Q. How do we fix up the IP?
@@ -591,74 +583,13 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 	// on the stack, speculatively. Might be cleaner and fit with our
 	// "walk the stack and fix up saved BPs only" idea, i.e. minimise
 	// how many on-stack pointers have to work to get us to the sigreturn.
-	fixup_sigframe_for_return(gsp->saved_context, /*new_top_of_stack - sizeof (struct ibcs_sigframe), */
+	fixup_sigframe_for_return(gsp->saved_context, /*post_zap_top_of_stack - sizeof (struct ibcs_sigframe), */
 		ret_op, trap_len(&gsp->saved_context->uc.uc_mcontext),
 		/* new_sp: we have a new sp only if we're the child.
 		 * We can detect that using ret_op i.e. clone()'s return value. */
 		(ret_op == 0) ? (void*) (gsp->args[1] /* see fake_arg1 comment above  */)
 			: NULL);
-	__systrap_post_handling(gsp, ret_op, /* do_caller_fixup */ 0);
-}
-
-extern inline void 
-__attribute__((always_inline,gnu_inline))
-do_syscall_and_resume(struct generic_syscall *gsp)
-{
-	/* This is our general function for performing or emulating a system call.
-	 * If the syscall does not have a replacement installed, we follow a generic
-	 * emulation path.
-	 *
-	 * The 'post_handling' argument is worth explaining.
-	 * A typical replad_syscalls function looks like this.
-
-	void frob_replacement(struct generic_syscall *s, post_handler *post)
-	{
-        	// Unpack the arguments.
-        	void *old_addr = (void*) s->args[0];
-        	...
-        	// Do the call we actually want to do
-        	void *ret = raw_frob(old_addr ^ 0x42);
-        	// Do the post-handling and resume.
-        	post(s, (long) ret, 1); //<------- means YES PLEASE FIXUP THE SIGFRAME
-                                	// i.e. "we did not fix it up ourselves, lazy lazy"
-	}
-
-	 * Our SIGILL handler will always pass the "post_handler" because each
-	 * application of our library may have some generic post-syscall stuff to do.
-	 * So, post-handling is shared with the "default emulation path", when
-	 * there is no replacement syscall, and the "replaced" path.
-	 * We tell the post-handler whether it's necessary to do the sigframe
-	 * fixup.
-	 * XXX: is this flexibility really needed? Are there any applications which
-	 * want to replace a syscall while doing their own fixup, so would pass 0 not
-	 * 1 above? Are there any emulation paths where we *do* want the
-	 * post-handler to do the fixup, i.e. we would pass 1 here?
-	 *
-	 * If not, then we could simplify this. E.g. why not have replacement syscalls
-	 * return to their caller? Am I right that the post_handler is noreturn?
-	 *
-	 */
-	systrap_pre_handling(gsp);
-	if (replaced_syscalls[gsp->syscall_number])
-	{
-		/* Since replaced_syscalls holds function pointers, these calls will 
-		 * not be inlined. It follows that if the call ends up doing a real
-		 * clone(), we have no way to get back here. So the semantics of a 
-		 * replaced syscall must include "do your own resumption". We therefore
-		 * pass the post-handling as a function. */
-		replaced_syscalls[gsp->syscall_number](gsp, &__systrap_post_handling);
-	}
-	else
-	{
-		do_generic_syscall_and_resume(gsp);
-	}
-}
-
-extern inline long int 
-__attribute__((always_inline,gnu_inline))
-do_real_syscall (struct generic_syscall *gsp) 
-{
-	return do_syscall6(gsp);
+	return ret_op;
 }
 
 #endif

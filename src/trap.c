@@ -379,8 +379,25 @@ void clone3_emulated_replacement(struct generic_syscall *s, post_handler *post)
 {
 	struct clone_args *cl_args = (struct clone_args *) s->args[0];
 	size_t size = s->args[1];
-	long ret = clone3_using_clone(cl_args, size, s->saved_context);
-	post(s, (long) ret, 1);
+	//long ret = clone3_using_clone(cl_args, size, s->saved_context);
+	/* Build a vanilla clone generic_syscall and let it handle the rest.
+	 * All the hairy stuff is in do-syscall.h. */
+	struct generic_syscall gs = MKGS5(SYS_clone,
+		/* flags */ cl_args->flags | (cl_args->exit_signal & 0xff),
+		/* stack */ (long long) (cl_args->stack ? ((char*) cl_args->stack + cl_args->stack_size) : NULL),
+		/* parent_tid */ (pid_t *) cl_args->parent_tid,
+#if defined(__x86_64__)
+		/* child_tid */ (pid_t *) cl_args->child_tid,
+		/* tls */ cl_args->tls
+#elif defined(__i386__) /* last two arguments are reversed on this arch */
+		/* tls */ cl_args->tls,
+		/* child_tid */ (pid_t *) cl_args->child_tid
+#else
+#error "Unrecognised architecture -- check raw clone() signature on this platform."
+#endif
+		);
+	gs.saved_context = s->saved_context;
+	do_generic_syscall_and_fixup(&gs); // does post-handling and sets return value in fixed-up context
 }
 
 void install_sigill_handler(void)

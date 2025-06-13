@@ -386,6 +386,22 @@ struct ibcs_sigframe
  * a struct mcontext, since the rest is arch-specific and we should be able
  * to hide it from them for the most part. Let' see if we can make that work. */
 #define trap_site(mctxt) ((mctxt)->MC_REG_IP)
+/* FIXME: on i386, the effective trap_len is either
+ * 2 (normally)
+ * or
+ * 2 + some delta, if our trap site is the 'sysenter' inside the
+ * vDSO.
+ * We detect specially the case where we have a real_sysinfo, a fake_sysinfo,
+ * a sysenter_offset_in_real_sysinfo,
+ * and the trap site.
+ * We fix it up to the first 'nop' after an int 0x80 following the sysenter.
+ * This is a hack. In principle, the actual resume address is entirely private
+ * to the kernel. But it seems to work by immediately following the sysenter
+ * with an int 0x80 and pretending that the user context is that int 0x80.
+ * So, to the rest of the kernel it looks like that int 0x80 is what caused
+ * the syscall. See linux's arch/x86/entry/vdso/vma.c... my reading is that the
+ * the never-used int 0x80 instruction bytes are called the 'landing pad'.
+ */
 #ifndef __i386__
 #define trap_len(mctxt) 2 /* FIXME: x86_64-specific */
 #else /* i386 / sysinfo -specific stuff */
