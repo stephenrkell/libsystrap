@@ -242,10 +242,10 @@ bootstrap.o: CFLAGS += -DCHAIN_LOADER
 
 DYNAPPEND ?= $(shell which dynappend)
 # FIXME: localize all global symbols except maybe _start?
-trace-syscalls-ld.so: trace-syscalls-ld.lds $(LDSO_OBJS) $(filter-out fake-tls.o,$(LOCAL_OBJS)) dynamic-list
+trace-syscalls-ld.so: trace-syscalls-ld.lds $(LDSO_OBJS) $(filter-out fake-tls.o,$(LOCAL_OBJS)) dynamic-list $(srcroot)/build/$(arch)/libsystrap.a
 	$(CC) $(CFLAGS) -fuse-ld=bfd \
             -Bsymbolic -nostdlib -nostartfiles -static-libgcc -shared -o "$@" \
-            $(filter-out dynamic-list,$(filter-out %.lds,$+)) \
+            $(filter-out dynamic-list,$(filter-out %.lds,$(filter-out %.a,$+))) \
             $(LDFLAGS) $(LDLIBS) -lgcc -Wl,-Bsymbolic \
             -T $(filter %.lds,$+) -Wl,-soname=ld-linux.so.2 \
             -Wl,--dynamic-list,dynamic-list
@@ -254,6 +254,8 @@ trace-syscalls-ld.so: trace-syscalls-ld.lds $(LDSO_OBJS) $(filter-out fake-tls.o
 # There is no way to make _DYNAMIC a dynamic symbol.
 # A bit of a HACK, but we look for _init and _fini to find our own load address
 # (in find_r_debug()), so try to export them.
+# XXX: I think this does nothing, because dynamic-list does not affect the dynamic symbol
+# table for shared libraries.
 dynamic-list:
 	printf '{ etext; _init; _fini; };\n' >$@ || (rm -f $@; false)
 
@@ -269,8 +271,8 @@ trace-syscalls-ld.lds: $(shell which ld) $(THIS_MAKEFILE)
 .PHONY: clean
 clean:
 	rm -f trace-syscalls.so trace-syscalls-ld.so
-	rm -f *.o *.a
-	rm -f *.d
+	rm -f $(LOCAL_OBJS) $(LDSO_OBJS) dlmalloc.o
+	rm -f $(patsubst %.o,%.d,$(LOCAL_OBJS) $(LDSO_OBJS) dlmalloc.o)
 	rm -f syscall-macros.h $(SYS)-syscall-macros.h
 	rm -f dynamic-list
 	rm -f trace-syscalls-ld.lds

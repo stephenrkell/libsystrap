@@ -107,23 +107,24 @@ vpath x86_decode.c $(LIBX86EMULATE_DIR)/src
 x86_decode.o: CFLAGS += -include $(LIBX86EMULATE_DIR)/src/x86_defs.h -include stdio.h
 x86_decode.o instr.o: CFLAGS += -std=gnu11
 
-ARCHIVES := $(XED_A)
-
 $(info OBJS is $(OBJS))
 # Also extract archives and re-add their members to our archive.  This allows
 # clients to link to us without concern for these dependencies, which they
 # probably don't have available in PIC form.
-libsystrap.a: $(OBJS)
-	objs_list=$$( for fname in $(ARCHIVES); do \
-		$(AR) vx "$$fname"; done | \
-		grep '^x - ' | sed 's/^x - //' ); \
-	$(AR) r "$@" $^ $${objs_list}; \
-	true # rm -f objs_list    # tee objs_list above for debugging
+# XXX: for now we create one big .os, to avoid dumping a large pile of uncleanable
+# .o detritus into the build directory. However, that is not so great -- it
+# means that the whole xed archive will be linked in unconditionally, i.e. even if
+# the client doesn't need all of it.
+xed.os: $(XED_A)
+	ld -r -o $@ --whole-archive $< --no-whole-archive
+
+libsystrap.a: $(OBJS) xed.os
+	$(AR) r "$@" $+
 
 .PHONY: clean
 clean:
 	rm -f libsystrap.a
-	rm -f *.o
-	rm -f *.d
+	rm -f $(OBJS) xed.os
+	rm -f $(patsubst %.o,%.d,$(OBJS))
 
 endif # run-from-srcdir test
