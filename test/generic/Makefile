@@ -1,6 +1,6 @@
 ALLTESTS := hello time truemk-execve truesh-execve sigreturn clone
 .PHONY: default
-default: $(foreach m,preload chain,$(foreach t,$(ALLTESTS),run-$(t)-$(m).stamp))
+default: $(foreach m,preload chain,$(foreach t,$(ALLTESTS),$(t) run-$(t)-$(m).stamp))
 # FIXME: we skip 'read' and 'write' as they exit nonzero even on success
 
 include ../rules.mk

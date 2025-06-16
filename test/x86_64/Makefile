@@ -1,5 +1,5 @@
 .PHONY: default
-default: $(foreach m,preload chain,$(foreach t,true getpid clone3,run-$(t)-$(m).stamp))
+default: $(foreach m,preload chain,$(foreach t,true getpid clone3,$(t) run-$(t)-$(m).stamp))
 
 include $(dir $(realpath $(lastword $(MAKEFILE_LIST))))/../rules.mk
 

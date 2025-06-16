@@ -3,7 +3,7 @@
 #ALLTESTS := x86-decode x86-operands
 ALLTESTS :=
 .PHONY: default
-default: $(foreach t,$(ALLTESTS),run-$(t).stamp)
+default: $(foreach t,$(ALLTESTS),$(t) run-$(t).stamp)
 
 include ../rules.mk
 
