@@ -13,7 +13,8 @@ jobs:
               autoconf automake libtool pkg-config autoconf-archive \
               g++ python3 python \
               make git gawk gdb wget \
-              libunwind-dev libc6-dev-i386 zlib1g-dev libc6-dbg
+              libunwind-dev libc6-dev-i386 zlib1g-dev libc6-dbg \
+              gettext-base # for envsubst
       - checkout
       - run:
           name: Update submodules
