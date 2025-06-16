@@ -1,3 +1,7 @@
+#ifndef MIN
+#define MIN(a,b)  (((a)<(b))?(a):(b))
+#endif
+
 /* We are a fragment of C code, called from a late pre-entry context in donald. */
 // also snarf the shdrs (FIXME: we don't seem to use these anywhere? ah, trace-syscalls-ld does)
 int inferior_fd = open(inferior_path, O_RDONLY); // HACK: re-open ld.so
