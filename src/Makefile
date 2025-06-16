@@ -79,7 +79,7 @@ CFLAGS += -nostdinc $(LIBC_CFLAGS)
 
 C_SRC := $(wildcard $(srcdir)/*.c)
 $(info C_SRC is $(C_SRC))
-C_DEPS := $(patsubst %.c,%.d$,$(notdir $(C_SRC)))
+C_DEPS := $(patsubst %.c,%.d,$(notdir $(C_SRC)))
 $(info C_DEPS is $(C_DEPS))
 DEPS := $(C_DEPS)
 OBJS := $(patsubst %.c,%.o,$(notdir $(C_SRC)))
