@@ -379,7 +379,6 @@ void clone3_emulated_replacement(struct generic_syscall *s, post_handler *post)
 {
 	struct clone_args *cl_args = (struct clone_args *) s->args[0];
 	size_t size = s->args[1];
-	//long ret = clone3_using_clone(cl_args, size, s->saved_context);
 	/* Build a vanilla clone generic_syscall and let it handle the rest.
 	 * All the hairy stuff is in do-syscall.h. */
 	struct generic_syscall gs = MKGS5(SYS_clone,

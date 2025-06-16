@@ -29,29 +29,9 @@ int raw_mprotect(const void *addr, size_t len,
 #define MMAP_RETURN_IS_ERROR(p) \
         (((unsigned long long)(void*)-1 - (unsigned long long)(p)) < MIN_PAGE_SIZE)
 #endif
-typedef unsigned long long u64;
-// from the man page
-struct clone_args {
-   u64 flags;        /* Flags bit mask */
-   u64 pidfd;        /* Where to store PID file descriptor
-                        (pid_t *) */
-   u64 child_tid;    /* Where to store child TID,
-                        in child's memory (pid_t *) */
-   u64 parent_tid;   /* Where to store child TID,
-                        in parent's memory (int *) */
-   u64 exit_signal;  /* Signal to deliver to parent on
-                        child termination */
-   u64 stack;        /* Pointer to lowest byte of stack */
-   u64 stack_size;   /* Size of stack */
-   u64 tls;          /* Location of new TLS */
-   u64 set_tid;      /* Pointer to a pid_t array
-                        (since Linux 5.5) */
-   u64 set_tid_size; /* Number of elements in set_tid
-                        (since Linux 5.5) */
-   u64 cgroup;       /* File descriptor for target cgroup
-                        of child (since Linux 5.7) */
-};
+
 struct ibcs_sigframe;
+struct clone_args;
 long clone3_using_clone(struct clone_args *cl_args, size_t size, struct ibcs_sigframe *);
 
 void *raw_mmap(void *addr, size_t length, int prot, int flags,

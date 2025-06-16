@@ -202,6 +202,94 @@ do_real_syscall(struct generic_syscall *gsp)
 	return do_syscall6(gsp);
 }
 
+enum special_syscall
+{
+	NOT_SPECIAL,
+#if defined(__linux__)
+	SPECIAL_SYSCALL_CLONE_NEWSTACK,
+	SPECIAL_SYSCALL_CLONE3_NEWSTACK,
+#elif defined(__FreeBSD__)
+#endif
+	SPECIAL_SYSCALL_MAX
+};
+	
+#ifndef SYS_clone3
+#define SYS_clone3 435
+#endif
+#ifndef __NR_clone3
+#define __NR_clone3 SYS_clone3
+#endif
+typedef unsigned long long u64;
+// from the man page
+struct clone_args {
+   u64 flags;        /* Flags bit mask */
+   u64 pidfd;        /* Where to store PID file descriptor
+                        (pid_t *) */
+   u64 child_tid;    /* Where to store child TID,
+                        in child's memory (pid_t *) */
+   u64 parent_tid;   /* Where to store child TID,
+                        in parent's memory (int *) */
+   u64 exit_signal;  /* Signal to deliver to parent on
+                        child termination */
+   u64 stack;        /* Pointer to lowest byte of stack */
+   u64 stack_size;   /* Size of stack */
+   u64 tls;          /* Location of new TLS */
+   u64 set_tid;      /* Pointer to a pid_t array
+                        (since Linux 5.5) */
+   u64 set_tid_size; /* Number of elements in set_tid
+                        (since Linux 5.5) */
+   u64 cgroup;       /* File descriptor for target cgroup
+                        of child (since Linux 5.7) */
+};
+
+extern inline __attribute__((always_inline,gnu_inline))
+enum special_syscall is_special_syscall(struct generic_syscall *gsp)
+{
+#ifdef __linux__
+	if (gsp->syscall_number == __NR_clone && gsp->args[1] /* newstack */ != 0)
+	{ return SPECIAL_SYSCALL_CLONE_NEWSTACK; }
+	if (gsp->syscall_number == __NR_clone3 && ((struct clone_args *) gsp->args[0])->stack != 0)
+	{ return SPECIAL_SYSCALL_CLONE3_NEWSTACK; }
+#endif
+	return NOT_SPECIAL;
+}
+
+#ifdef __linux__
+extern inline long
+__attribute__((always_inline,gnu_inline))
+do_clone(struct generic_syscall *gsp);
+extern inline long
+__attribute__((always_inline,gnu_inline))
+do_clone3(struct generic_syscall *gsp);
+#endif
+
+extern inline void
+__attribute__((always_inline,gnu_inline))
+do_generic_syscall_and_fixup(struct generic_syscall *gsp)
+{
+	long ret;
+	switch (is_special_syscall(gsp))
+	{
+		case NOT_SPECIAL:
+			ret = do_real_syscall(gsp);            /* always inlined */
+			fixup_sigframe_for_return(gsp->saved_context, ret,
+				trap_len(&gsp->saved_context->uc.uc_mcontext), NULL);
+			break;
+#ifdef __linux__
+		case SPECIAL_SYSCALL_CLONE_NEWSTACK:
+			ret = do_clone(gsp); // does its own fixup
+			break;
+		case SPECIAL_SYSCALL_CLONE3_NEWSTACK:
+			ret = do_clone3(gsp); // does its own fixup
+			break;
+#endif
+		
+		default:
+			break;
+	}
+	__systrap_post_handling(gsp, ret, /* do_caller_fixup */ 0);
+}
+
 /* At least clone(), and perhaps other system calls, will zap the stack.
  * This is a problem for us, because of our long return path.
  * Our normal return path is
@@ -267,16 +355,22 @@ static void *copy_to_new_stack(
 	 * If it doesn't match, adjust destination downwards s.t. it does. */
 	uintptr_t *copydest_end = (uintptr_t *) new_stack;
 	uintptr_t *copydest_start = ((uintptr_t *) new_stack) - nwords_to_copy;
-#define ALIGN 64
-	if (   (uintptr_t) copydest_end % ALIGN
-		!= (uintptr_t) copysrc_end % ALIGN)
+#if 1 /* all arches for now... i.e. both 32- and 64-bit x86. Seems to be the XSAVE area? */
+#define SIGFRAME_ALIGN 64
+#endif
+	if (   (uintptr_t) copydest_end % SIGFRAME_ALIGN
+		!= (uintptr_t) copysrc_end % SIGFRAME_ALIGN)
 	{
-		ssize_t difference = (uintptr_t) copydest_end % ALIGN
-		 - (uintptr_t) copysrc_end % ALIGN;
+		ssize_t difference = (uintptr_t) copydest_end % SIGFRAME_ALIGN
+		 - (uintptr_t) copysrc_end % SIGFRAME_ALIGN;
 		assert(0 == difference % sizeof (uintptr_t));
+		/* if difference > 0, it means copydest_end was aligned to a higher offset
+		 * than copysrc_end. */
+		if (difference < 0) difference = SIGFRAME_ALIGN + /* negative */ difference;
 		copydest_start -= difference / sizeof (uintptr_t);
 		copydest_end -= difference / sizeof (uintptr_t);
-		assert((uintptr_t) copydest_end % ALIGN == (uintptr_t) copysrc_end % ALIGN);
+		assert((uintptr_t) copydest_end % SIGFRAME_ALIGN
+			 == (uintptr_t) copysrc_end % SIGFRAME_ALIGN);
 	}
 	long fixup_delta_nbytes = (uintptr_t) copydest_end - (uintptr_t) copysrc_end;
 
@@ -304,53 +398,14 @@ static void *copy_to_new_stack(
 	return (void*) copydest_start;
 }
 
-enum special_syscall
-{
-	NOT_SPECIAL,
-#if defined(__linux__)
-	SPECIAL_SYSCALL_CLONE_NEWSTACK,
-#elif defined(__FreeBSD__)
-#endif
-	SPECIAL_SYSCALL_MAX
-};
 
-extern inline __attribute__((always_inline,gnu_inline))
-enum special_syscall is_special_syscall(struct generic_syscall *gsp)
-{
-	if (gsp->syscall_number == __NR_clone && gsp->args[1] /* newstack */ != 0)
-	{ return SPECIAL_SYSCALL_CLONE_NEWSTACK; }
-	return NOT_SPECIAL;
-}
-
-#ifdef __linux__
-extern inline long
-__attribute__((always_inline,gnu_inline))
-do_clone(struct generic_syscall *gsp);
+#if defined(__x86_64__)
+#define STACK_ALIGN 16
+#elif defined(__i386__)
+#define STACK_ALIGN 4
+#else
+#error "Unsupported architecture."
 #endif
-
-extern inline void
-__attribute__((always_inline,gnu_inline))
-do_generic_syscall_and_fixup(struct generic_syscall *gsp)
-{
-	long ret;
-	switch (is_special_syscall(gsp))
-	{
-		case NOT_SPECIAL:
-			ret = do_real_syscall(gsp);            /* always inlined */
-			fixup_sigframe_for_return(gsp->saved_context, ret,
-				trap_len(&gsp->saved_context->uc.uc_mcontext), NULL);
-			break;
-#ifdef __linux__
-		case SPECIAL_SYSCALL_CLONE_NEWSTACK:
-			ret = do_clone(gsp); // does its own fixup
-			break;
-#endif
-		
-		default:
-			break;
-	}
-	__systrap_post_handling(gsp, ret, /* do_caller_fixup */ 0);
-}
 
 extern inline long
 __attribute__((always_inline,gnu_inline))
@@ -360,20 +415,7 @@ do_clone(struct generic_syscall *gsp)
 	assert(gsp->args[1] /* a.k.a. 'stack' argument to raw clone() syscall */);
 	void *post_zap_top_of_stack = (void*) gsp->args[1];
 	// our new stack should be aligned
-	assert(0 == (uintptr_t) post_zap_top_of_stack %
-#if defined(__x86_64__)
-		16
-#elif defined(__i386__)
-		4
-#else
-#error "Unsupported architecture."
-#endif
-	);
-	// the stack should have been aligned at the trap site
-	// assert(0 == (uintptr_t) gsp->saved_context->uc.uc_mcontext.MC_REG_SP % STACK_ALIGN);
-	/* HMM. Actually it might not be! So what can we do?
-	 * I'm suspecting that Linux does not need $rsp to be 16-byte-aligned,
-	 * but that clone() *does*. (For now, just a theory!) See below. */
+	assert(0 == (uintptr_t) post_zap_top_of_stack % STACK_ALIGN);
 
 	/* We are doing *two* sigreturns! One on our stack, one on the new stack
 	 * in the new cloned thread.
@@ -382,20 +424,10 @@ do_clone(struct generic_syscall *gsp)
 	 * for this second sigreturn to work. Note that the second sigreturn will
 	 * resume from exactly the same place in the client code as the original sigreturn.
 	 * It's the stack that will be different. (Our second sigreturn is on a stack that
-	 * never signalled!) */
-	uintptr_t *orig_sp;
-	uintptr_t *orig_bp;
-#if defined(__x86_64__)
-	__asm__ volatile ("movq %%rsp, %0" : "=rm"(orig_sp) : : );
-	__asm__ volatile ("movq %%rbp, %0" : "=rm"(orig_bp) : : );
-#elif defined(__i386__)
-	__asm__ volatile ("movl %%esp, %0" : "=rm"(orig_sp) : : );
-	__asm__ volatile ("movl %%ebp, %0" : "=rm"(orig_bp) : : );
-#else
-#error "Unsupported architecture."
-#endif
-	/* There may be stuff on the sigframe above the struct ibcs_sigframe.
-	 * We use the saved SP to work out how much to copy.
+	 * never signalled!)
+	 *
+	 * There may be stuff on the sigframe above the struct ibcs_sigframe.
+	 * We use the saved (syscall site's) SP to work out how much to copy.
 	 * Remember: the stack pointer points to the "stack's bottom-most valid word" (SysV i386 PSABI).
 
      our stack                                         new stack
@@ -446,7 +478,7 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		   mov %[arg3], %%"stringifx(argreg3)" \n\
 		   mov %[arg4], %%"stringifx(argreg4)"  \n"
 	#if defined(__x86_64__)
-		  "mov %[gsp],  %%r11 \n"    /* Put gsp in r11, for copy_to_new_stack */
+		  "mov %[gsp],  %%r12 \n"    /* Put gsp in r12 (our extra clobber), for copy_to_new_stack */
 		  "pushq %%rbp\n"            /* See below. We need this to restore BP in the parent... */
 		   /* begin PERFORM_SYSCALL replacement */
 		  "movq %%rsp, %%rcx\n"      /* rcx will form arg3 of sysv call, i.e. sp_at_clone */
@@ -458,7 +490,8 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		  "pushq %%r9\n"
 		  "pushq %%r10\n"
 		  "pushq %%r11\n"
-		  "movq %%r11, %%r8\n"       /* r8 is arg4 of sysv call */
+		  "movq %%r12, %%r8\n"       /* r8 is arg4 of sysv call */
+		  FIX_STACK_ALIGNMENT
 		  "callq copy_to_new_stack\n" /* RECEIVES: flags_unused in rdi(sysvargreg0),
 		                                new_stack a.k.a. argreg1 in rsi(sysvargreg1),
 		                                parent_tid_unused in rdx(sysvargreg2),
@@ -469,6 +502,7 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		                                r10 (kargreg3), r11 (holds gsp)
 		                                so we have to reload stuff.
 		                                RETURNS: actual new stack to use */
+		  UNFIX_STACK_ALIGNMENT
 		  "popq %%r11\n"
 		  "popq %%r10\n"
 		  "popq %%r9\n"
@@ -486,7 +520,7 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		   /* end PERFORM_SYSCALL replacement */
 		   /* Immediately test: did our stack actually get zapped? */
 		   "cmpq %%rsp, %%"stringifx(argreg1)"\n"
-		   "je .L001$           # if taken, it means we are the child with a new stack \n"
+		   "je 1f           # if taken, it means we are the child with a new stack \n"
 		   /* The compiler-generated
 		    * code in both parent and child may still need the BP to refer to locals.
 		    * When we take the 'je' above, to .001 below, our old stack is gone and above we
@@ -495,10 +529,10 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		    * unneeded BP save slot on the new stack. In the parent, we instead use this
 		    * saved value to restore the correct (parent) BP. */
 		   "popq %%rbp           # restore the correct (parent) BP \n"
-		   "jmp .L002$ \n"
-		".L001$:\n"
+		   "jmp 2f \n"
+		"1:\n"
 		   "addq $0x8, %%rsp    # discard the unwanted saved BP (actually uninitialized/zero in the child) \n"
-		   "jmp .L002$ \n"
+		   "jmp 2f \n"
 	#elif defined(__i386__)
 		  "push %%ebp\n"        /* See below. We need this to restore BP in the parent... */
 		  "push %%eax\n"
@@ -517,12 +551,12 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		   /* end PERFORM_SYSCALL expansion */
 		   /* Immediately test: did our stack actually get zapped? */
 		   "cmpl %%esp, %%"stringifx(argreg1)"\n"
-		   "je .L001$ \n"
-		   "pop %%ebp           # restore the correct (parent) BP \n"\n"
-		   "jmp .L002$ \n"
-		".L001$:\n"
+		   "je 1f \n"
+		   "pop %%ebp           # restore the correct (parent) BP \n"
+		   "jmp 2f \n"
+		"1:\n"
 		   "add $0x4, %%esp    # discard the unwanted saved BP (actually uninitialized/zero in the child) \n"
-		   "jmp .L002$ \n"
+		   "jmp 2f \n"
 	#else
 	#error "Unsupported architecture."
 	#endif
@@ -532,12 +566,12 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		    * So things should continue to Just Work from here... in particular
 		    * we should have a working %rbp and %rsp in both parent and child.
 		    */
-		".L002$:\n"
+		"2:\n"
 		   "nop\n"
 		  : [ret]  "+a" (ret_op)
 #ifndef __i386__
-		  , [gsp] "=m"(gsp)  /* gsp is a fake output, i.e. a clobber */
-		   /* We list gsp it as a memory output so that the compiler thinks it's
+		  , [gsp] "+m"(gsp)  /* gsp is a fake output, i.e. a clobber */
+		   /* We list gsp it as a memory in/out so that the compiler thinks it's
 		    * clobbered. That way, it will keep it in its stack slot during the asm block,
 		    * and will reload it later if it's needed in a register. Of course it
 		    * will be reloading the new, fixed-up version, but that is all transparent
@@ -589,6 +623,106 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		 * We can detect that using ret_op i.e. clone()'s return value. */
 		(ret_op == 0) ? (void*) (gsp->args[1] /* see fake_arg1 comment above  */)
 			: NULL);
+	return ret_op;
+}
+
+extern inline long
+__attribute__((always_inline,gnu_inline))
+do_clone3(struct generic_syscall *gsp)
+{
+// XXX: x86-64 only for now
+	long int ret_op = (long int) gsp->syscall_number;
+	__asm__ volatile (
+		  "mov %[arg0], %%"stringifx(argreg0)" \n\
+		   mov %[arg1], %%"stringifx(argreg1)" \n"
+		  "mov %[gsp],  %%r12 \n"    /* Put gsp in r12, for copy_to_new_stack */
+		  "pushq %%rbp\n"            /* See below. We need this to restore BP in the parent... */
+		   /* begin PERFORM_SYSCALL replacement */
+		  "movq %%rsp, %%rcx\n"      /* rcx will form arg3 of sysv call, i.e. sp_at_clone */
+		  "movq %c[new_stack_offs](%%rdi), %%rsi\n" /* new_stack: get the base */
+		  "addq %c[stack_size_offs](%%rdi), %%rsi\n" /* new_stack: make it the top */
+		  "pushq %%rax\n"
+		  "pushq %%rdx\n"
+		  "pushq %%rsi\n"
+		  "pushq %%rdi\n"
+		  "pushq %%r8\n"
+		  "pushq %%r9\n"
+		  "pushq %%r10\n"
+		  "pushq %%r11\n"
+		  "movq %%r12, %%r8\n"       /* r8 is arg4 of ABI call */
+		  FIX_STACK_ALIGNMENT
+		  "callq copy_to_new_stack\n" /* RECEIVES: flags_unused in rdi(sysvargreg0),
+		                                new_stack a.k.a. argreg1 in rsi(sysvargreg1),
+		                                garbage_unused in rdx(sysvargreg2),
+		                                rsp_on_clone in rcx(sysvargreg3),
+		                                gsp in r8(sysvargreg4).
+		                                CLOBBERS: rax (syscallno), rcx (unused), rdx (kargreg2), 
+		                                rsi (kargreg1), rdi (kargreg0), r8 (kargreg4), r9 (kargreg5),
+		                                r10 (kargreg3), r11 (holds gsp)
+		                                so we have to reload stuff.
+		                                RETURNS: *top* of the actual new stack to use */
+		  UNFIX_STACK_ALIGNMENT
+		  "popq %%r11\n"
+		  "popq %%r10\n"
+		  "popq %%r9\n"
+		  "popq %%r8\n"
+		  "popq %%rdi\n"
+		  "popq %%rsi\n"
+		  "popq %%rdx\n"
+		  "subq %c[stack_size_offs](%%rdi), %%rax\n"
+		  "movq %%rax, %c[new_stack_offs](%%rdi)\n"       /* copy_to_new_stack returned the *top* of the actual new stack to use */
+		  "addq %%rsi, %%rbp\n"  /* Swizzle bp to point into the child's stack, and pre-emptively... */
+		  "subq %%rsp, %%rbp\n"  /* set this as the BP. Compiler-generated code later in this function
+		                           might need to reference the BP. In the non-child case we restore the
+		                           parent BP that we pushed above. */
+		  "popq %%rax\n"         /* Restore %rax now we're finished with copy_'s return value */
+		  "subq $8,%%rbp\n"      /* In the subq above, our %%rsp was too small by 8 bytes */
+		   stringifx(SYSCALL_INSTR) "\n"
+		   /* end PERFORM_SYSCALL replacement */
+		   /* Immediately test: did our stack actually get zapped? */
+		   "cmpq %%rsp, %%"stringifx(argreg1)"\n"
+		   "je 1f           # if taken, it means we are the child with a new stack \n"
+		   /* The compiler-generated
+		    * code in both parent and child may still need the BP to refer to locals.
+		    * When we take the 'je' above, to .001 below, our old stack is gone and above we
+		    * preemptively put swizzled_bp in ebp/rbp, having pushed the old ebp/rbp.
+		    * That is correct, for the child, although we must adjust the SP to drop the
+		    * unneeded BP save slot on the new stack. In the parent, we instead use this
+		    * saved value to restore the correct (parent) BP. */
+		   "popq %%rbp           # restore the correct (parent) BP \n"
+		   "jmp 2f \n"
+		"1:\n"
+		   "addq $0x8, %%rsp    # discard the unwanted saved BP (actually uninitialized/zero in the child) \n"
+		   "jmp 2f \n"
+		   /* For all our locals, either
+		    * - the compiler chose a register *not* clobbered by the syscall (declared below), or
+		    * - the compiler put them on the stack and we copied/rewrote them appropriately.
+		    * So things should continue to Just Work from here... in particular
+		    * we should have a working %rbp and %rsp in both parent and child.
+		    */
+		"2:\n"
+		   "nop\n"
+		  : [ret]  "+a" (ret_op)
+		  , [gsp] "+m"(gsp)  /* gsp is a fake output, i.e. a clobber */
+		   /* We list gsp it as a memory output so that the compiler thinks it's
+		    * clobbered. That way, it will keep it in its stack slot during the asm block,
+		    * and will reload it later if it's needed in a register. Of course it
+		    * will be reloading the new, fixed-up version, but that is all transparent
+		    * to the compiler. */
+		  : [arg0] "m" ((long int) gsp->args[0])
+		  , [arg1] "m" ((long int) gsp->args[1])
+		  , [new_stack_offs]  "i" (offsetof (struct clone_args, stack))
+		  , [stack_size_offs] "i" (offsetof (struct clone_args, stack_size))
+		  : "%"stringifx(argreg0), "%"stringifx(argreg1), "memory", DO_SYSCALL_CLOBBER_LIST(5)
+	);
+	fixup_sigframe_for_return(gsp->saved_context, ret_op,
+		trap_len(&gsp->saved_context->uc.uc_mcontext),
+		/* new_sp: we have a new sp only if we're the child.
+		 * We can detect that using ret_op i.e. clone3()'s return value. */
+		(ret_op == 0) ? (void*) (
+		           (((struct clone_args *) gsp->args[0])->stack)
+		         + (((struct clone_args *) gsp->args[0])->stack_size)
+		): NULL);
 	return ret_op;
 }
 
