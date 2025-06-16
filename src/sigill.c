@@ -62,7 +62,8 @@ void handle_sigill(int n)
 #endif
 
 	/* Decode the syscall using sigcontext. */
-	_handle_sigill_debug_printf(1, "Took a trap from instruction at %p", p_frame->uc.uc_mcontext.MC_REG_IP);
+	_handle_sigill_debug_printf(1, "Took a trap from instruction at %p",
+			(void*) p_frame->uc.uc_mcontext.MC_REG_IP);
 #ifdef EXECUTABLE
 	if (p_frame->uc.uc_mcontext.MC_REG_IP == (uintptr_t) ignore_ud2_addr)
 	{
@@ -84,7 +85,7 @@ void handle_sigill(int n)
 #endif
 	assert(syscall_num >= 0);
 	assert(syscall_num < SYSCALL_MAX);
-	_handle_sigill_debug_printf(1, " which we think is syscall %s/%d\n",
+	_handle_sigill_debug_printf(1, " which we think is syscall %s/%ld\n",
 		&syscall_names[0] ? syscall_names[syscall_num] : "(names not linked in)", syscall_num);
 
 	if (syscall_num == __NR_rt_sigreturn
