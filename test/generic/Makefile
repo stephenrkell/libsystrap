@@ -14,3 +14,5 @@ CFLAGS += -g -fPIC
 $(filter-out clone,$(filter-out hello,$(ALLTESTS))): LDFLAGS += -nostdlib -nostartfiles -ffreestanding -no-pie
 # while glibc bug 25486 is unresolved, we need to link in libc as well as just the ld.so :-(
 $(filter-out hello,$(ALLTESTS)): LDLIBS += $(LDSO) -Wl,--no-as-needed -lc
+
+sigreturn: ../../build/$(shell uname -m)/restorer.o
