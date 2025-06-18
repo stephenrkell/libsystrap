@@ -14,6 +14,7 @@ jobs:
               g++ python3 python \
               make git gawk gdb wget \
               libunwind-dev libc6-dev-i386 zlib1g-dev libc6-dbg \
+              linux-libc-dev-i386-cross \
               gettext-base # for envsubst
       - checkout
       - run:
