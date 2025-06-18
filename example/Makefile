@@ -9,11 +9,12 @@ ifeq ($(realpath .),$(realpath $(srcroot))/example)
 ifeq ($(MAKECMDGOALS),)
 MAKECMDGOALS := default
 endif
-arch := $(shell m=`uname -m`; case "$$m" in (x86_64) echo x86_64 ;; (*) echo "$$m" ;; esac)
 .PHONY: $(MAKECMDGOALS)
 $(MAKECMDGOALS):
-	mkdir -p $(srcroot)/build/$(arch)
-	$(MAKE) -C $(srcroot)/build/$(arch) -f $(srcroot)/example/Makefile $(MAKECMDGOALS)
+	for arch in `m=$$(uname -m); case "$$m" in (x86_64) echo x86_64 ;; (*) echo "$$m" ;; esac`; do \
+    	mkdir -p $(srcroot)/build/$${arch} && \
+	    $(MAKE) -C $(srcroot)/build/$${arch} -f $(srcroot)/example/Makefile $(MAKECMDGOALS) ; \
+    done
 else
 # the rest: we take our arch from the current dir
 arch := $(notdir $(realpath .))
@@ -28,15 +29,18 @@ default: trace-syscalls.so trace-syscalls-ld.so
 
 SYS := $(shell uname -s | tr A-Z a-z )
 
-ifneq ($(shell gcc $(CFLAGS) -print-multiarch | sed 's/-.*//' ),$(arch))
-$(error GCC does not agree that the architecture is `$(arch)')
-endif
-
 # if we are doing a 32-on-64 build, add -m32
 ifeq ($(arch) $(shell uname -m),i386 x86_64)
 CFLAGS += -m32
 LDFLAGS += -m32
 endif
+
+ifneq ($(shell gcc $(CFLAGS) -print-multiarch | sed 's/-.*//' ),$(arch))
+$(error GCC does not agree that the architecture is `$(arch)')
+endif
+
+# debugging
+CFLAGS += -save-temps
 
 ifeq ($(arch),i386)
 LD_SO ?= /lib/ld-linux.so.2
@@ -156,9 +160,8 @@ dlmalloc.a: dlmalloc.o
 	$(AR) r "$@" $^
 
 # This is a quick but incomplete way to build a number->name mapping
-# XXX: don't build this here. Use the version built by src/Makefile
 linux-syscall-macros.h:
-	( /usr/bin/cpp -E -dM -o - /usr/include/`gcc $(CFLAGS) -print-multiarch`/asm/unistd.h </dev/null | \
+	( echo '#include "asm/unistd.h"' | /usr/bin/cpp $(LIBC_CFLAGS) -E -dM -o -  | \
            grep '#define *__NR_' | sort | uniq | \
            sed -r 's/^#define *__NR_([^[:blank:]]*)[[:blank:]]*([0-9]*)/#ifdef SYS_\1\nSYSCALL(\1)\n#endif/') > "$@" || (rm -f "$@"; false)
 freebsd-syscall-macros.h:
