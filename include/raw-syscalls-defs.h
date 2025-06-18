@@ -18,6 +18,7 @@ int raw_stat(char *filename, struct stat *buf) __attribute__((noinline));
 int raw_nanosleep(struct __asm_timespec *req,
 		struct __asm_timespec *rem) __attribute__((noinline));
 int raw_getpid(void) __attribute__((noinline));
+int raw_gettid(void) __attribute__((noinline));
 int raw_kill(pid_t pid, int sig) __attribute__((noinline));
 int raw_read(int fd, void *buf, size_t count) __attribute__((noinline));
 ssize_t raw_write(int fd, const void *buf,

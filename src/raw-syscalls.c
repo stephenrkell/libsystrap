@@ -53,6 +53,12 @@ int __attribute__((noinline)) raw_getpid(void)
 	return do_syscall0(&gs);
 }
 
+int __attribute__((noinline)) raw_gettid(void)
+{
+	struct generic_syscall gs = MKGS0(SYS_gettid);
+	return do_syscall0(&gs);
+}
+
 int __attribute__((noinline)) raw_kill(__kernel_pid_t pid, int sig)
 {
 	struct generic_syscall gs = MKGS2(SYS_kill, pid, sig);

@@ -240,7 +240,7 @@ void handle_sigill(int n)
 	 * from emulating the return-to-__restore_rt path, i.e. the exit path from
 	 * this function.
 	 */
-	systrap_pre_handling(&gsp);
+	__systrap_pre_handling(&gsp);
 	if (replaced_syscalls[gsp.syscall_number])
 	{
 		/* Since replaced_syscalls holds function pointers, these calls will 

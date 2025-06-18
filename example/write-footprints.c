@@ -115,7 +115,7 @@ void write_footprint_union(struct union_node *node, enum footprint_direction dir
 }
 
 void __attribute__((visibility("protected")))
-systrap_pre_handling(struct generic_syscall *gsp)
+__systrap_pre_handling(struct generic_syscall *gsp)
 {
 	/* Now walk the footprint. We print out a line per-syscall before and after
 	 * to bracket the invididual footprint items. */
@@ -192,7 +192,7 @@ systrap_pre_handling(struct generic_syscall *gsp)
 }
 
 void __attribute__((visibility("protected")))
-systrap_post_handling(struct generic_syscall *gsp, long int ret)
+__systrap_post_handling(struct generic_syscall *gsp, long int ret)
 {
 	void *calling_addr = (void*) gsp->saved_context->uc.uc_mcontext.MC_REG(rip);
 	struct link_map *calling_object = get_link_map(calling_addr);

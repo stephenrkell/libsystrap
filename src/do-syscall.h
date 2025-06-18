@@ -299,7 +299,7 @@ do_generic_syscall_and_fixup(struct generic_syscall *gsp)
 			break;
 		case SPECIAL_SYSCALL_SIGRETURN:
 			do_sigreturn(gsp);
-			break; // never hit
+			break; // never hit -- sigreturn never returns
 #ifdef __linux__
 		case SPECIAL_SYSCALL_CLONE_NEWSTACK:
 			ret = do_clone(gsp); // does its own fixup
