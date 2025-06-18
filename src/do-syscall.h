@@ -168,7 +168,7 @@ do_syscall6(struct generic_syscall *gsp)
 {
 	long int ret_op = (long int) gsp->syscall_number;
 	__asm__ volatile (
-			   "mov %[arg0], %%"stringifx(argreg0)" \n\
+			  "mov %[arg0], %%"stringifx(argreg0)" \n\
 			   mov %[arg1], %%"stringifx(argreg1)" \n\
 			   mov %[arg2], %%"stringifx(argreg2)" \n\
 			   mov %[arg3], %%"stringifx(argreg3)" \n\
@@ -180,9 +180,23 @@ do_syscall6(struct generic_syscall *gsp)
 			  "mov %[arg5], %%"stringifx(argreg5)" \n"
 			   PERFORM_SYSCALL
 #ifdef __i386__
-			  "pop %%ebp \n"
+			  "pop %%ebp \n"    /* handy is never a clone() or clone3() -- our stack lives */
 #endif
 	  : [ret]  "+a" (ret_op)
+#ifdef __i386__
+	  : [arg0] "m" ((long int) gsp->args[0])
+	  , [arg1] "m" ((long int) gsp->args[1])
+	  , [arg2] "m" ((long int) gsp->args[2])
+	  , [arg3] "m" ((long int) gsp->args[3])
+	  , [arg4] "m" ((long int) gsp->args[4])
+	  , [arg5] "m" ((long int) gsp->args[5])
+	  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%"stringifx(argreg2),
+	    "%"stringifx(argreg3), "%"stringifx(argreg4),
+	    /*"%"stringifx(argreg5), -- argreg5 is %ebp, which the compiler knows
+	     * is special, so does not allow us to mention in a clobber list. And
+	     * it's OK, because we don't clobber it! Witness the pushes and pops above. */
+	    DO_SYSCALL_CLOBBER_LIST(6)
+#else
 	  : [arg0] "rm" ((long int) gsp->args[0])
 	  , [arg1] "rm" ((long int) gsp->args[1])
 	  , [arg2] "rm" ((long int) gsp->args[2])
@@ -190,8 +204,10 @@ do_syscall6(struct generic_syscall *gsp)
 	  , [arg4] "rm" ((long int) gsp->args[4])
 	  , [arg5] "rm" ((long int) gsp->args[5])
 	  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%"stringifx(argreg2),
-	    "%"stringifx(argreg3),
-	    "%"stringifx(argreg4), /*"%"stringifx(argreg5),*/ DO_SYSCALL_CLOBBER_LIST(6));
+	    "%"stringifx(argreg3), "%"stringifx(argreg4), "%"stringifx(argreg5),
+	    DO_SYSCALL_CLOBBER_LIST(6)
+#endif
+	);
 	return ret_op;
 }
 
@@ -350,17 +366,14 @@ static void *copy_to_new_stack(
 	/* rcx */ uintptr_t sp_on_clone,
 	/* r8 */  struct generic_syscall *gsp
 #elif defined(__i386__)
-	/* eax */ unsigned long syscall_num_unused /* syscall num from eax */,
-	/* edx */ int *parent_tid_unused,
+	/* eax */ uintptr_t sp_on_clone,
+	/* edx */ struct generic_syscall *gsp,
 	/* ecx */ uintptr_t new_stack
 #else
 #error "Unrecognised architecture."
 #endif
 )
 {
-#if defined(__i386__)
-	uintptr_t sp_on_clone = ((uintptr_t) __builtin_frame_address()) - sizeof (long);
-#endif
 	uintptr_t *copysrc_start = (uintptr_t*) sp_on_clone;
 	uintptr_t *copysrc_end = (uintptr_t*) (gsp->saved_context->uc.uc_mcontext.MC_REG_SP);
 	size_t nwords_to_copy = copysrc_end - copysrc_start;
@@ -496,12 +509,12 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 	 */
 	long int ret_op = (long int) gsp->syscall_number;
 	__asm__ volatile (
+	#if defined(__x86_64__) /* XXX: rationalise this by combining with later pops*/
 		  "mov %[arg0], %%"stringifx(argreg0)" \n\
 		   mov %[arg1], %%"stringifx(argreg1)" \n\
 		   mov %[arg2], %%"stringifx(argreg2)" \n\
 		   mov %[arg3], %%"stringifx(argreg3)" \n\
 		   mov %[arg4], %%"stringifx(argreg4)"  \n"
-	#if defined(__x86_64__)
 		  "mov %[gsp],  %%r12 \n"    /* Put gsp in r12 (our extra clobber), for copy_to_new_stack */
 		  "pushq %%rbp\n"            /* See below. We need this to restore BP in the parent... */
 		   /* begin PERFORM_SYSCALL replacement */
@@ -559,17 +572,21 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		   "jmp 2f \n"
 	#elif defined(__i386__)
 		  "push %%ebp\n"        /* See below. We need this to restore BP in the parent... */
-		  "push %%eax\n"
-		  "push %%edx\n"
-		  "push %%ecx\n"
-		  "call copy_to_new_stack\n" /* RECEIVES eax (syscall num), edx (argreg2),
-		                              * ecx (argreg1); those regs are also the only clobbers.
-		                              * FIXME: it needs sp_at_clone and gsp too.
-		         * FIXME: sort out clobbers: syscall num, argreg1, argreg2
-		         * FIXME: test it, you idiot! */
-		  "pop %%ecx\n"
-		  "pop %%edx\n"
-		  "pop %%eax\n"
+		       /* Now, our esp equals sp_at_clone. So put it in eax (first regparm3 arg)
+		        * -- no need to save, as eax is a clobber of any syscall. */
+		  "mov %%esp, %%eax\n"
+		  "mov %[gsp], %%edx\n"
+		  "mov %[arg1], %%ecx\n"
+		  "call copy_to_new_stack\n" /* RECEIVES eax (sp_on_clone), edx (gsp),
+		                              * ecx (kargreg1 / new_stack); those regs are also the only clobbers. */
+		       /* Now our %eax contains the real new stack to use */
+		  "mov %%eax, %%"stringifx(argreg1)" \n"
+		       /* Now set up the other arg regs */
+		  "mov $%c[op], %%eax\n"
+		  "mov %[arg0], %%"stringifx(argreg0)" \n\
+		   mov %[arg2], %%"stringifx(argreg2)" \n\
+		   mov %[arg3], %%"stringifx(argreg3)" \n\
+		   mov %[arg4], %%"stringifx(argreg4)"  \n"
 		   /* begin PERFORM_SYSCALL expansion */
 		   stringifx(SYSCALL_INSTR) "\n"
 		   /* end PERFORM_SYSCALL expansion */
@@ -592,8 +609,9 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		    */
 		"2:\n"
 		   "nop\n"
-		  : [ret]  "+a" (ret_op)
+		  :
 #ifndef __i386__
+		    [ret]  "+a" (ret_op)
 		  , [gsp] "+m"(gsp)  /* gsp is a fake output, i.e. a clobber */
 		   /* We list gsp it as a memory in/out so that the compiler thinks it's
 		    * clobbered. That way, it will keep it in its stack slot during the asm block,
@@ -601,6 +619,8 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		    * will be reloading the new, fixed-up version, but that is all transparent
 		    * to the compiler. */
 #else
+		    [ret]  "=a" (ret_op)
+		  , [gsp] "=m"(gsp)  /* gsp is a fake output, i.e. a clobber */
 		/* On 32-bit x86 this code is very sensitive to asm constraint-solvability.
 		 * I have seen constraint solving fail following some innocuous changes
 		 * such as:
@@ -628,7 +648,11 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		 * it needs to reload gsp. And it really does need to reload gsp via BP,
 		 * because that is the only memory that is definitely valid. */
 #endif
-		  : [arg0] "m" ((long int) gsp->args[0])
+		  :
+#ifdef __i386__
+			[op] "i"(__NR_clone),
+#endif
+		    [arg0] "m" ((long int) gsp->args[0])
 		  , [arg1] "m" ((long int) gsp->args[1])
 		  , [arg2] "m" ((long int) gsp->args[2])
 		  , [arg3] "m" ((long int) gsp->args[3])
@@ -657,22 +681,25 @@ do_clone3(struct generic_syscall *gsp)
 // XXX: x86-64 only for now
 	long int ret_op = (long int) gsp->syscall_number;
 	__asm__ volatile (
+	#if defined(__x86_64__)
 		  "mov %[arg0], %%"stringifx(argreg0)" \n\
 		   mov %[arg1], %%"stringifx(argreg1)" \n"
 		  "mov %[gsp],  %%r12 \n"    /* Put gsp in r12, for copy_to_new_stack */
 		  "pushq %%rbp\n"            /* See below. We need this to restore BP in the parent... */
 		   /* begin PERFORM_SYSCALL replacement */
 		  "movq %%rsp, %%rcx\n"      /* rcx will form arg3 of sysv call, i.e. sp_at_clone */
-		  "movq %c[new_stack_offs](%%rdi), %%rsi\n" /* new_stack: get the base */
-		  "addq %c[stack_size_offs](%%rdi), %%rsi\n" /* new_stack: make it the top */
 		  "pushq %%rax\n"
+		  /* begin clobber saves */
 		  "pushq %%rdx\n"
 		  "pushq %%rsi\n"
+		  "movq %c[new_stack_offs](%%rdi), %%rsi\n" /* new_stack: get the base */
+		  "addq %c[stack_size_offs](%%rdi), %%rsi\n" /* new_stack: make it the top */
 		  "pushq %%rdi\n"
 		  "pushq %%r8\n"
 		  "pushq %%r9\n"
 		  "pushq %%r10\n"
 		  "pushq %%r11\n"
+		  /* end clobber saves */
 		  "movq %%r12, %%r8\n"       /* r8 is arg4 of ABI call */
 		  FIX_STACK_ALIGNMENT
 		  "callq copy_to_new_stack\n" /* RECEIVES: flags_unused in rdi(sysvargreg0),
@@ -686,6 +713,8 @@ do_clone3(struct generic_syscall *gsp)
 		                                so we have to reload stuff.
 		                                RETURNS: *top* of the actual new stack to use */
 		  UNFIX_STACK_ALIGNMENT
+		  "movq %%rax, %%r12\n"        /* "expected sp value after clone" -- we need this later */
+		  /* begin clobber restores */
 		  "popq %%r11\n"
 		  "popq %%r10\n"
 		  "popq %%r9\n"
@@ -693,18 +722,27 @@ do_clone3(struct generic_syscall *gsp)
 		  "popq %%rdi\n"
 		  "popq %%rsi\n"
 		  "popq %%rdx\n"
-		  "subq %c[stack_size_offs](%%rdi), %%rax\n"
-		  "movq %%rax, %c[new_stack_offs](%%rdi)\n"       /* copy_to_new_stack returned the *top* of the actual new stack to use */
-		  "addq %%rsi, %%rbp\n"  /* Swizzle bp to point into the child's stack, and pre-emptively... */
+		  /* end clobber restores */
+		  /* copy_to_new_stack returned the *top*
+		   * of the actual new stack to use, but clone3
+		   * wants the bottom, which is unchanged!
+		   * Instead we adjust the size downwards, first by
+		   * subtracting new_stack (bigger) and then by adding %rax (smaller).
+		   * We have to calculate new_stack first! */
+		  "movq %c[new_stack_offs](%%rdi), %%r12\n" /* new_stack: get the base */
+		  "addq %c[stack_size_offs](%%rdi), %%r12\n" /* new_stack: make it the top */
+		  "subq %%r12, %c[stack_size_offs](%%rdi)\n" /* now adjust the new stack *size* that we pass */
+		  "addq %%rax, %c[stack_size_offs](%%rdi)\n" /* r12 is still new_stack */
+		  "addq %%rax, %%rbp\n"  /* Swizzle bp to point into the child's stack, and pre-emptively... */
 		  "subq %%rsp, %%rbp\n"  /* set this as the BP. Compiler-generated code later in this function
 		                           might need to reference the BP. In the non-child case we restore the
 		                           parent BP that we pushed above. */
 		  "popq %%rax\n"         /* Restore %rax now we're finished with copy_'s return value */
-		  "subq $8,%%rbp\n"      /* In the subq above, our %%rsp was too small by 8 bytes */
+		  "subq $8,%%rbp\n"      /* In the subq above, our %%rsp was too small by one slot (8 bytes) because of the pushed %rax */
 		   stringifx(SYSCALL_INSTR) "\n"
 		   /* end PERFORM_SYSCALL replacement */
 		   /* Immediately test: did our stack actually get zapped? */
-		   "cmpq %%rsp, %%"stringifx(argreg1)"\n"
+		   "cmpq %%rsp, %%r12\n" /* are we the child? */
 		   "je 1f           # if taken, it means we are the child with a new stack \n"
 		   /* The compiler-generated
 		    * code in both parent and child may still need the BP to refer to locals.
@@ -718,6 +756,57 @@ do_clone3(struct generic_syscall *gsp)
 		"1:\n"
 		   "addq $0x8, %%rsp    # discard the unwanted saved BP (actually uninitialized/zero in the child) \n"
 		   "jmp 2f \n"
+#elif defined (__i386__)
+		  "mov %[arg0], %%"stringifx(argreg0) /* ebx */" \n"
+		  "push %%ebp\n"            /* See below. We need this to restore BP in the parent... */
+		  "mov %%esp, %%eax\n"      /* ecx will form arg3 of sysv+regparm3 call, i.e. sp_at_clone */
+		  /* save the old edx -- NOT a clobber, for a two-arg syscall */
+		  "push %%edx\n"
+		  "mov %[gsp], %%edx\n"
+		  "mov %c[new_stack_offs](%%ebx), %%ecx\n" /* new_stack: get the base */
+		  "add %c[stack_size_offs](%%ebx), %%ecx\n" /* new_stack: make it the top */
+		  "call copy_to_new_stack\n" /* RECEIVES eax (sp_on_clone),
+		                                         edx (gsp),
+		                                         ecx (new_stack);
+		                                and those regs are also the only clobbers. */
+		  /* copy_to_new_stack returned the *top*
+		   * of the actual new stack to use, but clone3
+		   * wants the bottom, which is unchanged!
+		   * Instead we adjust the size downwards, first by
+		   * subtracting new_stack (reloaded %ecx, bigger) and then by adding %eax (smaller) */
+		  "mov %c[new_stack_offs](%%ebx), %%ecx\n" /* new_stack: get the base */
+		  "add %c[stack_size_offs](%%ebx), %%ecx\n" /* new_stack: make it the top */
+		  "sub %%ecx, %c[stack_size_offs](%%ebx)\n"
+		  "add %%eax, %c[stack_size_offs](%%ebx)\n"
+		  "add %%eax, %%ebp\n"  /* Swizzle bp to point into the child's stack, and pre-emptively... */
+		  "sub %%esp, %%ebp\n"  /* set this as the BP. Compiler-generated code later in this function
+		                           might need to reference the BP. In the non-child case we restore the
+		                           parent BP that we pushed above. */
+		  "popl %%edx\n"          /* restore %edx that we saved earlier */
+		  "sub $4,%%ebp\n"      /* In the sub above, our %%esp was too small by one slot (4 bytes) because of the pushed rdx */
+		  "mov %%eax, %%edx\n"    /* edx is our other clobber, so stash the expected new sp there */
+		  "mov $%c[op], %%eax\n"   /* Restore %eax now we're finished with copy_'s return value */
+		  "mov %[arg1], %%ecx\n"   /* Reload %ecx, i.e. our arg1 */
+		   stringifx(SYSCALL_INSTR) "\n"
+		   /* end PERFORM_SYSCALL replacement */
+		   /* Immediately test: did our stack actually get zapped? */
+		   "cmp %%esp, %%edx\n"
+		   "je 1f           # if taken, it means we are the child with a new stack \n"
+		   /* The compiler-generated
+		    * code in both parent and child may still need the BP to refer to locals.
+		    * When we take the 'je' above, to .001 below, our old stack is gone and above we
+		    * preemptively put swizzled_bp in ebp/rbp, having pushed the old ebp/rbp.
+		    * That is correct, for the child, although we must adjust the SP to drop the
+		    * unneeded BP save slot on the new stack. In the parent, we instead use this
+		    * saved value to restore the correct (parent) BP. */
+		   "popl %%ebp           # restore the correct (parent) BP \n"
+		   "jmp 2f \n"
+		"1:\n"
+		   "add $0x4, %%esp    # discard the unwanted saved BP (actually uninitialized/zero in the child) \n"
+		   "jmp 2f \n"
+#else
+#error "Unsupported architecture."
+#endif
 		   /* For all our locals, either
 		    * - the compiler chose a register *not* clobbered by the syscall (declared below), or
 		    * - the compiler put them on the stack and we copied/rewrote them appropriately.
@@ -726,18 +815,27 @@ do_clone3(struct generic_syscall *gsp)
 		    */
 		"2:\n"
 		   "nop\n"
-		  : [ret]  "+a" (ret_op)
+		  :
+#ifdef __i386__
+		    [ret]  "=a" (ret_op)
+#else
+		    [ret]  "+a" (ret_op)
+#endif
 		  , [gsp] "+m"(gsp)  /* gsp is a fake output, i.e. a clobber */
 		   /* We list gsp it as a memory output so that the compiler thinks it's
 		    * clobbered. That way, it will keep it in its stack slot during the asm block,
 		    * and will reload it later if it's needed in a register. Of course it
 		    * will be reloading the new, fixed-up version, but that is all transparent
 		    * to the compiler. */
-		  : [arg0] "m" ((long int) gsp->args[0])
+		  :
+#ifdef __i386__
+            [op] "i" (__NR_clone3),
+#endif
+		    [arg0] "m" ((long int) gsp->args[0])
 		  , [arg1] "m" ((long int) gsp->args[1])
 		  , [new_stack_offs]  "i" (offsetof (struct clone_args, stack))
 		  , [stack_size_offs] "i" (offsetof (struct clone_args, stack_size))
-		  : "%"stringifx(argreg0), "%"stringifx(argreg1), "memory", DO_SYSCALL_CLOBBER_LIST(5)
+		  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%ecx", "memory", DO_SYSCALL_CLOBBER_LIST(2)
 	);
 	fixup_sigframe_for_return(gsp->saved_context, ret_op,
 		trap_len(&gsp->saved_context->uc.uc_mcontext),
@@ -775,7 +873,13 @@ do_sigreturn(struct generic_syscall *gsp)
 	 */
 	long int ret_op = (long int) gsp->syscall_number; /* either sigreturn or rt_sigreturn */
 	__asm__ volatile (
+#if defined(__x86_64__)
 		  "mov %[orig_sigframe_sp], %%rsp \n" /* stack pointer at the trapped sigreturn syscall */
+#elif defined(__i386__)
+		  "mov %[orig_sigframe_sp], %%esp \n" /* stack pointer at the trapped sigreturn syscall */
+#else
+#error "Unsupported architecture."
+#endif
 		   stringifx(SYSCALL_INSTR) "\n"
 		  : [ret]  "+a" (ret_op)
 		  : [orig_sigframe_sp] "r"(gsp->saved_context->uc.uc_mcontext.MC_REG_SP)

@@ -401,11 +401,6 @@ void clone3_emulated_replacement(struct generic_syscall *s, post_handler *post)
 
 void install_sigill_handler(void)
 {
-	/* While we can't handle clone3(), set it to occur using clone(). */
-#ifndef SYS_clone3
-#define SYS_clone3 435
-#endif
-	replaced_syscalls[SYS_clone3] = clone3_emulated_replacement;
 	/* Install our SIGILL (was SIGTRAP, but that interferes with gdb) handler.
 	 * Linux seems to require us to provide a restorer; the code is in restore_rt. */
 #ifndef SA_RESTORER
