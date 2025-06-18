@@ -54,8 +54,7 @@ build-musl: musl/build-i386/lib/libc.a host-includes-i386
 # our CC is probed by the shell snippet, so ensure it's exported... ditto AR, RANLIB
 AR ?= ar
 AS ?= as
-LIBCC ?= $(shell $(CC) -m32 -print-libgcc-file-name)
-export CC AR LIBCC
+export CC AR
 # at some point I needed this compiler flag for musl...
 # -DSYS_socketcall=__NR_socketcall
 # ... but no longer
@@ -63,7 +62,7 @@ musl/build-i386/config.mak:
 	mkdir -p $(dir $@) && cd $(dir $@) && \
 	RANLIB="$${AR} -s" \
 	AR="$${AR}" \
-	LIBCC="$${LIBCC}" \
+	LIBCC="$$( $${CC} -m32 -print-libgcc-file-name )" \
 	CC="$${CC} -m32" \
 	AS="$${AS} -m32" \
 	LDFLAGS="-Wl,-melf_i386" \
