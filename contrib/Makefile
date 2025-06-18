@@ -49,13 +49,27 @@ musl/%/lib/libc.a: musl/%/config.mak
 # to coerce musl to do the -m32 build... e.g. we are still pulling in
 # 64-bit libgcc, for some reason, and the RANLIB hack does not work (i386-ranlib not found).
 # Does musl support an -m32 build? as opposed to a fully general cross-compilation?
-ifeq ($(arch),x86_64_XXX_DELETE_THIS_TO_RE_ENABLE)
+ifeq ($(arch),x86_64)
 build-musl: musl/build-i386/lib/libc.a host-includes-i386
 # our CC is probed by the shell snippet, so ensure it's exported... ditto AR, RANLIB
-export CC AR RANLIB
+AR ?= ar
+AS ?= as
+LIBCC ?= $(shell $(CC) -m32 -print-libgcc-file-name)
+export CC AR LIBCC
+# at some point I needed this compiler flag for musl...
+# -DSYS_socketcall=__NR_socketcall
+# ... but no longer
 musl/build-i386/config.mak:
 	mkdir -p $(dir $@) && cd $(dir $@) && \
- CFLAGS="-g -m32" LDFLAGS="-m32" AR="$${AR}" RANLIB="$${RANLIB}" CC="$${CC:-cc} -m32 -DSYS_socketcall=__NR_socketcall" ../configure --target=i386
+	RANLIB="$${AR} -s" \
+	AR="$${AR}" \
+	LIBCC="$${LIBCC}" \
+	CC="$${CC} -m32" \
+	AS="$${AS} -m32" \
+	LDFLAGS="-Wl,-melf_i386" \
+	CFLAGS="$${CFLAGS} -g" ../configure --target=i386
+musl/build-i386/lib/libc.a: musl/build-i386/config.mak
+	$(MAKE) -C musl/build-i386
 clean::
 	$(MAKE) -C musl/build-i386 clean
 	rm -f musl/build-i386/{Makefile,config.mak}
