@@ -88,6 +88,7 @@ void handle_sigill(int n)
 	_handle_sigill_debug_printf(1, " which we think is syscall %s/%ld\n",
 		&syscall_names[0] ? syscall_names[syscall_num] : "(names not linked in)", syscall_num);
 
+#if 0
 	if (syscall_num == __NR_rt_sigreturn
 #ifdef __i386__
 	    || syscall_num == __NR_sigreturn
@@ -138,6 +139,7 @@ void handle_sigill(int n)
 #endif
 		goto out;
 	}
+#endif
 
 	/* FIXME: check whether this syscall creates executable mappings; if so,
 	 * we make them nx, do the rewrite, then make them x. */

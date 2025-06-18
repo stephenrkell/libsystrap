@@ -205,6 +205,7 @@ do_real_syscall(struct generic_syscall *gsp)
 enum special_syscall
 {
 	NOT_SPECIAL,
+	SPECIAL_SYSCALL_SIGRETURN,
 #if defined(__linux__)
 	SPECIAL_SYSCALL_CLONE_NEWSTACK,
 	SPECIAL_SYSCALL_CLONE3_NEWSTACK,
@@ -242,9 +243,27 @@ struct clone_args {
                         of child (since Linux 5.7) */
 };
 
+#if defined(SYS_sigreturn) && !defined(__NR_sigreturn)
+#define __NR_sigreturn SYS_sigreturn
+#endif
+
+#if defined(__linux__) && defined(__x86_64__) && !defined(__NR_rt_sigreturn)
+#define __NR_rt_sigreturn SYS_rt_sigreturn
+#endif
+#if !defined(__NR_sigreturn) && defined(__NR_rt_sigreturn)
+#define __NR_sigreturn __NR_rt_sigreturn
+#endif
+
 extern inline __attribute__((always_inline,gnu_inline))
 enum special_syscall is_special_syscall(struct generic_syscall *gsp)
 {
+	if (gsp->syscall_number == __NR_sigreturn
+#if defined(__linux__) && defined(__x86_64__)
+			|| gsp->syscall_number == __NR_rt_sigreturn
+#endif
+	) {
+		return SPECIAL_SYSCALL_SIGRETURN;
+	}
 #ifdef __linux__
 	if (gsp->syscall_number == __NR_clone && gsp->args[1] /* newstack */ != 0)
 	{ return SPECIAL_SYSCALL_CLONE_NEWSTACK; }
@@ -254,6 +273,9 @@ enum special_syscall is_special_syscall(struct generic_syscall *gsp)
 	return NOT_SPECIAL;
 }
 
+extern inline void
+__attribute__((always_inline,gnu_inline,noreturn))
+do_sigreturn(struct generic_syscall *gsp);
 #ifdef __linux__
 extern inline long
 __attribute__((always_inline,gnu_inline))
@@ -275,6 +297,9 @@ do_generic_syscall_and_fixup(struct generic_syscall *gsp)
 			fixup_sigframe_for_return(gsp->saved_context, ret,
 				trap_len(&gsp->saved_context->uc.uc_mcontext), NULL);
 			break;
+		case SPECIAL_SYSCALL_SIGRETURN:
+			do_sigreturn(gsp);
+			break; // never hit
 #ifdef __linux__
 		case SPECIAL_SYSCALL_CLONE_NEWSTACK:
 			ret = do_clone(gsp); // does its own fixup
@@ -283,7 +308,6 @@ do_generic_syscall_and_fixup(struct generic_syscall *gsp)
 			ret = do_clone3(gsp); // does its own fixup
 			break;
 #endif
-		
 		default:
 			break;
 	}
@@ -725,5 +749,41 @@ do_clone3(struct generic_syscall *gsp)
 		): NULL);
 	return ret_op;
 }
+
+
+extern inline void
+__attribute__((always_inline,gnu_inline,noreturn))
+do_sigreturn(struct generic_syscall *gsp)
+{
+	/* To do a sigreturn, we simply restore the user's stack pointer
+	 * to what it was at the site of the trap... i.e. do the same sigreturn
+	 * that the original code was trying to do, just from a different code address.
+	 *
+	 * NOTE that the *user's* sigframe should NOT be one of our trap sites.
+	 * So there is no need to fix it up!
+	 *
+	 * E.g. say we rewrote a __restore_rt s.t. its 'syscall' instead is 'ud2' and
+	 * traps to us. We take the stack pointer at the time of the ud2, and do
+	 * the sigreturn ourselves.
+	 *
+	 * We do it simply by restoring the stack pointer to its value at the site of
+	 * the ud2 trap, and doing sigreturn. That sigreturn should receive the
+	 * same sigframe that the sigreturn was trying to return through. That should
+	 * include a *further* trap site. We are skipping *past* the sigframe
+	 * that was caused by our trap, and heading straight for the actual
+	 * sigframe that that first signal's handler was trying to resume with.
+	 */
+	long int ret_op = (long int) gsp->syscall_number; /* either sigreturn or rt_sigreturn */
+	__asm__ volatile (
+		  "mov %[orig_sigframe_sp], %%rsp \n" /* stack pointer at the trapped sigreturn syscall */
+		   stringifx(SYSCALL_INSTR) "\n"
+		  : [ret]  "+a" (ret_op)
+		  : [orig_sigframe_sp] "r"(gsp->saved_context->uc.uc_mcontext.MC_REG_SP)
+		  : "memory", DO_SYSCALL_CLOBBER_LIST(0)
+	);
+	/* We should never get here. */
+	raw_exit(128 + SIGABRT);
+}
+
 
 #endif
