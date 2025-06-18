@@ -9,10 +9,11 @@ clean::
 CFLAGS += -g
 
 # getpid always exits non-zero, so how do we check it didn't crash?
+# We make it AND its 
 run-getpid-preload.stamp: getpid
-	output=$$( LD_PRELOAD=$(PRELOAD_BINARY) ./getpid; echo $?); test -n "$$output" && touch $@
+	LD_PRELOAD=$(PRELOAD_BINARY) ./getpid; test $$? -lt 128 && touch $@
 run-getpid-chain.stamp: getpid
-	output=$$( $(CHAIN_BINARY) ./getpid; echo $?); test -n "$$output" && touch $@
+	$(CHAIN_BINARY) ./getpid; test $$? -lt 128 && touch $@
 
 # freestanding assembly tests -- these use a non-PIC idiom
 true getpid clone3: LDFLAGS += -no-pie -nostartfiles -nostdlib
