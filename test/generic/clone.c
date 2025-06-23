@@ -1,6 +1,5 @@
 #define _GNU_SOURCE
-#include <linux/unistd.h>
-#include <asm/ldt.h>
+#include "../../include/raw-syscalls-asm.h"
 #include <sys/mman.h>
 #include <sched.h>
 #include <stdlib.h>

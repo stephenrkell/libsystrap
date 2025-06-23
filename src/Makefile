@@ -14,7 +14,7 @@ endif
 # of our dependencies: at least xed and librunt and musl; others?
 .PHONY: $(MAKECMDGOALS)
 $(MAKECMDGOALS):
-	for arch in `m=$$(uname -m); case "$$m" in (x86_64) echo x86_64 ;; (*) echo "$$m" ;; esac`; do \
+	for arch in `m=$$(uname -m); case "$$m" in (x86_64) echo x86_64 i386 ;; (*) echo "$$m" ;; esac`; do \
              mkdir -p $(srcroot)/build/$${arch} && \
              $(MAKE) -C $(srcroot)/build/$${arch} -f $(srcdir)/Makefile $(MAKECMDGOALS); \
         done
@@ -31,19 +31,17 @@ vpath %.s $(srcdir)
 default: libsystrap.a
 
 CONTRIB := $(srcroot)/contrib
-CONFIG ?= $(CONTRIB)/config.mk
-
 $(CONTRIB)/config.mk:
 	$(MAKE) -C $(CONTRIB)
 
-ifneq ($(MAKECMDGOALS),clean)
-include $(CONFIG)
-endif
+# includes a config from somewhere, probably contrib/
+include $(srcroot)/common.mk
 
 # if we are doing a 32-on-64 build, add -m32
 ifeq ($(arch) $(shell uname -m),i386 x86_64)
 CFLAGS += -m32
-LDFLAGS += -m32
+ASFLAGS += -m32
+LDFLAGS += -m32 -Wl,-melf_i386
 endif
 
 # we are to be linked with the librunt archive
@@ -70,13 +68,6 @@ else
 #instr.o: CFLAGS += -DUSE_OPDIS
 endif
 
-# LIBC_CFLAGS_PATTERN is now expected to be self-sufficient
-# e.g. using musl we should be able to build without pulling in ambient glibc stuff
-# we use envsubst to expand the pattern
-ifeq ($(shell which envsubst),)
-$(error "Please install 'gettext-base' or any package providing 'envsubst'")
-endif
-LIBC_CFLAGS := $(shell echo '$(LIBC_CFLAGS_PATTERN)' | env arch="$(arch)" envsubst )
 $(info LIBC_CFLAGS is $(LIBC_CFLAGS))
 CFLAGS += -nostdinc $(LIBC_CFLAGS)
 
@@ -94,8 +85,9 @@ ifneq ($(MAKECMDGOALS),clean)
 -include $(DEPS)
 endif
 
+$(info XED_DIR is $(XED_DIR))
 ifneq ($(realpath $(XED_DIR)),)
-CFLAGS += -I$(XED_DIR)/include
+CFLAGS += -I$(XED_DIR)/include/public -I$(XED_DIR)/build-$(arch)/include/xed
 endif
 ifneq ($(realpath $(LIBX86EMULATE_DIR)),)
 CFLAGS += -I$(LIBX86EMULATE_DIR)/src
@@ -118,8 +110,11 @@ $(info OBJS is $(OBJS))
 # .o detritus into the build directory. However, that is not so great -- it
 # means that the whole xed archive will be linked in unconditionally, i.e. even if
 # the client doesn't need all of it.
-xed.os: $(XED_A)
-	ld -r -o $@ --whole-archive $< --no-whole-archive
+# HACK: instead of ld -r, use CC -nostdlib -shared -Wl,-r, so that we get the -m32 flags
+# automatically if needed.
+$(info Now XED_DIR is $(XED_DIR))
+xed.os: $(XED_DIR)/build-$(arch)/lib/libxed.a
+	$(CC) $(CFLAGS) $(LDFLAGS) -nostdlib -no-pie -Wl,-r -o $@ -Wl,--whole-archive $< -Wl,--no-whole-archive
 
 libsystrap.a: $(OBJS) xed.os
 	$(AR) r "$@" $+

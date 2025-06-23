@@ -7,6 +7,8 @@ $(info Building for kernel: $(KERNEL))
 .PHONY: default clean
 default: build.stamp config.mk $(CONTRIB)/env.sh
 
+# our own config.mk may need to expand 'arch', so define it nice and early
+arch := $(shell uname -m)
 include config.mk
 
 ifeq ($(KERNEL),Linux)
@@ -36,7 +38,6 @@ MBUILD_DIR := mbuild
 # (3) on x86-64, special-case an extra -m32 build.
 # We will need to change LIBC_A because there can be more than one of them...
 #    LIBC_A_PATTERN? i.e. we sub in the arch, although it can be a no-op on other arches
-arch := $(shell uname -m)
 .PHONY: build-musl
 build-musl: musl/build-$(arch)/lib/libc.a host-includes-$(arch)
 musl/build-$(arch)/config.mak:
@@ -92,9 +93,17 @@ clean::
 	$(MAKE) -C musl/build-$(arch) clean
 	rm -f musl/build-$(arch)/{Makefile,config.mak}
 
+# musl always uses a 64-bit off_t.
+# This matters both for our client code in the main repo
+# *and* for the things we build here that need to link with musl, namely
+# librunt and xed.
+MUSL_ABI_CFLAGS := -D_FILE_OFFSET_BITS=64
+
 ifeq ($(KERNEL),Linux)
-CONFIG_MK += \nLIBC_A_PATTERN := $(realpath $(dir $(THIS_MAKEFILE)))/musl/build-$(shell uname -m)/lib/libc.a\n
-CONFIG_MK += \nLIBC_CFLAGS_PATTERN := -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/arch/$${arch} -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/arch/generic -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/build-$(shell uname -m)/obj/include -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/include -I$(realpath $(dir $(THIS_MAKEFILE)))/host-includes-$${arch} \n
+CONFIG_MK += \nLIBC_A_PATTERN := $(realpath $(dir $(THIS_MAKEFILE)))/musl/build-$${arch}/lib/libc.a\n
+CONFIG_MK += \nLIBC_CFLAGS_PATTERN := -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/arch/$${arch} -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/arch/generic -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/build-$${arch}/obj/include -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/include -I$(realpath $(dir $(THIS_MAKEFILE)))/host-includes-$${arch} \n
+# musl always uses a 64-bit off_t
+CONFIG_MK += \nLIBC_CFLAGS_PATTERN += $(MUSL_ABI_CFLAGS)\n
 else
 ifeq ($(KERNEL),FreeBSD) # FIXME: check this
 CONFIG_MK += \nLIBC_A_PATTERN := /usr/lib/libc_pic.a\n
@@ -103,34 +112,69 @@ endif
 endif
 varlist += LIBC_A_PATTERN LIBC_CFLAGS_PATTERN
 
+# Remember that we include CONFIG_MK ourselves, so we also get this var to use.
+# BUT the quoting isn't quite right! LIBC_CFLAGS_PATTERN is supposed to be
+# a pattern, so the ${arch} part should not be expanded. But currently it
+# is. Not sure what to do about this... use a different pattern-expander tool/syntax?
+# $(info LIBC_CFLAGS_PATTERN is $(LIBC_CFLAGS_PATTERN))
+
 # ----------------------------xed
 
 .PHONY: build-xed
-build-xed: $(MBUILD_DIR)
-	cd xed && ./mfile.py install --install-dir=build --no-encoder --extra-flags='-fPIC -ffreestanding'
+build-xed: xed/build-$(arch)/lib/libxed.a
+xed/build-$(arch)/lib/libxed.a: $(MBUILD_DIR)
+	cd xed && ./mfile.py install --build-dir=obj-$(arch) --install-dir=build-$(arch) --no-encoder \
+	  --extra-flags='-fPIC -ffreestanding $(MUSL_ABI_CFLAGS)'
+ifeq ($(arch),x86_64)
+build-xed: xed/build-i386/lib/libxed.a
+xed/build-i386/lib/libxed.a: $(MBUILD_DIR)
+	cd xed && ./mfile.py install --build-dir=obj-i386 --install-dir=build-i386 --no-encoder \
+	  --extra-flags='-m32 -fPIC -ffreestanding $(MUSL_ABI_CFLAGS)' --extra-linkflags=-Wl,-melf_i386
+endif
 
 clean::
-	cd xed && ./mfile.py clean || true
+	cd xed && rm -rf obj-* build-* && ./mfile.py clean || true
 
-CONFIG_MK +=\nXED_DIR ?= $(CONTRIB)/xed/build\n
-CONFIG_MK +=\nXED_A ?= $(CONTRIB)/xed/build/lib/libxed.a\n
-varlist += XED_DIR XED_A
+CONFIG_MK +=\nXED_DIR ?= $(CONTRIB)/xed\n
+varlist += XED_DIR
 
 # ----------------------------librunt
 
+ifeq ($(DEBUG),)
+frag := opt
+else
+frag := debug
+endif
 .PHONY: build-librunt
-build-librunt: librunt/lib/librunt_preload.a
-librunt/lib/librunt_preload.a: librunt/Makefile
-	cd librunt && $(MAKE)
+build-librunt: librunt/build/$(frag)-$(arch)/librunt_preload.a
+librunt/build/$(frag)-%/librunt_preload.a: librunt/Makefile
+	mkdir -p $(dir $@) && cd $(dir $@) && $(LIBRUNT_MAKE_PREFIX) $(MAKE) -f ../../src/Makefile
 # librunt is not yet autotools'd
 #librunt/Makefile: librunt/configure
 #	cd librunt && ./configure
 #librunt/configure: librunt/configure.ac
 #	cd librunt && ./autogen.sh
 
+# also build 32-bit version on x86_64
+ifeq ($(arch),x86_64)
+build-librunt: librunt/build/$(frag)-i386/librunt_preload.a
+librunt/build/$(frag)-i386/librunt_preload.a: LIBRUNT_MAKE_PREFIX := CFLAGS="$(CFLAGS) $(MUSL_ABI_CFLAGS)" CC="$(CC) -m32" ASFLAGS="-m32" LDFLAGS="-Wl,-melf_i386"
+endif
+
+CONFIG_MK +=\nLIBRUNT_CFLAGS := $(LIBRUNT_CFLAGS) -I$(CONTRIB)/librunt/include\n
+CONFIG_MK +=\nLIBRUNT_LDFLAGS := $(LIBRUNT_LDFLAGS) -L$(CONTRIB)/librunt/build/$(frag)-$(arch) \
+ -Wl,-rpath,$(CONTRIB)/librunt/build/$(frag)-$(arch)
+# How to plumb through the 32-bit version's flags? Just add both -L dirs and
+# let the linker figure it out.
+ifeq ($(arch),x86_64)
+CONFIG_MK +=\nLIBRUNT_LDFLAGS += -L$(CONTRIB)/librunt/build/$(frag)-i386 \
+ -Wl,-rpath,$(CONTRIB)/librunt/build/$(frag)-i386
+endif
+
+clean::
+	cd librunt && rm -rf build
+
 CONFIG_MK +=\nLIBRUNT_DIR ?= $(realpath $(CONTRIB)/librunt)\n
-CONFIG_MK +=\nLIBRUNT_CFLAGS ?= -I$(CONTRIB)/librunt/include\n
-CONFIG_MK +=\nLIBRUNT_LDFLAGS ?= -L$(CONTRIB)/librunt/lib -Wl,-rpath,$(CONTRIB)/librunt/lib
 # non-autoconf'd stuff (liballocs, libsystrap) may expect LIBRUNT_DIR
 varlist += LIBRUNT_CFLAGS LIBRUNT_LDFLAGS LIBRUNT_DIR
 

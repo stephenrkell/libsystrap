@@ -11,13 +11,14 @@ MAKECMDGOALS := default
 endif
 .PHONY: $(MAKECMDGOALS)
 $(MAKECMDGOALS):
-	for arch in `m=$$(uname -m); case "$$m" in (x86_64) echo x86_64 ;; (*) echo "$$m" ;; esac`; do \
+	for arch in `m=$$(uname -m); case "$$m" in (x86_64) echo x86_64 i386 ;; (*) echo "$$m" ;; esac`; do \
     	mkdir -p $(srcroot)/build/$${arch} && \
 	    $(MAKE) -C $(srcroot)/build/$${arch} -f $(srcroot)/example/Makefile $(MAKECMDGOALS) ; \
     done
 else
 # the rest: we take our arch from the current dir
 arch := $(notdir $(realpath .))
+$(info arch is $(arch))
 vpath %.c $(srcroot)/example
 vpath %.s $(srcroot)/example
 vpath %.lds $(srcroot)/example
@@ -32,7 +33,8 @@ SYS := $(shell uname -s | tr A-Z a-z )
 # if we are doing a 32-on-64 build, add -m32
 ifeq ($(arch) $(shell uname -m),i386 x86_64)
 CFLAGS += -m32
-LDFLAGS += -m32
+ASFLAGS += -m32
+LDFLAGS += -m32 -Wl,-melf_i386
 endif
 
 ifneq ($(shell gcc $(CFLAGS) -print-multiarch | sed 's/-.*//' ),$(arch))
@@ -83,7 +85,9 @@ $(error Please set DONALD or make $(srcroot)/config.mk do so)
 endif
 
 ifneq ($(LIBC_A_PATTERN),)
+$(info LIBC_A was pre-set to $(LIBC_A) (arch: $(arch), pattern: $(LIBC_A_PATTERN)))
 LIBC_A ?= $(shell echo '$(LIBC_A_PATTERN)' | env arch='$(arch)' envsubst )
+$(info LIBC_A is $(LIBC_A))
 endif
 
 ifeq ($(SYS),freebsd)
@@ -119,6 +123,8 @@ CFLAGS += -ffreestanding -fno-omit-frame-pointer
 CFLAGS += -I$(srcroot)/src
 CFLAGS += -I$(srcroot)/include
 CFLAGS += -I $(LIBRUNT_DIR)/include
+CFLAGS += -I$(XED_DIR)/build-$(arch)/include/xed
+CFLAGS += -I$(XED_DIR)/include/public
 CFLAGS += -std=c99
 
 # musl has 'int' for line number, unlike glibc... librunt can hack around for us
@@ -171,13 +177,19 @@ freebsd-syscall-macros.h:
 syscall-macros.h: $(SYS)-syscall-macros.h
 	cp "$<" "$@"
 
+ifeq ($(DEBUG),)
+librunt_frag := opt
+else
+librunt_frag := debug
+endif
+
 # FIXME: make our dynamic symbols hidden! 
 # We don't want user code calling into our exit(), hence having us make its syscalls.
 # NOTE: the --whole-archive is only necessary for debugging, to ensure that
 # functions we might want to call from the debugger are actually linked in
 trace-syscalls.so: LDLIBS := -Bstatic \
 	$(srcroot)/build/$(arch)/libsystrap.a \
-	-Wl,--whole-archive $(LIBRUNT_DIR)/lib/librunt_preload.a -Wl,--no-whole-archive \
+	-Wl,--whole-archive $(LIBRUNT_DIR)/build/$(librunt_frag)-$(arch)/librunt_preload.a -Wl,--no-whole-archive \
 	-ldl
 
 # FIXME: what's the right way to pull in libgcc.a? It seems that
@@ -220,7 +232,7 @@ trace-syscalls-ld.so: LDFLAGS += -Wl,--wrap,enter -Wl,--wrap,load_one_phdr \
 -Wl,--wrap,__runt_files_metadata_by_addr
 trace-syscalls-ld.so: LDLIBS += -Bstatic \
   $(srcroot)/build/$(arch)/libsystrap.a \
-  $(LIBRUNT_DIR)/lib/librunt_preload.a \
+  $(LIBRUNT_DIR)/build/$(librunt_frag)-$(arch)/librunt_preload.a \
   $(LIBC_A)
 
 trace-syscalls.so: trace-syscalls.o syscall-names.o dlmalloc.a fake-tls.o
@@ -263,7 +275,7 @@ dynamic-list:
 	printf '{ etext; _init; _fini; };\n' >$@ || (rm -f $@; false)
 
 trace-syscalls-ld.lds: $(shell which ld) $(THIS_MAKEFILE)
-	USE_LD=ld.bfd $(CC) -fuse-ld=bfd -nostdlib -nostartfiles -shared \
+	USE_LD=ld.bfd $(CC) $(CFLAGS) -fuse-ld=bfd -nostdlib -nostartfiles -shared \
       -Wl,--verbose 2>&1 |  \
         LC_ALL=C \
           sed -e '/^=========/,/^=========/!d;/^=========/d'    \

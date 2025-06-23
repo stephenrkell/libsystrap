@@ -24,9 +24,22 @@ static void handle_it(int signum)
 
 void _start(void)
 {
-	struct __asm_sigaction test = { .sa_handler = handle_it, .sa_restorer = &__restore_rt,
-		.sa_flags = SA_RESTORER | SA_NODEFER };
+	struct __asm_sigaction test = { .sa_handler = handle_it,
+#if defined(__x86_64__)
+		.sa_restorer = &__restore_rt,
+#elif defined(__i386__)
+		.sa_restorer = &__restore,
+#else
+#error "Unrecognised architecture."
+#endif
+					.sa_flags = SA_RESTORER | SA_NODEFER };
+#if defined(__x86_64__)
 	int ret = raw_rt_sigaction(SIGUSR1, &test, NULL);
+#elif defined(__i386__)
+	int ret = raw_sigaction(SIGUSR1, &test, NULL);
+#else
+#error "Unrecognised architecture."
+#endif
 	if (ret != 0) raw_exit(128 + SIGABRT);
 
 	int mypid = raw_getpid();
