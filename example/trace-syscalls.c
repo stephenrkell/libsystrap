@@ -162,8 +162,13 @@ void __init_libc(char **envp, char *pn); // musl-internal API
  * donald defines __wrap___init_tp(), so we put our even faker version
  * in a separate file (fake-tls.o). */
 // void __wrap___init_tp() {}
-static void startup(void) __attribute__((constructor(101)));
-static void startup(void)
+
+/* This constructor is used only by the preload library. For the
+ * chain loader, the equivalent code is in pre-entry.c (which is called
+ * from donald, as a wrapper of donald's enter() function) and chain.inc.c
+ * which is called immediately *before* this, in the context of donald's main. */
+static void startup(int argc, char **argv, char **environ) __attribute__((constructor(101)));
+static void startup(int argc, char **argv, char **environ)
 {
 	/* We use musl as our libc. That means there are (up to) two libc instances
 	 * in the process! Before we do any libc calls, make sure musl's state
@@ -175,8 +180,34 @@ static void startup(void)
 	__runt_auxv_get_env(&p_envv_0, &p_envv_end);
 	__init_libc((char**) p_envv_0, (char*) *p_argv_0);
 	init_fds();
-	trap_all_mappings();
+	const ElfW(auxv_t) *p_auxv_start = NULL, *p_auxv_terminator = NULL;
+	__runt_auxv_get_auxv(&p_auxv_start, &p_auxv_terminator);
+	/* We can create the fake vDSO, but how can we make the program use it?
+	 * In the chain-loader case, we modify the AT_SYSINFO_EHDR auxv entry
+	 * before the inferior ld.so sees it. As a plain old preload library, do
+	 * we have any influence? We could still update the auxv but presumably
+	 * we are too late. How does the vDSO get plumbed in? Does it live in a
+	 * TLS slot perhaps? I spy a call *%gs:0x10 in 32-bit __timerfd_gettime64.
+	 * So perhaps I can just clobber the TLS slot? Well durr. no. It links to
+	 * it! The VDSO is a shared object after all. Still I do vaguely remember
+	 * something about TLS.
+	 */
+	create_fake_vdso(p_auxv_start); // creates in already-trapped form
+	trap_all_mappings(); // XXX: use this to trap the fake vdso too; have just "copy_vdso(...)"?
 	install_sigill_handler();
+#if defined(__i386__)
+	/* This only runs if our auxv contains AT_SYSINFO, *not* AT_SYSINFO_EHDR.
+	 * The former is deprecated. From vdso(7): "it is used for locating the
+	 * vsyscall entry point". But there is a TLS slot reserved for it? We make
+	 * this point to fake_sysinfo i.e. "the same offset but within the fake
+	 * vDSO", if and only if the original auxv contained this entry. */
+	if (fake_sysinfo)
+	{
+		unsigned char *tls;
+		__asm__("mov %%gs:0x0,%0" : "=r"(tls));
+		*(void**)(tls+16) = fake_sysinfo; // FIXME: need a reference for this please
+	}
+#endif
 }
 
 

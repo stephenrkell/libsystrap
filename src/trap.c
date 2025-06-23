@@ -330,8 +330,9 @@ void trap_one_executable_region_given_shdrs(unsigned char *begin,
 void trap_one_executable_region(unsigned char *begin, unsigned char *end, const char *filename,
 	_Bool is_writable, _Bool is_readable)
 {
-	// HACK: why was this apparently not necessary previously?
-	// CHECK code history since I did the x86 32-bit work
+	// Q: why was this apparently not necessary previously?
+	// A. it was handled by a failure to mprotect()-to-writable, but that
+	// failure can no longer be relied on (kernel changes)
 	if (0 == strncmp(filename, "[vdso", 5))
 	{
 		return;
