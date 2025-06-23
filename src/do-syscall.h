@@ -580,14 +580,19 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		  "call copy_to_new_stack\n" /* RECEIVES eax (sp_on_clone), edx (gsp),
 		                              * ecx (kargreg1 / new_stack); those regs are also the only clobbers. */
 		       /* Now our %eax contains the real new stack to use */
+		   /* begin PERFORM_SYSCALL expansion */
 		  "mov %%eax, %%"stringifx(argreg1)" \n"
 		       /* Now set up the other arg regs */
 		  "mov $%c[op], %%eax\n"
-		  "mov %[arg0], %%"stringifx(argreg0)" \n\
-		   mov %[arg2], %%"stringifx(argreg2)" \n\
+		  "mov %[arg0], %%"stringifx(argreg0)" \n"
+		  /*     arg1   is initialized above!  */
+		  "mov %[arg2], %%"stringifx(argreg2)" \n\
 		   mov %[arg3], %%"stringifx(argreg3)" \n\
 		   mov %[arg4], %%"stringifx(argreg4)"  \n"
-		   /* begin PERFORM_SYSCALL expansion */
+		  "add %%"stringifx(argreg1)", %%ebp\n"  /* Swizzle bp to point into the child's stack, and pre-emptively... */
+		  "sub %%esp, %%ebp\n"  /* set this as the BP. Compiler-generated code later in this function
+		                           might need to reference the BP. In the non-child case we restore the
+		                           parent BP that we pushed above. */
 		   stringifx(SYSCALL_INSTR) "\n"
 		   /* end PERFORM_SYSCALL expansion */
 		   /* Immediately test: did our stack actually get zapped? */
@@ -840,10 +845,12 @@ do_clone3(struct generic_syscall *gsp)
 	fixup_sigframe_for_return(gsp->saved_context, ret_op,
 		trap_len(&gsp->saved_context->uc.uc_mcontext),
 		/* new_sp: we have a new sp only if we're the child.
-		 * We can detect that using ret_op i.e. clone3()'s return value. */
+		 * We can detect that using ret_op i.e. clone3()'s return value.
+		 * XXX: it is possible to clone without replacing the stack, which
+		 * is not handled correctly here. */
 		(ret_op == 0) ? (void*) (
-		           (((struct clone_args *) gsp->args[0])->stack)
-		         + (((struct clone_args *) gsp->args[0])->stack_size)
+		           (uintptr_t)(((struct clone_args *) gsp->args[0])->stack)
+		         + (uintptr_t)(((struct clone_args *) gsp->args[0])->stack_size)
 		): NULL);
 	return ret_op;
 }
