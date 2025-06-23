@@ -12,6 +12,49 @@
 #include "systrap.h"
 #include <xed/xed-interface.h>
 
+/* How do we handle the vDSO?
+ *
+ * On 32-bit x86, many syscalls are funnelled through a single 'sysenter'
+ * or 'syscall' instruction, depending on microarch, within __kernel_vsyscall.
+ *
+ * To see those syscalls, we need to trap this.
+ *
+ * However, 
+ * It is magic in the sense of mapping some kernel memory. So if we take
+ * a copy, it will break the link.
+ * On my system, the 32-bit vDSO right now (20250620) has phdrs like this:
+
+Program Header:
+    LOAD off 0x0000 vaddr 0x0000 align 2**12 filesz 0x128c memsz 0x128c flags r-x
+ DYNAMIC off 0x031c vaddr 0x031c align 2**2  filesz 0x0090 memsz 0x0090 flags r--
+    NOTE off 0x03b8 vaddr 0x03b8 align 2**2  filesz 0x0060 memsz 0x0060 flags r--
+EH_FRAME off 0x0418 vaddr 0x0418 align 2**2  filesz 0x0024 memsz 0x0024 flags r--
+
+ * ... i.e. the actual content fits in a single page. Our approach is to copy
+ * the text to our new 'fake' vDSO but leave references to the *original* data.
+ *
+ * It is clear from a GitHub issue I raise when I first wrote this code...
+ * https://github.com/stephenrkell/libsystrap/issues/15
+ * ... that even then-me did not understand what it was doing. Certainly it did
+ * let us trap the vDSO-using syscalls, which was good.
+ *
+ * Since global data references are not PC-relative on i386, my guess is that
+ * the kernel text is pre-relocated for the chosen vDSO load address. In that case,
+ * the instructions are PC-relative and therefore relocatable, but will naturally
+ * referencing the original data. I suspect that is why it works.
+ *
+ * As a preload library we have particular problems because the dynamic linker
+ * has already bound to the real vDSO.
+ * XXX: can we just insert a trap in the real vDSO? No, it's not writable.
+ * XXX: can we just map a trap-modified page on top of the real vDSO? Maybe, but
+ * that will break the magic link to the magic data.
+ * XXX: can we redirect references? If we are an audit library, yes. Otherwse... hmm?
+ *
+ * TODO: get a look at the code that links to the vDSO? It does not seem
+ * to be normal linkage, because none of the UND symbols in libc.so.6 are ones
+ * that the vDSO defines.
+ */
+
 extern _Bool xed_done_init;
 static void copy_text_section(unsigned char *dest, const unsigned char *src, size_t sz,
 	ElfW(Shdr) *the_shdr, ElfW(Shdr) *all_shdrs, unsigned shentsz)
@@ -214,12 +257,18 @@ void create_fake_vdso(ElfW(auxv_t) *auxv)
 				break;
 			case AT_SYSINFO_EHDR: {
 				saw_at_sysinfo_ehdr_entry = p;
+				mapping_sz = count_vdso_size((void*) p->a_un.a_val);
+#define HAVE_MEMFD_CREATE 1 /* FIXME: configure-time check */
+#if HAVE_MEMFD_CREATE
+				int fd = memfd_create("fake-vdso", MFD_CLOEXEC);
+				if (fd == -1) abort();
+#else
 				// make a temporary file
 				char fname[] = "/tmp/tmp.XXXXXX";
 				int fd = mkstemp(fname);
 				if (fd == -1) abort();
 				unlink(fname);
-				mapping_sz = count_vdso_size((void*) p->a_un.a_val);
+#endif
 				int ret = ftruncate(fd, mapping_sz);
 				if (ret == 0)
 				{
@@ -257,5 +306,41 @@ void create_fake_vdso(ElfW(auxv_t) *auxv)
 		// swap in the fake vdso
 		saw_at_sysinfo_ehdr_entry->a_un.a_val = (uintptr_t) mapping;
 		assert(ret == 0);
+	}
+	if (!fake_sysinfo && saw_at_sysinfo_ehdr_entry)
+	{
+		/* Let's try to recover fake_sysinfo from the vdso's symtab. */
+		ElfW(Ehdr) *ehdr = (ElfW(Ehdr) *) orig_vdso_ehdr_address;
+		uintptr_t orig_load_addr = orig_vdso_ehdr_address;
+		uintptr_t fake_load_addr = (uintptr_t) mapping;
+		for (ElfW(Phdr) *phdr0 = (ElfW(Phdr) *)((char*) ehdr + ehdr->e_phoff),
+		                *phdr = phdr0;
+		     phdr != phdr0 + ehdr->e_phnum;
+		     phdr = (ElfW(Phdr) *)(((char*) phdr) + ehdr->e_phentsize))
+		{
+			if (phdr->p_type == PT_DYNAMIC)
+			{
+				ElfW(Dyn) *d = (ElfW(Dyn) *)(orig_load_addr + phdr->p_vaddr);
+				/* Did we get a good dyn? Sanity check by counting its entries. */
+				unsigned n = 0;
+				for (ElfW(Dyn) *i = d; i->d_tag != DT_NULL; ++i, ++n);
+				assert(n > 0);
+				assert(n < phdr->p_memsz / sizeof (ElfW(Dyn)));
+				assert(n >= 0.5 * phdr->p_memsz / sizeof (ElfW(Dyn)));
+				/* OK, seems sane. */
+				ElfW(Sym) *symtab = get_dynsym_from_dyn(d, orig_load_addr);
+				unsigned char *strtab = get_dynstr_from_dyn(d, orig_load_addr);
+				ElfW(Word) *sysv_hash = get_sysv_hash_from_dyn(d, orig_load_addr);
+				ElfW(Word) *gnu_hash = get_gnu_hash_from_dyn(d, orig_load_addr);
+				ElfW(Sym) *vsyscall_sym = NULL;
+				if (gnu_hash) vsyscall_sym = gnu_hash_lookup(gnu_hash, symtab, strtab,
+						"__kernel_vsyscall");
+				else if (sysv_hash) vsyscall_sym = hash_lookup(sysv_hash, symtab, strtab,
+						"__kernel_vsyscall");
+				// use the new fake load addr to resolve the symbol in the fake space
+				if (vsyscall_sym) fake_sysinfo = sym_to_addr_given_base(fake_load_addr,
+						vsyscall_sym);
+			}
+		}
 	}
 }
