@@ -7,6 +7,7 @@ jobs:
       - run:
           name: Install dependencies
           command: |
+            dpkg --add-architecture i386
             apt update
             DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt install -y \
               libelf-dev libdw-dev binutils-dev \
@@ -14,7 +15,7 @@ jobs:
               g++ python3 python \
               make git gawk gdb wget \
               libunwind-dev libc6-dev-i386 zlib1g-dev libc6-dbg \
-              linux-libc-dev-i386-cross \
+              linux-libc-dev-i386-cross libunwind-dev:i386 \
               gettext-base # for envsubst
       - checkout
       - run:
