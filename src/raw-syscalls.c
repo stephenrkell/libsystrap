@@ -111,7 +111,6 @@ int __attribute__((noinline)) raw_rt_sigaction(int signum, const struct __asm_si
 	return do_syscall4(&gs);
 }
 
-#if 0
 #ifdef __i386__
 int __attribute__((noinline)) raw_sigaction(int signum, const struct __asm_sigaction *act,
 		     struct __asm_sigaction *oldact)
@@ -120,7 +119,6 @@ int __attribute__((noinline)) raw_sigaction(int signum, const struct __asm_sigac
 	struct generic_syscall gs = MKGS4(SYS_sigaction, signum, act, oldact, sizeof (__asm_sigset_t));
 	return do_syscall4(&gs);
 }
-#endif
 #endif
 
 ssize_t __attribute__((noinline)) raw_write(int fd, const void *buf, size_t count)
