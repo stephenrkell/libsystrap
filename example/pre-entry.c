@@ -43,9 +43,12 @@ void __wrap_enter(void *entry_point)
 	install_sigill_handler();
 	// FIXME: should go in the real entry point?
 #if defined(__i386__)
-	unsigned char *tls;
-	__asm__("mov %%gs:0x0,%0" : "=r"(tls));
-	if (fake_sysinfo) *(void**)(tls+16) = fake_sysinfo;
+	if (fake_sysinfo)
+	{
+		unsigned char *tls;
+		__asm__("mov %%gs:0x0,%0" : "=r"(tls));
+		*(void**)(tls+16) = fake_sysinfo; // FIXME: need a reference for this please
+	}
 #endif
 	/* Install replacements.
 	 * Why not just initialize the replaced_syscalls array itself?
@@ -73,6 +76,13 @@ int __wrap_load_one_phdr(unsigned long base_addr, int fd, unsigned long vaddr, u
 		memsz, filesz, read, write, exec);
 	if (ret == 0 && exec)
 	{
+		/* XXX: can't remember what I was thinking when I wrote this code or the comment
+		 * below, but I assume it was something about how we instrument the inferior
+		 * ld.so. Here we seem to be intercepting the action, in donald, of loading one
+		 * phdr. Whereas "running the usual function" means trap_all_mappings, above,
+		 * i.e. enumerating all mappings in one big go using librunt, rather than
+		 * trapping them as we go along, which we could do from this function.
+		 */
 		/* HMM. Maybe don't do this, just make librunt work and run the usual function?
 		 * Problem is that the parts of librunt that derive from liballocs assume that
 		 * a libdl-style runtime is available. Ideally it would not do so, so that even
