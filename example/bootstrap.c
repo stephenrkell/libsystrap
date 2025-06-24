@@ -643,3 +643,45 @@ REPLACE(munmap)
  *
  * Try reading what Rust's signal_hook does.
  */
+
+struct rt_sigaction;
+int rt_sigaction(int, const struct rt_sigaction *, struct rt_sigaction *);
+#define rt_sigaction_ret_t int
+#define rt_sigaction_args(v, sep) \
+    v(int, signum, 0) sep  v(const struct rt_sigaction *, act, 1) sep \
+    v(struct rt_sigaction *, oldact, 2)
+bootstrap_proto(rt_sigaction)
+{
+	if (signum == SIGILL)
+	{
+		debug_printf(0, "Blocked program's attempt to install a SIGILL handler\n");
+		return -1;
+	}
+#ifdef __x86_64__
+/* There is no rt_sigaction wrapper, so... maybe we should raw_syscall it? */
+	return /*rt_*/sigaction(signum, act, oldact);
+#else
+	return sigaction(signum, act, oldact);
+
+#endif
+}
+REPLACE(rt_sigaction)
+
+#if defined(__i386__)
+struct sigaction;
+int sigaction(int, const struct sigaction *, struct sigaction *);
+#define sigaction_ret_t int
+#define sigaction_args(v, sep) \
+    v(int, signum, 0) sep  v(const struct sigaction *, act, 1) sep \
+    v(struct sigaction *, oldact, 2)
+bootstrap_proto(sigaction)
+{
+	if (signum == SIGILL)
+	{
+		debug_printf(0, "Blocked program's attempt to install a SIGILL handler\n");
+		return -1;
+	}
+	return sigaction(signum, act, oldact);
+}
+REPLACE(sigaction)
+#endif
