@@ -44,7 +44,9 @@ jobs:
             dpkg --add-architecture i386
             apt update
             apt install -y ca-certificates make build-essential g++ autoconf automake libtool \
-              libelf-dev python3 python git gawk python3-distutils libunwind-dev libunwind-dev:i386 gettext-base
+              libelf-dev python3 python git gawk python3-distutils libunwind-dev libunwind-dev:i386 gettext-base \
+              linux-libc-dev-i386-cross
+
       - attach_workspace:
           at: /root
       - run:
