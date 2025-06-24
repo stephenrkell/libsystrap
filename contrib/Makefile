@@ -92,6 +92,7 @@ done
 clean::
 	$(MAKE) -C musl/build-$(arch) clean
 	rm -f musl/build-$(arch)/{Makefile,config.mak}
+	rm -rf host-includes-*
 
 # musl always uses a 64-bit off_t.
 # This matters both for our client code in the main repo
