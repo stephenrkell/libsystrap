@@ -196,16 +196,59 @@ static void startup(int argc, char **argv, char **environ)
 	trap_all_mappings(); // XXX: use this to trap the fake vdso too; have just "copy_vdso(...)"?
 	install_sigill_handler();
 #if defined(__i386__)
-	/* This only runs if our auxv contains AT_SYSINFO, *not* AT_SYSINFO_EHDR.
-	 * The former is deprecated. From vdso(7): "it is used for locating the
-	 * vsyscall entry point". But there is a TLS slot reserved for it? We make
-	 * this point to fake_sysinfo i.e. "the same offset but within the fake
-	 * vDSO", if and only if the original auxv contained this entry. */
+	/* There is a TLS slot reserved for AT_SYSINFO a.k.a. the __kernel_vsyscall
+	 * entry point in the vdso. Assuming we got AT_SYSINFO or could find the
+	 * entry point by symname, fake the TLS entry. Note that on each trap we
+	 * will swap the fake and real TLS slots, so that our own syscalls use the
+	 * real one. See handle_sigill(). What about the return? I think we just let
+	 * sigreturn do the restore. */
 	if (fake_sysinfo)
 	{
 		unsigned char *tls;
 		__asm__("mov %%gs:0x0,%0" : "=r"(tls));
 		*(void**)(tls+16) = fake_sysinfo; // FIXME: need a reference for this please
+		/* musl has in arch/i386/syscall_arch.h:
+		
+		#if SYSCALL_NO_TLS
+		#define SYSCALL_INSNS "int $128"
+		#else
+		#define SYSCALL_INSNS "call *%%gs:16"
+		#endif
+
+		and pthread_impl.h:
+
+			struct pthread {
+				// Part 1 -- these fields may be external or
+				// internal (accessed via asm) ABI. Do not change. 
+				struct pthread *self;
+				uintptr_t *dtv;
+				struct pthread *prev, *next; // non-ABI 
+				uintptr_t sysinfo;
+				uintptr_t canary, canary2;
+			...
+
+		which on 32-bit x86 does indeed leave sysinfo at offset 16.
+
+		Other implementations indeed differ on the 'non-ABI' parts only,
+		e.g. glibc/NPTL has:
+
+			typedef struct
+			{
+			  void *tcb;            // Pointer to the TCB.  Not necessarily the
+                        			// thread descriptor used by libpthread.
+			  dtv_t *dtv;
+			  void *self;           // Pointer to the thread descriptor.
+			  int multiple_threads;
+			  int gscope_flag;
+			  uintptr_t sysinfo;
+			  uintptr_t stack_guard;
+			  uintptr_t pointer_guard;
+			  ...
+
+		XXX: see if I can dig up the LKML post where vDSO / linux-gate was
+		first introduced, in case that helps. And/or prior to NPTL, what was
+		the ABI in the predecessor thread library? If it even had TLS...
+ */
 	}
 #endif
 }
