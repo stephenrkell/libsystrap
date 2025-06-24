@@ -40,7 +40,13 @@ void _start(void)
 #else
 #error "Unrecognised architecture."
 #endif
-	if (ret != 0) raw_exit(128 + SIGABRT);
+	if (ret != 0)
+	{
+		static const char msg[] = "sigaction() failed!\n";
+		raw_write(2, msg, sizeof msg);
+		raw_exit(ret);
+	}
+
 
 	int mypid = raw_getpid();
 	raw_kill(mypid, SIGUSR1);
