@@ -59,6 +59,7 @@ void __wrap_enter(void *entry_point)
 	for (unsigned n = 0; n < nreplacements; ++n)
 	{
 		uintptr_t syscall_n = (&__start___replaced_syscalls)[2*n];
+		assert(syscall_n < SYSCALL_MAX);
 		void (*replacement)(struct generic_syscall *s, post_handler *post)
 		 = (void*)(&__start___replaced_syscalls)[2*n + 1];
 		replaced_syscalls[syscall_n] = replacement;
