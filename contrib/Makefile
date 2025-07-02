@@ -7,6 +7,8 @@ $(info Building for kernel: $(KERNEL))
 .PHONY: default clean
 default: build.stamp config.mk $(CONTRIB)/env.sh
 
+# our own config.mk may need to expand 'arch', so define it nice and early
+arch := $(shell uname -m)
 include config.mk
 
 ifeq ($(KERNEL),Linux)
@@ -14,6 +16,7 @@ build.stamp: build-xed build-musl build-librunt
 else
 ifeq ($(KERNEL),FreeBSD)
 build.stamp: build-udis86
+$(error FIXME: make xed build on FreeBSD)
 endif
 endif
 	touch $@
@@ -24,156 +27,155 @@ clean::
 # don't remove intermediates
 .SECONDARY:
 
-# Things we may need to build
-# libudis86
-# opdis
-# binutils: libiberty, libopcodes, bfd  (for opdis)
-# zlib  (for bfd)
-# eglibc or musl
-# xed
-# mbuild (for xed)
-# librunt
-OPDIS_REPO := https://github.com/mkfs/opdis.git
-UDIS86_REPO := https://github.com/vmt/udis86.git
-ZLIB_DIR := zlib-1.2.8
-ZLIB_TAR := zlib-1.2.8.tar.gz
-# ZLIB_TAR_URL := http://zlib.net/zlib-1.2.8.tar.gz
-# zlib.net removes non-current releases, so use Debian ftp
-ZLIB_TAR_URL := http://cdn-fastly.deb.debian.org/debian/pool/main/z/zlib/zlib_1.2.8.dfsg.orig.tar.gz
-BINUTILS_DIR := binutils-2.26
-BINUTILS_TAR := binutils-2.26.tar.bz2
-BINUTILS_TAR_URL := ftp://ftp.gnu.org/gnu/binutils/binutils-2.26.tar.bz2
 MBUILD_DIR := mbuild
-WGET := wget
 
 # ----------------------------we need some libc or other, to be self-contained
 
-$(EGLIBC_TAR):
-	$(WGET) http://downloads.yoctoproject.org/releases/eglibc/$(EGLIBC_TAR)
-$(EGLIBC_DIR)/libc/configure: $(EGLIBC_TAR)
-	tar -k -xvjf "$<"
-	touch "$@"
-# eglibc is VERY picky about its compiler flags
-$(EGLIBC_DIR)/libc/build/Makefile: $(EGLIBC_DIR)/libc/configure | install-binutils
-	mkdir -p $(EGLIBC_DIR)/libc/build
-	cd $(EGLIBC_DIR)/libc/build && CFLAGS="-g -O1 -fPIC -DPIC" CPPFLAGS="" ../configure --prefix=/usr --with-binutils=$(CONTRIB)/bin # --with-sysroot=$(CONTRIB)
-.PHONY: build-eglibc
-build-eglibc: $(EGLIBC_DIR)/libc/build/Makefile
-	CFLAGS="-g -O1 -fPIC -DPIC" CPPFLAGS="" $(MAKE) -C $(EGLIBC_DIR)/libc/build
-
+# TODO: multiarch musl build. What do we need to do?
+# Possibly simplest:
+# (1) always build in a build dir, not default/top-level
+# (2) name the build dir after the arch
+# (3) on x86-64, special-case an extra -m32 build.
+# We will need to change LIBC_A because there can be more than one of them...
+#    LIBC_A_PATTERN? i.e. we sub in the arch, although it can be a no-op on other arches
 .PHONY: build-musl
-build-musl: musl/libc/libc.a host-includes
-musl/config.mak:
-	cd musl && CFLAGS=-g ./configure
+build-musl: musl/build-$(arch)/lib/libc.a host-includes-$(arch)
+musl/build-$(arch)/config.mak:
+	mkdir -p $(dir $@) && cd $(dir $@) && CFLAGS=-g ../configure
+musl/%/lib/libc.a: musl/%/config.mak
+	$(MAKE) -C musl/$*
 
-musl/libc/libc.a: musl/config.mak
-	$(MAKE) -C musl
+# on x86-64, also build the -m32 version
+# XXX: This is still failing, because we are trying too hard
+# to coerce musl to do the -m32 build... e.g. we are still pulling in
+# 64-bit libgcc, for some reason, and the RANLIB hack does not work (i386-ranlib not found).
+# Does musl support an -m32 build? as opposed to a fully general cross-compilation?
+ifeq ($(arch),x86_64)
+build-musl: musl/build-i386/lib/libc.a host-includes-i386
+# our CC is probed by the shell snippet, so ensure it's exported... ditto AR, RANLIB
+AR ?= ar
+AS ?= as
+export CC AR
+# at some point I needed this compiler flag for musl...
+# -DSYS_socketcall=__NR_socketcall
+# ... but no longer
+musl/build-i386/config.mak:
+	mkdir -p $(dir $@) && cd $(dir $@) && \
+	RANLIB="$${AR} -s" \
+	AR="$${AR}" \
+	LIBCC="$$( $${CC} -m32 -print-libgcc-file-name )" \
+	CC="$${CC} -m32" \
+	AS="$${AS} -m32" \
+	LDFLAGS="-Wl,-melf_i386" \
+	CFLAGS="$${CFLAGS} -g" ../configure --target=i386
+musl/build-i386/lib/libc.a: musl/build-i386/config.mak
+	$(MAKE) -C musl/build-i386
+clean::
+	$(MAKE) -C musl/build-i386 clean
+	rm -f musl/build-i386/{Makefile,config.mak}
+endif
 
-host-includes:
-	mkdir -p $@ && ln -sf -t $@ /usr/include/linux /usr/include/asm-generic /usr/include/$(shell gcc -print-multiarch)/asm
+# HACK: we rewrite 386 to 686... this should not be necessary, might be Debian-specific?
+# HACK: on my Debian system I have /usr/i686-linux-gnu/include but /usr/include/x86_64-linux-gnu
+# and no /usr/x86_64-linux-gnu/include... this is very unsatisfying.
+host-includes-%:
+	triple="$$( if [ "$*" = "i386" ] && [ "$$(uname -m)" = "x86_64" ]; then gcc -m32 -print-multiarch; else gcc -print-multiarch; fi )"; \
+	mkdir -p $@ && for d in /usr/include/linux \
+ /usr/include/asm-generic \
+ /usr/$$( echo "$${triple}" | sed 's/386/686/')/include/asm; do \
+     echo "Expecting to use system include dir $${d}, so symlinking to it"; \
+     { test -e "$$d" && ln -s -t $@ "$$d"; } || \
+      { d="$$(echo "$$d" | sed "s^/usr/$${triple}/include^/usr/include/$${triple}^" )"; test -e "$$d" \
+       && echo "Fell back to $$d" && ln -s -t $@ "$$d"; }  ; \
+done
 
 clean::
-	$(MAKE) -C musl clean
+	$(MAKE) -C musl/build-$(arch) clean
+	rm -f musl/build-$(arch)/{Makefile,config.mak}
+	rm -rf host-includes-*
+
+# musl always uses a 64-bit off_t.
+# This matters both for our client code in the main repo
+# *and* for the things we build here that need to link with musl, namely
+# librunt and xed.
+MUSL_ABI_CFLAGS := -D_FILE_OFFSET_BITS=64
 
 ifeq ($(KERNEL),Linux)
-CONFIG_MK += \nLIBC_A := $(realpath $(dir $(THIS_MAKEFILE)))/musl/lib/libc.a\n
-CONFIG_MK += \nLIBC_CFLAGS := -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/arch/$(shell gcc -print-multiarch | sed 's/-.*//') -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/arch/generic -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/obj/include -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/include -I$(realpath $(dir $(THIS_MAKEFILE)))/host-includes \n
+CONFIG_MK += \nLIBC_A_PATTERN := $(realpath $(dir $(THIS_MAKEFILE)))/musl/build-$${arch}/lib/libc.a\n
+CONFIG_MK += \nLIBC_CFLAGS_PATTERN := -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/arch/$${arch} -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/arch/generic -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/build-$${arch}/obj/include -I$(realpath $(dir $(THIS_MAKEFILE)))/musl/include -I$(realpath $(dir $(THIS_MAKEFILE)))/host-includes-$${arch} \n
+# musl always uses a 64-bit off_t
+CONFIG_MK += \nLIBC_CFLAGS_PATTERN += $(MUSL_ABI_CFLAGS)\n
 else
 ifeq ($(KERNEL),FreeBSD) # FIXME: check this
-CONFIG_MK += \nLIBC_A := /usr/lib/libc_pic.a\n
-CONFIG_MK += \nLIBC_CFLAGS :=
+CONFIG_MK += \nLIBC_A_PATTERN := /usr/lib/libc_pic.a\n
+CONFIG_MK += \nLIBC_CFLAGS_PATTERN :=
 endif
 endif
-varlist += LIBC_A LIBC_CFLAGS
+varlist += LIBC_A_PATTERN LIBC_CFLAGS_PATTERN
 
-# ----------------------------we need some instruction decoder or other
-
-$(ZLIB_TAR):
-	$(WGET) -O "$@" $(ZLIB_TAR_URL)
-$(ZLIB_DIR)/configure: $(ZLIB_TAR)
-	tar -k -xvzf "$<"
-	touch "$@"
-$(ZLIB_DIR)/Makefile: $(ZLIB_DIR)/configure
-	cd $(ZLIB_DIR) && CFLAGS="-fPIC -DPIC" ./configure
-.PHONY: build-zlib
-build-zlib: $(ZLIB_DIR)/Makefile
-	$(MAKE) -C $(ZLIB_DIR)
-
-opdis/bootstrap:
-	git clone $(OPDIS_REPO)
-opdis/configure: opdis/bootstrap
-	cd opdis && ./bootstrap
-opdis-build/Makefile: opdis/configure | build-binutils
-	mkdir -p opdis-build
-	cd opdis-build && CPPFLAGS="-I$(CONTRIB)/binutils-2.26/include -I$(CONTRIB)/binutils-build/bfd" CFLAGS="-fPIC -g -I$(CONTRIB)/binutils-2.26/include -I$(CONTRIB)/binutils-build/bfd" LDFLAGS="-L$(CONTRIB)/binutils-build/libiberty -L$(CONTRIB)/binutils-build/bfd -L$(CONTRIB)/binutils-build/intl -L$(CONTRIB)/binutils-build/opcodes" ../opdis/configure
-.PHONY: build-opdis
-build-opdis: opdis-build/Makefile
-	$(MAKE) -C opdis-build
-
-.PHONY: build-udis86
-build-udis86: udis86/Makefile
-	$(MAKE) -C udis86
-udis86/autogen.sh:
-	git clone $(UDIS86_REPO)
-udis86/configure: udis86/autogen.sh
-	cd udis86 && ./autogen.sh
-udis86/Makefile: udis86/configure
-	cd udis86 && CFLAGS=-fPIC ./configure --enable-shared=no --enable-static=yes
-
-$(BINUTILS_TAR):
-	$(WGET) $(BINUTILS_TAR_URL)
-$(BINUTILS_DIR)/configure: $(BINUTILS_TAR)
-	tar -k -xjf "$(BINUTILS_TAR)"
-	touch "$@"
-
-#binutils-build/Makefile: $(BINUTILS_DIR)/configure
-#	mkdir -p binutils-build
-#	cd binutils-build && CFLAGS="-g -O2 -fPIC -DPIC" ../$(BINUTILS_DIR)/configure --prefix=$(CONTRIB) --enable-ld --disable-gold --disable-multilib --disable-bootstrap --without-x --without-system-zlib
-
-# NOT -DPIC because that breaks libintl
-# and don't bother to build the docs
-# yes, MAKEINFO=true actually accomplishes that ¬_¬
-binutils-build/Makefile: $(BINUTILS_DIR)/configure
-	mkdir -p binutils-build
-	cd binutils-build && CFLAGS="-g -O2 -fPIC" ../$(BINUTILS_DIR)/$*/configure --prefix=$(CONTRIB) --without-included-gettext --disable-bootstrap --enable-ld --disable-gold --without-x --with-sysroot=$(CONTRIB)
-
-# gah binutils
-.PHONY: build-binutils
-build-binutils: binutils-build/Makefile
-	$(MAKE) -C binutils-build MAKEINFO=/bin/true
-
-.PHONY: install-binutils
-install-binutils: build-binutils
-	$(MAKE) -C binutils-build install MAKEINFO=/bin/true
+# Remember that we include CONFIG_MK ourselves, so we also get this var to use.
+# BUT the quoting isn't quite right! LIBC_CFLAGS_PATTERN is supposed to be
+# a pattern, so the ${arch} part should not be expanded. But currently it
+# is. Not sure what to do about this... use a different pattern-expander tool/syntax?
+# $(info LIBC_CFLAGS_PATTERN is $(LIBC_CFLAGS_PATTERN))
 
 # ----------------------------xed
 
 .PHONY: build-xed
-build-xed: $(MBUILD_DIR)
-	cd xed && ./mfile.py install --install-dir=build --no-encoder --extra-flags='-fPIC -ffreestanding'
+build-xed: xed/build-$(arch)/lib/libxed.a
+xed/build-$(arch)/lib/libxed.a: $(MBUILD_DIR)
+	cd xed && ./mfile.py install --build-dir=obj-$(arch) --install-dir=build-$(arch) --no-encoder \
+	  --extra-flags='-fPIC -ffreestanding $(MUSL_ABI_CFLAGS)'
+ifeq ($(arch),x86_64)
+build-xed: xed/build-i386/lib/libxed.a
+xed/build-i386/lib/libxed.a: $(MBUILD_DIR)
+	cd xed && ./mfile.py install --build-dir=obj-i386 --install-dir=build-i386 --no-encoder \
+	  --extra-flags='-m32 -fPIC -ffreestanding $(MUSL_ABI_CFLAGS)' --extra-linkflags=-Wl,-melf_i386
+endif
 
 clean::
-	cd xed && ./mfile.py clean || true
+	cd xed && rm -rf obj-* build-* && ./mfile.py clean || true
 
-CONFIG_MK +=\nXED_DIR ?= $(CONTRIB)/xed/build\n
-CONFIG_MK +=\nXED_A ?= $(CONTRIB)/xed/build/lib/libxed.a\n
-varlist += XED_DIR XED_A
+CONFIG_MK +=\nXED_DIR ?= $(CONTRIB)/xed\n
+varlist += XED_DIR
 
 # ----------------------------librunt
 
+ifeq ($(DEBUG),)
+frag := opt
+else
+frag := debug
+endif
 .PHONY: build-librunt
-build-librunt: librunt/lib/librunt_preload.a
-librunt/lib/librunt_preload.a: librunt/Makefile
-	cd librunt && $(MAKE)
+build-librunt: librunt/build/$(frag)-$(arch)/librunt_preload.a
+librunt/build/$(frag)-%/librunt_preload.a: librunt/Makefile
+	mkdir -p $(dir $@) && cd $(dir $@) && $(LIBRUNT_MAKE_PREFIX) $(MAKE) -f ../../src/Makefile
 # librunt is not yet autotools'd
 #librunt/Makefile: librunt/configure
 #	cd librunt && ./configure
 #librunt/configure: librunt/configure.ac
 #	cd librunt && ./autogen.sh
 
+# also build 32-bit version on x86_64
+ifeq ($(arch),x86_64)
+build-librunt: librunt/build/$(frag)-i386/librunt_preload.a
+librunt/build/$(frag)-i386/librunt_preload.a: LIBRUNT_MAKE_PREFIX := CFLAGS="$(CFLAGS) $(MUSL_ABI_CFLAGS)" CC="$(CC) -m32" ASFLAGS="-m32" LDFLAGS="-Wl,-melf_i386"
+endif
+
+CONFIG_MK +=\nLIBRUNT_CFLAGS := $(LIBRUNT_CFLAGS) -I$(CONTRIB)/librunt/include\n
+CONFIG_MK +=\nLIBRUNT_LDFLAGS := $(LIBRUNT_LDFLAGS) -L$(CONTRIB)/librunt/build/$(frag)-$(arch) \
+ -Wl,-rpath,$(CONTRIB)/librunt/build/$(frag)-$(arch)
+# How to plumb through the 32-bit version's flags? Just add both -L dirs and
+# let the linker figure it out.
+ifeq ($(arch),x86_64)
+CONFIG_MK +=\nLIBRUNT_LDFLAGS += -L$(CONTRIB)/librunt/build/$(frag)-i386 \
+ -Wl,-rpath,$(CONTRIB)/librunt/build/$(frag)-i386
+endif
+
+clean::
+	cd librunt && rm -rf build
+
 CONFIG_MK +=\nLIBRUNT_DIR ?= $(realpath $(CONTRIB)/librunt)\n
-CONFIG_MK +=\nLIBRUNT_CFLAGS ?= -I$(CONTRIB)/librunt/include\n
-CONFIG_MK +=\nLIBRUNT_LDFLAGS ?= -L$(CONTRIB)/librunt/lib -Wl,-rpath,$(CONTRIB)/librunt/lib
 # non-autoconf'd stuff (liballocs, libsystrap) may expect LIBRUNT_DIR
 varlist += LIBRUNT_CFLAGS LIBRUNT_LDFLAGS LIBRUNT_DIR
 

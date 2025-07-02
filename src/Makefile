@@ -1,20 +1,50 @@
+THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
+srcroot := $(realpath $(dir $(THIS_MAKEFILE)))/..
+srcdir := $(srcroot)/src
+
+# run-from-srcroot case:
+# if the current dir is the source dir, change to the output directory
+# and re-invoke this makefile from there.
+# If we don't know which output directory we want, we want the production one.
+ifeq ($(realpath .),$(realpath $(srcdir)))
+ifeq ($(MAKECMDGOALS),)
+MAKECMDGOALS := default
+endif
+# FIXME: before we can do a multiarch build, we need multiarch version
+# of our dependencies: at least xed and librunt and musl; others?
+.PHONY: $(MAKECMDGOALS)
+$(MAKECMDGOALS):
+	for arch in `m=$$(uname -m); case "$$m" in (x86_64) echo x86_64 i386 ;; (*) echo "$$m" ;; esac`; do \
+             mkdir -p $(srcroot)/build/$${arch} && \
+             $(MAKE) -C $(srcroot)/build/$${arch} -f $(srcdir)/Makefile $(MAKECMDGOALS); \
+        done
+else
+# the rest: we take our arch from the current dir
+arch := $(notdir $(realpath .))
+vpath %.c $(srcdir)
+vpath %.s $(srcdir)
+
+# don't delete intermediates
+.SECONDARY:
+
 .PHONY: default
 default: libsystrap.a
 
-THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
-srcroot := $(realpath $(dir $(THIS_MAKEFILE)))/..
-
 CONTRIB := $(srcroot)/contrib
-CONFIG ?= $(CONTRIB)/config.mk
-
 $(CONTRIB)/config.mk:
 	$(MAKE) -C $(CONTRIB)
 
-ifneq ($(MAKECMDGOALS),clean)
-include $(CONFIG)
+# includes a config from somewhere, probably contrib/
+include $(srcroot)/common.mk
+
+# if we are doing a 32-on-64 build, add -m32
+ifeq ($(arch) $(shell uname -m),i386 x86_64)
+CFLAGS += -m32
+ASFLAGS += -m32
+LDFLAGS += -m32 -Wl,-melf_i386
 endif
 
-# we link with the librunt archive
+# we are to be linked with the librunt archive
 CFLAGS += -DIN_LIBRUNT_DSO
 # musl has 'int' for line number, unlike glibc... librunt can hack around for us
 # FIXME: should be a configure-time thing perhaps? in which repo?
@@ -38,41 +68,26 @@ else
 #instr.o: CFLAGS += -DUSE_OPDIS
 endif
 
-# LIBC_CFLAGS is now expected to be self-sufficient
-# e.g. using musl we should be able to build without pulling in ambient glibc stuff
+$(info LIBC_CFLAGS is $(LIBC_CFLAGS))
 CFLAGS += -nostdinc $(LIBC_CFLAGS)
 
-C_SRC := $(wildcard *.c)
-CC_SRC := $(wildcard *.cc)
+C_SRC := $(wildcard $(srcdir)/*.c)
+$(info C_SRC is $(C_SRC))
+C_DEPS := $(patsubst %.c,%.d,$(notdir $(C_SRC)))
+$(info C_DEPS is $(C_DEPS))
+DEPS := $(C_DEPS)
+OBJS := $(patsubst %.c,%.o,$(notdir $(C_SRC)))
 
-C_DEPS := $(patsubst %.c,.%.d,$(C_SRC))
-CC_DEPS := $(patsubst %.cc,.%.d,$(CC_SRC))
-DEPS := $(C_DEPS) $(CC_DEPS)
-OBJS := $(patsubst %.c,%.o,$(C_SRC)) $(patsubst %.cc,%.o,$(CC_SRC))
-
-$(CC_DEPS): .%.d: %.cc
-	$(CXX) -MM $(CXXFLAGS) $+ > "$@" || rm -f "$@"
-$(C_DEPS): .%.d: %.c
+$(C_DEPS): %.d: %.c
 	$(CC) -MM $(CFLAGS) $+ > "$@" || rm -f "$@"
 
 ifneq ($(MAKECMDGOALS),clean)
 -include $(DEPS)
 endif
 
-ifneq ($(realpath $(UDIS86_DIR)),)
-CFLAGS += -I$(UDIS86_DIR)
-endif
-ifneq ($(realpath $(OPDIS_DIR)),)
-CFLAGS += -I$(OPDIS_DIR)
-endif
-ifneq ($(realpath $(LIBOPCODES_DIR)),)
-CFLAGS += -I$(LIBOPCODES_DIR)/include
-endif
-ifneq ($(realpath $(BFD_DIR)),)
-CFLAGS += -I$(BFD_DIR)
-endif
+$(info XED_DIR is $(XED_DIR))
 ifneq ($(realpath $(XED_DIR)),)
-CFLAGS += -I$(XED_DIR)/include
+CFLAGS += -I$(XED_DIR)/include/public -I$(XED_DIR)/build-$(arch)/include/xed
 endif
 ifneq ($(realpath $(LIBX86EMULATE_DIR)),)
 CFLAGS += -I$(LIBX86EMULATE_DIR)/src
@@ -81,33 +96,33 @@ endif
 # always add librunt
 CFLAGS += -I$(LIBRUNT_DIR)/include
 
-CXXFLAGS := $(CXXFLAGS) $(CFLAGS) # eagerly latch CFLAGS now; don't want later additions
 CFLAGS += -std=c99
-CXXFLAGS += -std=c++11 $(LLVM_CXXFLAGS)
 
 vpath x86_decode.c $(LIBX86EMULATE_DIR)/src
 x86_decode.o: CFLAGS += -include $(LIBX86EMULATE_DIR)/src/x86_defs.h -include stdio.h
 x86_decode.o instr.o: CFLAGS += -std=gnu11
 
-ifneq ($(shell uname -s),FreeBSD)
-ARCHIVES := $(LIBUDIS86_A) $(LIBOPDIS_A) $(LIBOPCODES_A) $(LIBBFD_A) $(LIBIBERTY_A) $(XED_A)
-else
-ARCHIVES := $(XED_A)
-endif
+$(info OBJS is $(OBJS))
+# Also extract archives and re-add their members to our archive.  This allows
+# clients to link to us without concern for these dependencies, which they
+# probably don't have available in PIC form.
+# XXX: for now we create one big .os, to avoid dumping a large pile of uncleanable
+# .o detritus into the build directory. However, that is not so great -- it
+# means that the whole xed archive will be linked in unconditionally, i.e. even if
+# the client doesn't need all of it.
+# HACK: instead of ld -r, use CC -nostdlib -shared -Wl,-r, so that we get the -m32 flags
+# automatically if needed.
+$(info Now XED_DIR is $(XED_DIR))
+xed.os: $(XED_DIR)/build-$(arch)/lib/libxed.a
+	$(CC) $(CFLAGS) $(LDFLAGS) -nostdlib -no-pie -Wl,-r -o $@ -Wl,--whole-archive $< -Wl,--no-whole-archive
 
-# Also extract 	$(LIBOPDIS_A), $(LIBOPCODES_A), $(LIBBFD_A) and $(LIBIBERTY_A),
-# and re-add their members to our archive.  This allows clients to link to us
-# without concern for these dependencies, which they probably don't have
-# available in PIC form.
-libsystrap.a: $(OBJS)
-	objs_list=$$( for fname in $(ARCHIVES); do \
-		$(AR) vx "$$fname"; done | \
-		grep '^x - ' | sed 's/^x - //' | tee objs_list ); \
-	$(AR) r "$@" $^ $${objs_list}; \
-	rm -f $$objs_list
+libsystrap.a: $(OBJS) xed.os
+	$(AR) r "$@" $+
 
 .PHONY: clean
 clean:
 	rm -f libsystrap.a
-	rm -f *.o
-	rm -f .*.d
+	rm -f $(OBJS) xed.os
+	rm -f $(patsubst %.o,%.d,$(OBJS))
+
+endif # run-from-srcdir test

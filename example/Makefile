@@ -1,25 +1,62 @@
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 srcroot := $(realpath $(dir $(THIS_MAKEFILE)))/..
 
+# run-from-srcroot case:
+# if the current dir is the source dir, change to the output directory
+# and re-invoke this makefile from there.
+# If we don't know which output directory we want, we want the production one.
+ifeq ($(realpath .),$(realpath $(srcroot))/example)
+ifeq ($(MAKECMDGOALS),)
+MAKECMDGOALS := default
+endif
+.PHONY: $(MAKECMDGOALS)
+$(MAKECMDGOALS):
+	for arch in `m=$$(uname -m); case "$$m" in (x86_64) echo x86_64 i386 ;; (*) echo "$$m" ;; esac`; do \
+    	mkdir -p $(srcroot)/build/$${arch} && \
+	    $(MAKE) -C $(srcroot)/build/$${arch} -f $(srcroot)/example/Makefile $(MAKECMDGOALS) ; \
+    done
+else
+# the rest: we take our arch from the current dir
+arch := $(notdir $(realpath .))
+$(info arch is $(arch))
+vpath %.c $(srcroot)/example
+vpath %.s $(srcroot)/example
+vpath %.lds $(srcroot)/example
+
+# set arch options based on the name of the build dir
+
 .PHONY: default
 default: trace-syscalls.so trace-syscalls-ld.so
 
 SYS := $(shell uname -s | tr A-Z a-z )
 
-ARCH ?= $(shell gcc -print-multiarch | sed 's/-.*//' )
-ifeq ($(ARCH),i386)
+# if we are doing a 32-on-64 build, add -m32
+ifeq ($(arch) $(shell uname -m),i386 x86_64)
+CFLAGS += -m32
+ASFLAGS += -m32
+LDFLAGS += -m32 -Wl,-melf_i386
+endif
+
+ifneq ($(shell gcc $(CFLAGS) -print-multiarch | sed 's/-.*//' ),$(arch))
+$(error GCC does not agree that the architecture is `$(arch)')
+endif
+
+# debugging
+CFLAGS += -save-temps
+
+ifeq ($(arch),i386)
 LD_SO ?= /lib/ld-linux.so.2
 else
-ifeq ($(ARCH),x86_64)
+ifeq ($(arch),x86_64)
 LD_SO ?= /lib64/ld-linux-x86-64.so.2
 endif
 endif
 
 ifeq ($(LD_SO),)
-$(error Could not determine ld.so pathname (from architecture $(ARCH)).)
+$(error Could not determine ld.so pathname (from architecture $(arch)).)
 endif
 
-UNWIND_MACHINE ?= $(ARCH)
+UNWIND_MACHINE ?= $(arch)
 ifeq ($(UNWIND_MACHINE),i386)
 UNWIND_MACHINE := x86
 endif
@@ -33,6 +70,8 @@ include $(srcroot)/contrib/config.mk
 $(srcroot)/contrib/config.mk:
 	$(MAKE) -C $(srcroot)/contrib config.mk
 endif
+
+# Check for dependencies built already -- unless cleaning
 ifneq ($(MAKECMDGOALS),clean)
 
 ifeq ($(LIBRUNT_DIR),)
@@ -44,22 +83,34 @@ endif
 ifeq ($(DONALD),)
 $(error Please set DONALD or make $(srcroot)/config.mk do so)
 endif
+
+ifneq ($(LIBC_A_PATTERN),)
+$(info LIBC_A was pre-set to $(LIBC_A) (arch: $(arch), pattern: $(LIBC_A_PATTERN)))
+LIBC_A ?= $(shell echo '$(LIBC_A_PATTERN)' | env arch='$(arch)' envsubst )
+$(info LIBC_A is $(LIBC_A))
+endif
+
 ifeq ($(SYS),freebsd)
 LIBC_A ?= /usr/lib/libc_pic.a
 endif
 ifeq ($(LIBC_A),)
-$(error Please set LIBC_A to point to a position-independent libc archive)
+$(error Please set LIBC_A to point to a position-independent libc archive, or LIBC_A_PATTERN to a pattern that can locate one after substituting $${arch})
 endif
-ifeq ($(realpath $(srcroot)/lib/libsystrap.a),)
+ifeq ($(realpath $(srcroot)/build/$(arch)/libsystrap.a),)
 $(error Please build libsystrap first)
 endif
 
-endif
+endif # end dependencies check
+
+# LIBC_CFLAGS_PATTERN is now expected to be self-sufficient
+# e.g. using musl we should be able to build without pulling in ambient glibc stuff
+# we use envsubst to expand the pattern
+LIBC_CFLAGS := $(shell echo '$(LIBC_CFLAGS_PATTERN)' | env arch="$(arch)" envsubst )
+$(info LIBC_CFLAGS is $(LIBC_CFLAGS))
+CFLAGS += -nostdinc $(LIBC_CFLAGS)
 
 CFLAGS += -DOUR_LDSO_DIR="\"$(shell pwd)/\""
-CFLAGS += $(LIBC_CFLAGS)
 CFLAGS += -DSYSTRAP_DEFINE_FILE
-CFLAGS += -DASSERT_FAIL_LINE_SIGNED   # see note in src/Makefile
 CFLAGS += -I$(XED_DIR)/include
 
 CFLAGS += -g
@@ -69,11 +120,21 @@ CFLAGS += -O2
 endif
 CFLAGS += -fPIC
 CFLAGS += -ffreestanding -fno-omit-frame-pointer
+CFLAGS += -I$(srcroot)/src
 CFLAGS += -I$(srcroot)/include
 CFLAGS += -I $(LIBRUNT_DIR)/include
+CFLAGS += -I$(XED_DIR)/build-$(arch)/include/xed
+CFLAGS += -I$(XED_DIR)/include/public
 CFLAGS += -std=c99
 
-syscall-names.o: $(SYS)-syscall-macros.h
+# musl has 'int' for line number, unlike glibc... librunt can hack around for us
+# FIXME: should be a configure-time thing perhaps? in which repo?
+# Problem is that configure might not see same libc headers as we plumb through here.
+CFLAGS += -DASSERT_FAIL_LINE_SIGNED
+
+syscall-names.o: syscall-macros.h
+# for syscall-macros.h
+CFLAGS += -I.
 
 # for dlmalloc.c
 vpath %.c $(srcroot)/contrib
@@ -84,13 +145,13 @@ vpath %.S $(DONALD)/src
 vpath %.h $(DONALD)/src
 CFLAGS += -I$(DONALD)/src
 
-C_SRC := $(filter-out %.inc.c,$(wildcard *.c))
-C_DEPS := $(patsubst %.c,.%.d,$(C_SRC))
+C_SRC := $(filter-out %.inc.c,$(wildcard $(srcroot)/example/*.c))
+C_DEPS := $(patsubst %.c,%.d,$(C_SRC))
 DEPS := $(C_DEPS)
-LOCAL_OBJS := $(filter-out pre-entry.o,$(filter-out write-footprints.o,$(patsubst %.c,%.o,$(C_SRC))))
+LOCAL_OBJS := $(filter-out pre-entry.o,$(filter-out write-footprints.o,$(patsubst %.c,%.o,$(notdir $(C_SRC)))))
 $(info LOCAL_OBJS is $(LOCAL_OBJS))
 
-$(DEPS): .%.d: %.c
+$(DEPS): %.d: %.c
 	$(CC) -MG -MM $(CFLAGS) $+ > "$@" || rm -f "$@"
 
 ifneq ($(MAKECMDGOALS),clean)
@@ -106,22 +167,29 @@ dlmalloc.a: dlmalloc.o
 
 # This is a quick but incomplete way to build a number->name mapping
 linux-syscall-macros.h:
-	( /usr/bin/cpp -E -dM -o - /usr/include/`gcc -print-multiarch`/asm/unistd.h </dev/null | \
+	( echo '#include "asm/unistd.h"' | /usr/bin/cpp $(LIBC_CFLAGS) -E -dM -o -  | \
            grep '#define *__NR_' | sort | uniq | \
            sed -r 's/^#define *__NR_([^[:blank:]]*)[[:blank:]]*([0-9]*)/#ifdef SYS_\1\nSYSCALL(\1)\n#endif/') > "$@" || (rm -f "$@"; false)
 freebsd-syscall-macros.h:
 	cat /usr/include/sys/syscall.h | grep 'SYS_[a-z][A-Za-z0-9_]*' | cut -f2 | \
     sed 's/SYS_\(.*\)/SYSCALL(\1)/' > "$@" || (rm -f "$@"; false)
+#vpath %.h $(srcroot)/build/$(arch)
 syscall-macros.h: $(SYS)-syscall-macros.h
 	cp "$<" "$@"
+
+ifeq ($(DEBUG),)
+librunt_frag := opt
+else
+librunt_frag := debug
+endif
 
 # FIXME: make our dynamic symbols hidden! 
 # We don't want user code calling into our exit(), hence having us make its syscalls.
 # NOTE: the --whole-archive is only necessary for debugging, to ensure that
 # functions we might want to call from the debugger are actually linked in
 trace-syscalls.so: LDLIBS := -Bstatic \
-	$(srcroot)/lib/libsystrap.a \
-	-Wl,--whole-archive $(LIBRUNT_DIR)/lib/librunt_preload.a -Wl,--no-whole-archive \
+	$(srcroot)/build/$(arch)/libsystrap.a \
+	-Wl,--whole-archive $(LIBRUNT_DIR)/build/$(librunt_frag)-$(arch)/librunt_preload.a -Wl,--no-whole-archive \
 	-ldl
 
 # FIXME: what's the right way to pull in libgcc.a? It seems that
@@ -163,13 +231,13 @@ trace-syscalls-ld.so: LDFLAGS += -Wl,--wrap,enter -Wl,--wrap,load_one_phdr \
 -Wl,--defsym,__wrap___runt_files_notify_load=__runt_files_notify_load \
 -Wl,--wrap,__runt_files_metadata_by_addr
 trace-syscalls-ld.so: LDLIBS += -Bstatic \
-  $(srcroot)/src/libsystrap.a \
-  $(LIBRUNT_DIR)/lib/librunt_preload.a \
+  $(srcroot)/build/$(arch)/libsystrap.a \
+  $(LIBRUNT_DIR)/build/$(librunt_frag)-$(arch)/librunt_preload.a \
   $(LIBC_A)
 
 trace-syscalls.so: trace-syscalls.o syscall-names.o dlmalloc.a fake-tls.o
 
-trace-syscalls.so: $(srcroot)/lib/libsystrap.a
+trace-syscalls.so: $(srcroot)/build/$(arch)/libsystrap.a
 	$(CC) -shared -static-libgcc \
 		-fuse-ld=gold \
 		-Wl,-soname=$@ \
@@ -182,17 +250,17 @@ trace-syscalls-ld.so: LDFLAGS += -Wl,--spare-dynamic-tags=5
 
 $(LDSO_OBJS): CFLAGS += -DDONALD_NAME=\"trace-syscalls-ld\" \
   -DCHAIN_LOADER \
-  -DCHAIN_LOADER_COVER_TRACKS_H='"$(shell pwd)/chain-decls.h"' \
-  -DCHAIN_LOADER_COVER_TRACKS_INC='"$(shell pwd)/chain.inc.c"'
+  -DCHAIN_LOADER_COVER_TRACKS_H='"$(srcroot)/example/chain-decls.h"' \
+  -DCHAIN_LOADER_COVER_TRACKS_INC='"$(srcroot)/example/chain.inc.c"'
 
 bootstrap.o: CFLAGS += -DCHAIN_LOADER
 
 DYNAPPEND ?= $(shell which dynappend)
 # FIXME: localize all global symbols except maybe _start?
-trace-syscalls-ld.so: trace-syscalls-ld.lds $(LDSO_OBJS) $(filter-out fake-tls.o,$(LOCAL_OBJS)) dynamic-list
+trace-syscalls-ld.so: trace-syscalls-ld.lds $(LDSO_OBJS) $(filter-out fake-tls.o,$(LOCAL_OBJS)) dynamic-list $(srcroot)/build/$(arch)/libsystrap.a
 	$(CC) $(CFLAGS) -fuse-ld=bfd \
             -Bsymbolic -nostdlib -nostartfiles -static-libgcc -shared -o "$@" \
-            $(filter-out dynamic-list,$(filter-out %.lds,$+)) \
+            $(filter-out dynamic-list,$(filter-out %.lds,$(filter-out %.a,$+))) \
             $(LDFLAGS) $(LDLIBS) -lgcc -Wl,-Bsymbolic \
             -T $(filter %.lds,$+) -Wl,-soname=ld-linux.so.2 \
             -Wl,--dynamic-list,dynamic-list
@@ -201,11 +269,13 @@ trace-syscalls-ld.so: trace-syscalls-ld.lds $(LDSO_OBJS) $(filter-out fake-tls.o
 # There is no way to make _DYNAMIC a dynamic symbol.
 # A bit of a HACK, but we look for _init and _fini to find our own load address
 # (in find_r_debug()), so try to export them.
+# XXX: I think this does nothing, because dynamic-list does not affect the dynamic symbol
+# table for shared libraries.
 dynamic-list:
 	printf '{ etext; _init; _fini; };\n' >$@ || (rm -f $@; false)
 
 trace-syscalls-ld.lds: $(shell which ld) $(THIS_MAKEFILE)
-	USE_LD=ld.bfd $(CC) -fuse-ld=bfd -nostdlib -nostartfiles -shared \
+	USE_LD=ld.bfd $(CC) $(CFLAGS) -fuse-ld=bfd -nostdlib -nostartfiles -shared \
       -Wl,--verbose 2>&1 |  \
         LC_ALL=C \
           sed -e '/^=========/,/^=========/!d;/^=========/d'    \
@@ -216,6 +286,12 @@ trace-syscalls-ld.lds: $(shell which ld) $(THIS_MAKEFILE)
 .PHONY: clean
 clean:
 	rm -f trace-syscalls.so trace-syscalls-ld.so
-	rm -f *.o *.a
-	rm -f .*.d
+	rm -f $(LOCAL_OBJS) $(LDSO_OBJS) dlmalloc.o
+	rm -f $(patsubst %.o,%.d,$(LOCAL_OBJS) $(LDSO_OBJS) dlmalloc.o)
 	rm -f syscall-macros.h $(SYS)-syscall-macros.h
+	rm -f dynamic-list
+	rm -f trace-syscalls-ld.lds
+	rm -f trace-syscalls-ld.so.map
+	rm -f trace-syscalls.so.map
+
+endif # run-from-srcroot test

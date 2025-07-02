@@ -162,8 +162,13 @@ void __init_libc(char **envp, char *pn); // musl-internal API
  * donald defines __wrap___init_tp(), so we put our even faker version
  * in a separate file (fake-tls.o). */
 // void __wrap___init_tp() {}
-static void startup(void) __attribute__((constructor(101)));
-static void startup(void)
+
+/* This constructor is used only by the preload library. For the
+ * chain loader, the equivalent code is in pre-entry.c (which is called
+ * from donald, as a wrapper of donald's enter() function) and chain.inc.c
+ * which is called immediately *before* this, in the context of donald's main. */
+static void startup(int argc, char **argv, char **environ) __attribute__((constructor(101)));
+static void startup(int argc, char **argv, char **environ)
 {
 	/* We use musl as our libc. That means there are (up to) two libc instances
 	 * in the process! Before we do any libc calls, make sure musl's state
@@ -175,8 +180,77 @@ static void startup(void)
 	__runt_auxv_get_env(&p_envv_0, &p_envv_end);
 	__init_libc((char**) p_envv_0, (char*) *p_argv_0);
 	init_fds();
-	trap_all_mappings();
+	const ElfW(auxv_t) *p_auxv_start = NULL, *p_auxv_terminator = NULL;
+	__runt_auxv_get_auxv(&p_auxv_start, &p_auxv_terminator);
+	/* We can create the fake vDSO, but how can we make the program use it?
+	 * In the chain-loader case, we modify the AT_SYSINFO_EHDR auxv entry
+	 * before the inferior ld.so sees it. As a plain old preload library, do
+	 * we have any influence? We could still update the auxv but presumably
+	 * we are too late. How does the vDSO get plumbed in? Does it live in a
+	 * TLS slot perhaps? I spy a call *%gs:0x10 in 32-bit __timerfd_gettime64.
+	 * So perhaps I can just clobber the TLS slot? Well durr. no. It links to
+	 * it! The VDSO is a shared object after all. Still I do vaguely remember
+	 * something about TLS.
+	 */
+	create_fake_vdso(p_auxv_start); // creates in already-trapped form
+	trap_all_mappings(); // XXX: use this to trap the fake vdso too; have just "copy_vdso(...)"?
 	install_sigill_handler();
+#if defined(__i386__)
+	/* There is a TLS slot reserved for AT_SYSINFO a.k.a. the __kernel_vsyscall
+	 * entry point in the vdso. Assuming we got AT_SYSINFO or could find the
+	 * entry point by symname, fake the TLS entry. Note that on each trap we
+	 * will swap the fake and real TLS slots, so that our own syscalls use the
+	 * real one. See handle_sigill(). What about the return? I think we just let
+	 * sigreturn do the restore. */
+	if (fake_sysinfo)
+	{
+		unsigned char *tls;
+		__asm__("mov %%gs:0x0,%0" : "=r"(tls));
+		*(void**)(tls+16) = fake_sysinfo; // FIXME: need a reference for this please
+		/* musl has in arch/i386/syscall_arch.h:
+		
+		#if SYSCALL_NO_TLS
+		#define SYSCALL_INSNS "int $128"
+		#else
+		#define SYSCALL_INSNS "call *%%gs:16"
+		#endif
+
+		and pthread_impl.h:
+
+			struct pthread {
+				// Part 1 -- these fields may be external or
+				// internal (accessed via asm) ABI. Do not change. 
+				struct pthread *self;
+				uintptr_t *dtv;
+				struct pthread *prev, *next; // non-ABI 
+				uintptr_t sysinfo;
+				uintptr_t canary, canary2;
+			...
+
+		which on 32-bit x86 does indeed leave sysinfo at offset 16.
+
+		Other implementations indeed differ on the 'non-ABI' parts only,
+		e.g. glibc/NPTL has:
+
+			typedef struct
+			{
+			  void *tcb;            // Pointer to the TCB.  Not necessarily the
+                        			// thread descriptor used by libpthread.
+			  dtv_t *dtv;
+			  void *self;           // Pointer to the thread descriptor.
+			  int multiple_threads;
+			  int gscope_flag;
+			  uintptr_t sysinfo;
+			  uintptr_t stack_guard;
+			  uintptr_t pointer_guard;
+			  ...
+
+		XXX: see if I can dig up the LKML post where vDSO / linux-gate was
+		first introduced, in case that helps. And/or prior to NPTL, what was
+		the ABI in the predecessor thread library? If it even had TLS...
+ */
+	}
+#endif
 }
 
 
@@ -185,46 +259,36 @@ void print_pre_syscall(void *stream, struct generic_syscall *gsp, void *calling_
 void print_pre_syscall(void *stream, struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, void *ret) {
 	char namebuf[5];
 	snprintf(namebuf, sizeof namebuf, "%d", gsp->syscall_number);
-	fprintf(stream, "== %d == > %p (%s+0x%x) %s(%p, %p, %p, %p, %p, %p)\n",
-			 getpid(), 
-			 calling_addr,
-			 calling_object ? calling_object->l_name : "(unknown)",
-			 calling_object ? (char*) calling_addr - (char*) calling_object->l_addr : (ptrdiff_t) 0,
-			 (gsp->syscall_number < SYSCALL_MAX && syscall_names[gsp->syscall_number]) ? syscall_names[gsp->syscall_number] : namebuf,
-			 gsp->args[0],
-			 gsp->args[1],
-			 gsp->args[2],
-			 gsp->args[3],
-			 gsp->args[4],
-			 gsp->args[5]
-		);
-	fflush(stream);
-}
-
-void print_post_syscall(void *stream, struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, void *ret)
-			__attribute__((visibility("protected")));
-void print_post_syscall(void *stream, struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, void *ret) {
-	char namebuf[5];
-	snprintf(namebuf, sizeof namebuf, "%d", gsp->syscall_number);
-	fprintf(stream, "== %d == < %p (%s+0x%x) %s(%p, %p, %p, %p, %p, %p) = %p\n",
-		getpid(),
-		calling_addr,
-		calling_object ? calling_object->l_name : "(unknown)",
-		calling_object ? (char*) calling_addr - (char*) calling_object->l_addr : (ptrdiff_t) 0,
-		 (gsp->syscall_number < SYSCALL_MAX && syscall_names[gsp->syscall_number]) ? syscall_names[gsp->syscall_number] : namebuf,
+	fprintf(stream, "== %d == > %s(%p, %p, %p, %p, %p, %p) @%p (%s+0x%x)\n",
+			raw_gettid(),
+			syscall_names[gsp->syscall_number]?:namebuf,
 			gsp->args[0],
 			gsp->args[1],
 			gsp->args[2],
 			gsp->args[3],
 			gsp->args[4],
 			gsp->args[5],
-		ret
+			calling_addr,
+			calling_object ? calling_object->l_name : "(unknown)",
+			calling_object ? (char*) calling_addr - (char*) calling_object->l_addr : (ptrdiff_t) 0
+		);
+	fflush(stream);
+}
+
+void print_post_syscall(void *stream, struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, long int ret)
+			__attribute__((visibility("protected")));
+void print_post_syscall(void *stream, struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, long int ret) {
+	fprintf(stream, "== %d == < 0x%lx (from %s @%p)\n",
+		raw_gettid(),
+		(unsigned long) ret,
+		syscall_names[gsp->syscall_number],
+		calling_addr
 	);
 	fflush(stream);
 }
 
 void __attribute__((visibility("protected")))
-systrap_pre_handling(struct generic_syscall *gsp)
+__systrap_pre_handling(struct generic_syscall *gsp)
 {
 	void *calling_addr = generic_syscall_get_ip(gsp);
 	struct link_map *calling_object = get_highest_loaded_object_below(calling_addr);
@@ -232,10 +296,10 @@ systrap_pre_handling(struct generic_syscall *gsp)
 }
 
 void __attribute__((visibility("protected")))
-systrap_post_handling(struct generic_syscall *gsp, long ret, _Bool do_fixup)
+__systrap_post_handling(struct generic_syscall *gsp, long ret, _Bool do_fixup)
 {
-	void *calling_addr = generic_syscall_get_ip(gsp);
+	void *calling_addr = generic_syscall_get_ip(gsp) - 2 /* FIXME: inverse traplen hack */;
 	struct link_map *calling_object = get_highest_loaded_object_below(calling_addr);
-	print_post_syscall(traces_out, gsp, calling_addr, calling_object, NULL);
+	print_post_syscall(traces_out, gsp, calling_addr, calling_object, ret);
 	__libsystrap_noop_post_handling(gsp, ret, do_fixup);
 }

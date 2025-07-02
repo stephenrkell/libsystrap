@@ -7,13 +7,16 @@ jobs:
       - run:
           name: Install dependencies
           command: |
+            dpkg --add-architecture i386
             apt update
             DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt install -y \
               libelf-dev libdw-dev binutils-dev \
               autoconf automake libtool pkg-config autoconf-archive \
               g++ python3 python \
               make git gawk gdb wget \
-              libunwind-dev libc6-dev-i386 zlib1g-dev libc6-dbg
+              libunwind-dev libc6-dev-i386 zlib1g-dev libc6-dbg \
+              linux-libc-dev-i386-cross libunwind-dev:i386 \
+              gettext-base # for envsubst
       - checkout
       - run:
           name: Update submodules
@@ -38,14 +41,18 @@ jobs:
       - run:
           name: Install dependencies
           command: |
+            dpkg --add-architecture i386
             apt update
             apt install -y ca-certificates make build-essential g++ autoconf automake libtool \
-              libelf-dev python3 python git gawk python3-distutils libunwind-dev
+              libelf-dev python3 python git gawk python3-distutils libunwind-dev libunwind-dev:i386 gettext-base \
+              linux-libc-dev-i386-cross libc6-dev-i386
+
       - attach_workspace:
           at: /root
       - run:
           name: Run tests (sequentially for now)
-          command: make -C /root/project/test -j 1
+          command: make -C /root/project/test ARCH=x86_64 generic-recursive && make -C /root/project/test/x86_64 && make -C /root/project/test/client && make -C /root/project/test/support
+          # CircleCI Docker doesn't support sigaction() on 32-bit x86?!!?
 
 workflows:
   version: 2

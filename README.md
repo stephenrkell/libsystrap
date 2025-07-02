@@ -42,7 +42,13 @@ handler (which, unlike handling SIGTRAP, doesn't break debugging).
 
 # trace-syscalls.so
 
-This is a strace-like tool.
+This is a strace-like tool, packaged as a preloadable (LD_PRELOAD) library.
+
+# trace-syscalls-ld.so
+
+This is a strace-like tool, packaged as an ELF dynamic linker that acts
+as a "chain loader". You can read more about this approach here:
+<https://www.humprog.org/~stephen/blog/devel/syscall-tracing-in-process.html>.
 
 # trace-sysfoot.so
 
@@ -51,7 +57,8 @@ semantic information about syscalls, including (thanks to dwarfidl) for
 system call names and type signatures scraped from the kernel DWARF. It
 also uses libfootprints to walk the memory foorprints of each call. This
 will soon be split into its own repository, since it has many more
-dependencies and is very fragile/experimental at present.
+dependencies and is very fragile/experimental at present. XXX: this is
+no longer built by default, but remains interesting (worth a write-up).
 
 # Building
 
@@ -96,7 +103,7 @@ Unless stated otherwise, the source code in this distribution is made
 available under the terms of the GNU Lesser General Public License
 version 3. See the files LICENSE.lgpl3 and LICENSE.gpl3.
 
-would like to discuss alternative licensing arrangements, please
+If you would like to discuss alternative licensing arrangements, please
 contact the principal author, Stephen Kell <srk31@srcf.ucam.org>.
 
 Note that a few specific files are under different licensing terms. This
@@ -112,4 +119,4 @@ cases, subject to licensing terms imposed by those projects. To determine the
 terms applying to a binary you have built, one reliable method is to use the
 debugging information in that binary to establish which source files it
 embodies. In particular, x86_decode.c from libx86decode originates in the Xen
-project and is licensed as "GPLv2 or later".
+project and is licensed as "GPLv2 or later". Not all builds use this file.

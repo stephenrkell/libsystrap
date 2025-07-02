@@ -23,6 +23,13 @@
 #include "systrap.h"
 #include "vas.h"
 #include "trace-syscalls.h" // FIXME: move us out of example/ into src/
+#include "chain.h"
+
+/* HACK: x86-specific, and hard-codes installation paths */
+static const char *ldso_names[] = {
+	[ELFCLASS32] = OUR_LDSO_DIR "../i386/" DONALD_NAME ".so",
+	[ELFCLASS64] = OUR_LDSO_DIR "../x86_64/" DONALD_NAME ".so"
+};
 
 int openat(int dirfd, const char *pathname, int flags, ...);
 int open(const char *pathname, int flags, ...);
@@ -179,26 +186,18 @@ int recursively_resolve_elf_and_execveat(
 		{
 			if (0 == memcmp(eident, "\177ELF", 4))
 			{
-				// we got an ELF file, so let's try
-				char *elf_prefix_argv[] = {
-					OUR_LDSO_NAME,
-					NULL
-				};
-				char **new_argv = realloca_argv_with_prefix(
-					argv, elf_prefix_argv
-				);
-				assert(0 == strcmp(new_argv[0], OUR_LDSO_NAME));
-				/* We don't *have* to set argv[0] equal to filename...
-				 * it's supposed to be "what the program thinks it's called",
-				 * so do a sneaky switcheroo. Though hmm, this creates
+				/* argv[0] is supposed to be "what the program thinks it's called"
+				 * and doesn't have to be set equal to filename... so it's
+				 * tempting to do a sneaky switcheroo to avoid argv[0] being
+				 * the chain loader binary name. This may help tools like
+				 * 'ps' that like to use argv[0]. However, this creates
 				 * a bogus overall command line, e.g.
 
 				 ["./truemk", "/proc/self/fd/6", "-qf", "/proc/self/fd/5"]
 
 				 * ... because './truemk' is standing in for OUR_LDSO_NAME.
-				 * Is this really adding value anywhere? I guess tools like
-				 * 'ps' like to use argv[0]? If so we could make it say
-				 * things like 'truemk [interpreted]' ? exename will point
+				 * Is this really adding value anywhere? We could make it say
+				 * things like 'truemk [interpreted]'? exename will point
 				 * to the interpreter and the rest of argv will make up
 				 * a sane invocation. Not all process-introspecting clients
 				 * will know how to decode this, of course, so this may be
@@ -230,9 +229,18 @@ int recursively_resolve_elf_and_execveat(
 					strcat(buf, to_append);
 					fake_argv0 = buf;
 				}
+				// we know we got an ELF file, so let's try
+				char *elf_prefix_argv[] = {
+					ldso_names[(int) eident[EI_CLASS]],
+					NULL
+				};
+				char **new_argv = realloca_argv_with_prefix(
+					argv, elf_prefix_argv
+				);
+				assert(0 == strcmp(new_argv[0], ldso_names[(int) eident[EI_CLASS]]));
 				new_argv[0] = fake_argv0;
 				return syscall(__NR_execveat, dirfd,
-					/* filename is always us */ OUR_LDSO_NAME, new_argv, envp, 0);
+					/* filename is always us */ ldso_names[(int) eident[EI_CLASS]], new_argv, envp, 0);
 			}
 		}
 	}
@@ -383,6 +391,9 @@ REPLACE(execveat)
 #endif /* CHAIN_LOADER */
 
 #ifdef __i386__
+#if defined(__linux__) && !defined(__NR_mmap2)
+#define __NR_mmap2 192
+#endif
 #define mmap2_ret_t void *
 #define mmap2_args(v, sep) \
     v(void *, addr, 0) sep   v(size_t, length, 1) sep \
@@ -608,3 +619,69 @@ bootstrap_proto(munmap)
 	return munmap(addr, length);
 }
 REPLACE(munmap)
+
+/* FIXME: we need to do some stuff around processes which attempt to
+ * - install a SIGILL handler
+ * - mask SIGILL
+ * - wait for a SIGILL (they should not see one that we generate)
+ * - create a signalfd that can accept a SIGILL (but I don't think signalfd supports this?)
+ */
+/* Or more generally....
+ *
+ * Is there a clean way to take control of all incoming signals, and
+ * then re-dispatch them? i.e. the analogous thing to what we do with
+ * system calls. We cannot use signalfd because we still want signals
+ * to be raised/raisable asynchronously.
+ *
+ * We could try to install a handler for all signals, but that still
+ * does not prevent certain system calls from interfering e.g. using
+ * signalfd, or changing the signal mask.
+ *
+ * We could relax about the latter on the grounds that we should be
+ * able to move away from SIGILL to trampolines. So any incoming signal
+ * would be bona fide. But we still want to know about them!
+ *
+ * Try reading what Rust's signal_hook does.
+ */
+
+struct rt_sigaction;
+int rt_sigaction(int, const struct rt_sigaction *, struct rt_sigaction *);
+#define rt_sigaction_ret_t int
+#define rt_sigaction_args(v, sep) \
+    v(int, signum, 0) sep  v(const struct rt_sigaction *, act, 1) sep \
+    v(struct rt_sigaction *, oldact, 2)
+bootstrap_proto(rt_sigaction)
+{
+	if (signum == SIGILL)
+	{
+		debug_printf(0, "Blocked program's attempt to install a SIGILL handler\n");
+		return -1;
+	}
+#ifdef __x86_64__
+/* There is no rt_sigaction wrapper, so... maybe we should raw_syscall it? */
+	return /*rt_*/sigaction(signum, act, oldact);
+#else
+	return sigaction(signum, act, oldact);
+
+#endif
+}
+REPLACE(rt_sigaction)
+
+#if defined(__i386__)
+struct sigaction;
+int sigaction(int, const struct sigaction *, struct sigaction *);
+#define sigaction_ret_t int
+#define sigaction_args(v, sep) \
+    v(int, signum, 0) sep  v(const struct sigaction *, act, 1) sep \
+    v(struct sigaction *, oldact, 2)
+bootstrap_proto(sigaction)
+{
+	if (signum == SIGILL)
+	{
+		debug_printf(0, "Blocked program's attempt to install a SIGILL handler\n");
+		return -1;
+	}
+	return sigaction(signum, act, oldact);
+}
+REPLACE(sigaction)
+#endif

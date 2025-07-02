@@ -169,7 +169,7 @@ void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *e
 	debug_printf(1, "We think ld.so's link map is at %p, base %p, filename %s\n",
 		ld_so_link_map,
 		ld_so_link_map ? (void*) ld_so_link_map->l_addr : (void*) -1,
-		ld_so_link_map ? ld_so_link_map->l_name : "(can't deref null)");
+		ld_so_link_map ? ld_so_link_map->l_name : "(no link map)");
 
 	struct link_map *range_link_map = get_highest_loaded_object_below(begin_instr_pos);
 	_Bool range_is_in_ld_so = (ld_so_link_map && range_link_map &&
@@ -180,15 +180,13 @@ void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *e
 		int ret = raw_mprotect(begin_page, end_page - begin_page,
 			PROT_READ | PROT_WRITE | (range_is_in_ld_so ? PROT_EXEC : 0));
 
-		/* If we failed, it might be on the vdso page. */
-		assert(ret == 0 || (intptr_t) begin_page < 0);
+		/* If we failed, it might be on the vdso page or similar. However,
+		 * as of at least Linux 5.15, possibly earlier, it does seem to be
+		 * possible to make the vdso pages writable. */
+		assert(ret == 0 || (intptr_t) begin_page < 0); // XXX: this "< 0" check is sysdep
 		if (ret != 0 && (intptr_t) begin_page < 0)
 		{
-			/* vdso/vsyscall handling: since we can't rewrite the instructions on these
-			 * pages, instead we should execute-protect them. Then, when we take a trap,
-			 * we need to emulate the instructions there. FIXME: implement this. */
-
-			debug_printf(1, "Couldn't rewrite nor protect vdso mapping at %p\n", begin_page);
+			debug_printf(1, "Couldn't rewrite nor protect mapping (vdso?) at %p\n", begin_page);
 			return;
 		}
 	}
@@ -332,6 +330,13 @@ void trap_one_executable_region_given_shdrs(unsigned char *begin,
 void trap_one_executable_region(unsigned char *begin, unsigned char *end, const char *filename,
 	_Bool is_writable, _Bool is_readable)
 {
+	// Q: why was this apparently not necessary previously?
+	// A. it was handled by a failure to mprotect()-to-writable, but that
+	// failure can no longer be relied on (kernel changes)
+	if (0 == strncmp(filename, "[vdso", 5))
+	{
+		return;
+	}
 	struct file_metadata *fm = __runt_files_metadata_by_addr(begin);
 	trap_one_executable_region_given_shdrs(begin, end, filename, is_writable,
 		is_readable,
@@ -365,14 +370,35 @@ static void __attribute__((constructor)) startup(void)
 		debug_printf(1, ".");
 	}
 	debug_printf(1, "\n");
-
-	//trap_all_mappings();
-	// install_sigill_handler();
 }
 
 void __libsystrap_force_init(void)
 {
 	startup();
+}
+
+void clone3_emulated_replacement(struct generic_syscall *s, post_handler *post)
+{
+	struct clone_args *cl_args = (struct clone_args *) s->args[0];
+	size_t size = s->args[1];
+	/* Build a vanilla clone generic_syscall and let it handle the rest.
+	 * All the hairy stuff is in do-syscall.h. */
+	struct generic_syscall gs = MKGS5(SYS_clone,
+		/* flags */ cl_args->flags | (cl_args->exit_signal & 0xff),
+		/* stack */ (long long) (cl_args->stack ? ((char*)(uintptr_t)cl_args->stack + cl_args->stack_size) : NULL),
+		/* parent_tid */ (pid_t *)(uintptr_t) cl_args->parent_tid,
+#if defined(__x86_64__)
+		/* child_tid */ (pid_t *)cl_args->child_tid,
+		/* tls */ cl_args->tls
+#elif defined(__i386__) /* last two arguments are reversed on this arch */
+		/* tls */ cl_args->tls,
+		/* child_tid */ (pid_t *)(uintptr_t) cl_args->child_tid
+#else
+#error "Unrecognised architecture -- check raw clone() signature on this platform."
+#endif
+		);
+	gs.saved_context = s->saved_context;
+	do_generic_syscall_and_fixup(&gs); // does post-handling and sets return value in fixed-up context
 }
 
 void install_sigill_handler(void)

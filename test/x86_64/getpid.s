@@ -6,5 +6,6 @@ _start:
         movq $0x0, %rdi
         syscall
         movq %rax, %rdi
+        andq $0x7f, %rdi       # successful return in range 0..127
         movq $60, %rax         # exit
         syscall
