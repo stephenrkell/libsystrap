@@ -141,14 +141,18 @@ varlist += XED_DIR
 
 # ----------------------------librunt
 
+# We build both opt and debug verisons of librunt, because
+# liballocs's self-test (make TEST=1) configuration wants to
+# use the debug version, and we run that as part of our test
+# suite (the 'lib-test' case).
 ifeq ($(DEBUG),)
 frag := opt
 else
 frag := debug
 endif
 .PHONY: build-librunt
-build-librunt: librunt/build/$(frag)-$(arch)/librunt_preload.a
-librunt/build/$(frag)-%/librunt_preload.a: librunt/Makefile
+build-librunt: librunt/build/debug-$(arch)/librunt_preload.a librunt/build/opt-$(arch)/librunt_preload.a
+librunt/build/%/librunt_preload.a: librunt/Makefile
 	mkdir -p $(dir $@) && cd $(dir $@) && $(LIBRUNT_MAKE_PREFIX) $(MAKE) -f ../../src/Makefile
 # librunt is not yet autotools'd
 #librunt/Makefile: librunt/configure
@@ -158,18 +162,18 @@ librunt/build/$(frag)-%/librunt_preload.a: librunt/Makefile
 
 # also build 32-bit version on x86_64
 ifeq ($(arch),x86_64)
-build-librunt: librunt/build/$(frag)-i386/librunt_preload.a
-librunt/build/$(frag)-i386/librunt_preload.a: LIBRUNT_MAKE_PREFIX := CFLAGS="$(CFLAGS) $(MUSL_ABI_CFLAGS)" CC="$(CC) -m32" ASFLAGS="-m32" LDFLAGS="-Wl,-melf_i386"
+build-librunt: librunt/build/opt-i386/librunt_preload.a librunt/build/debug-i386/librunt_preload.a
+librunt/build/%-i386/librunt_preload.a: LIBRUNT_MAKE_PREFIX := CFLAGS="$(CFLAGS) $(MUSL_ABI_CFLAGS)" CC="$(CC) -m32" ASFLAGS="-m32" LDFLAGS="-Wl,-melf_i386"
 endif
 
 CONFIG_MK +=\nLIBRUNT_CFLAGS := $(LIBRUNT_CFLAGS) -I$(CONTRIB)/librunt/include\n
-CONFIG_MK +=\nLIBRUNT_LDFLAGS := $(LIBRUNT_LDFLAGS) -L$(CONTRIB)/librunt/build/$(frag)-$(arch) \
- -Wl,-rpath,$(CONTRIB)/librunt/build/$(frag)-$(arch)
+CONFIG_MK +=\nLIBRUNT_LDFLAGS := $(LIBRUNT_LDFLAGS) -L$(CONTRIB)/librunt/build/$(if $(DEBUG),debug,opt)-$(arch) \
+ -Wl,-rpath,$(CONTRIB)/librunt/build/$(if $(DEBUG),debug,opt)-$(arch)
 # How to plumb through the 32-bit version's flags? Just add both -L dirs and
 # let the linker figure it out.
 ifeq ($(arch),x86_64)
-CONFIG_MK +=\nLIBRUNT_LDFLAGS += -L$(CONTRIB)/librunt/build/$(frag)-i386 \
- -Wl,-rpath,$(CONTRIB)/librunt/build/$(frag)-i386
+CONFIG_MK +=\nLIBRUNT_LDFLAGS += -L$(CONTRIB)/librunt/build/$(if $(DEBUG),debug,opt)-i386 \
+ -Wl,-rpath,$(CONTRIB)/librunt/build/$(if $(DEBUG),debug,opt)-i386
 endif
 
 clean::
