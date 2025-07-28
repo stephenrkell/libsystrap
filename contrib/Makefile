@@ -75,14 +75,11 @@ clean::
 	rm -f musl/build-i386/{Makefile,config.mak}
 endif
 
-# HACK: we rewrite 386 to 686... this should not be necessary, might be Debian-specific?
-# HACK: on my Debian system I have /usr/i686-linux-gnu/include but /usr/include/x86_64-linux-gnu
-# and no /usr/x86_64-linux-gnu/include... this is very unsatisfying.
 host-includes-%:
 	triple="$$( if [ "$*" = "i386" ] && [ "$$(uname -m)" = "x86_64" ]; then gcc -m32 -print-multiarch; else gcc -print-multiarch; fi )"; \
 	mkdir -p $@ && for d in /usr/include/linux \
  /usr/include/asm-generic \
- /usr/$$( echo "$${triple}" | sed 's/386/686/')/include/asm; do \
+ /usr/$$triple/include/asm; do \
      echo "Expecting to use system include dir $${d}, so symlinking to it"; \
      { test -e "$$d" && ln -s -t $@ "$$d"; } || \
       { d="$$(echo "$$d" | sed "s^/usr/$${triple}/include^/usr/include/$${triple}^" )"; test -e "$$d" \
