@@ -231,7 +231,7 @@ int recursively_resolve_elf_and_execveat(
 				}
 				// we know we got an ELF file, so let's try
 				char *elf_prefix_argv[] = {
-					ldso_names[(int) eident[EI_CLASS]],
+					(char*) ldso_names[(int) eident[EI_CLASS]],
 					NULL
 				};
 				char **new_argv = realloca_argv_with_prefix(
@@ -644,12 +644,12 @@ REPLACE(munmap)
  * Try reading what Rust's signal_hook does.
  */
 
-struct rt_sigaction;
-int rt_sigaction(int, const struct rt_sigaction *, struct rt_sigaction *);
+struct __asm_sigaction;
+int rt_sigaction(int, const struct __asm_sigaction *, struct __asm_sigaction *);
 #define rt_sigaction_ret_t int
 #define rt_sigaction_args(v, sep) \
-    v(int, signum, 0) sep  v(const struct rt_sigaction *, act, 1) sep \
-    v(struct rt_sigaction *, oldact, 2)
+    v(int, signum, 0) sep  v(const struct __asm_sigaction *, act, 1) sep \
+    v(struct __asm_sigaction *, oldact, 2)
 bootstrap_proto(rt_sigaction)
 {
 	if (signum == SIGILL)
@@ -657,13 +657,9 @@ bootstrap_proto(rt_sigaction)
 		debug_printf(0, "Blocked program's attempt to install a SIGILL handler\n");
 		return -1;
 	}
-#ifdef __x86_64__
-/* There is no rt_sigaction wrapper, so... maybe we should raw_syscall it? */
-	return /*rt_*/sigaction(signum, act, oldact);
-#else
-	return sigaction(signum, act, oldact);
-
-#endif
+/* There is no rt_sigaction wrapper, so... maybe we should raw_syscall it?
+ * NOTE that our raw_ wrapper supplies the fourth argument (sigsetsize) as sizeof (__asm_sigset_t) */
+	return raw_rt_sigaction(signum, act, oldact);
 }
 REPLACE(rt_sigaction)
 
