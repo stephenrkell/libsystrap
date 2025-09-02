@@ -114,7 +114,7 @@ $(info OBJS is $(OBJS))
 # automatically if needed.
 $(info Now XED_DIR is $(XED_DIR))
 xed.os: $(XED_DIR)/build-$(arch)/lib/libxed.a
-	$(CC) $(CFLAGS) $(LDFLAGS) -nostdlib -no-pie -Wl,-r -o $@ -Wl,--whole-archive $< -Wl,--no-whole-archive
+	$(CC) $(CFLAGS) $(LDFLAGS) -nostdlib -no-pie -fno-lto -Wl,-r -o $@ -Wl,--whole-archive $< -Wl,--no-whole-archive
 
 libsystrap.a: $(OBJS) xed.os
 	$(AR) r "$@" $+
