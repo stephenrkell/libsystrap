@@ -8,6 +8,7 @@
 
 void install_sigill_handler(void);
 void trap_all_mappings(void);
+void create_fake_vdso(ElfW(auxv_t) *auxv);
 void trap_one_executable_region(unsigned char *begin, unsigned char *end, const char *filename,
 	_Bool is_writable, _Bool is_readable);
 void trap_one_instruction_range(unsigned char *begin, unsigned char *end,

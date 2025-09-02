@@ -192,6 +192,7 @@ static void startup(int argc, char **argv, char **environ)
 	 * it! The VDSO is a shared object after all. Still I do vaguely remember
 	 * something about TLS.
 	 */
+	// XXX: should these just be a single "enable_systrap()" call?
 	create_fake_vdso(p_auxv_start); // creates in already-trapped form
 	trap_all_mappings(); // XXX: use this to trap the fake vdso too; have just "copy_vdso(...)"?
 	install_sigill_handler();
