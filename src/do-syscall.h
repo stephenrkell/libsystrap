@@ -583,7 +583,7 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		   /* begin PERFORM_SYSCALL expansion */
 		  "mov %%eax, %%"stringifx(argreg1)" \n"
 		       /* Now set up the other arg regs */
-		  "mov $%c[op], %%eax\n"
+		  "mov $"stringifx(__NR_clone)", %%eax\n"
 		  "mov %[arg0], %%"stringifx(argreg0)" \n"
 		  /*     arg1   is initialized above!  */
 		  "mov %[arg2], %%"stringifx(argreg2)" \n\
@@ -614,49 +614,14 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		    */
 		"2:\n"
 		   "nop\n"
-		  :
-#ifndef __i386__
-		    [ret]  "+a" (ret_op)
+		  : [ret_op]  "+a" (ret_op)
 		  , [gsp] "+m"(gsp)  /* gsp is a fake output, i.e. a clobber */
 		   /* We list gsp it as a memory in/out so that the compiler thinks it's
 		    * clobbered. That way, it will keep it in its stack slot during the asm block,
 		    * and will reload it later if it's needed in a register. Of course it
 		    * will be reloading the new, fixed-up version, but that is all transparent
 		    * to the compiler. */
-#else
-		    [ret]  "=a" (ret_op)
-		  , [gsp] "=m"(gsp)  /* gsp is a fake output, i.e. a clobber */
-		/* On 32-bit x86 this code is very sensitive to asm constraint-solvability.
-		 * I have seen constraint solving fail following some innocuous changes
-		 * such as:
-		 *
-		 *  turning on -fno-strict-aliasing
-		 *
-		 *  using asm to get the value of BP
-		 *
-		 *  introducing memcpy calls.
-		 *
-		 * For snarfing %ebp, it seemed the problem was triggered
-		 * if swizzled_bp was used as an the output of
-		 * *any* asm or builtin, even 'nop' like this.
-		 *__asm__ ("nop" : "=r"(swizzled_bp) : : );
-		 *
-		 * Previously I worked around this in a sneaky way: our current
-		 * %ebp is a fixed offset from the lowest stack address currently
-		 * saved on the stack (assuming none of our locals points to a local).
-		 * So when we do a copy-and-relocate of the stack (above), we
-		 * snarf the first pointer we relocate. However, that seemed unreliable.
-		 *
-		 * For the moment I found that if we refrain from declaring 'gsp'
-		 * as an output of the asm, it frees up enough slack in the constraints.
-		 * However, this is dangerous as we haven't really told the compiler that
-		 * it needs to reload gsp. And it really does need to reload gsp via BP,
-		 * because that is the only memory that is definitely valid. */
-#endif
-		  :
-#ifdef __i386__
-			[op] "i"(__NR_clone),
-#endif
+		   :
 		    [arg0] "m" ((long int) gsp->args[0])
 		  , [arg1] "m" ((long int) gsp->args[1])
 		  , [arg2] "m" ((long int) gsp->args[2])
@@ -683,7 +648,6 @@ extern inline long
 __attribute__((always_inline,gnu_inline))
 do_clone3(struct generic_syscall *gsp)
 {
-// XXX: x86-64 only for now
 	long int ret_op = (long int) gsp->syscall_number;
 	__asm__ volatile (
 	#if defined(__x86_64__)
@@ -790,7 +754,7 @@ do_clone3(struct generic_syscall *gsp)
 		  "popl %%edx\n"          /* restore %edx that we saved earlier */
 		  "sub $4,%%ebp\n"      /* In the sub above, our %%esp was too small by one slot (4 bytes) because of the pushed rdx */
 		  "mov %%eax, %%edx\n"    /* edx is our other clobber, so stash the expected new sp there */
-		  "mov $%c[op], %%eax\n"   /* Restore %eax now we're finished with copy_'s return value */
+		  "mov $"stringifx(__NR_clone3)", %%eax\n"   /* Restore %eax now we're finished with copy_'s return value */
 		  "mov %[arg1], %%ecx\n"   /* Reload %ecx, i.e. our arg1 */
 		   stringifx(SYSCALL_INSTR) "\n"
 		   /* end PERFORM_SYSCALL replacement */
@@ -820,22 +784,14 @@ do_clone3(struct generic_syscall *gsp)
 		    */
 		"2:\n"
 		   "nop\n"
-		  :
-#ifdef __i386__
-		    [ret]  "=a" (ret_op)
-#else
-		    [ret]  "+a" (ret_op)
-#endif
-		  , [gsp] "+m"(gsp)  /* gsp is a fake output, i.e. a clobber */
+		  : [ret_op]  "+a" (ret_op)
+		  , [gsp]     "+m"(gsp)  /* gsp is a fake output, i.e. a clobber */
 		   /* We list gsp it as a memory output so that the compiler thinks it's
 		    * clobbered. That way, it will keep it in its stack slot during the asm block,
 		    * and will reload it later if it's needed in a register. Of course it
 		    * will be reloading the new, fixed-up version, but that is all transparent
 		    * to the compiler. */
 		  :
-#ifdef __i386__
-            [op] "i" (__NR_clone3),
-#endif
 		    [arg0] "m" ((long int) gsp->args[0])
 		  , [arg1] "m" ((long int) gsp->args[1])
 		  , [new_stack_offs]  "i" (offsetof (struct clone_args, stack))
