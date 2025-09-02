@@ -406,7 +406,16 @@ void install_sigill_handler(void)
 	/* Install our SIGILL (was SIGTRAP, but that interferes with gdb) handler.
 	 * Linux seems to require us to provide a restorer; the code is in restore_rt. */
 #ifndef SA_RESTORER
-#error "NO SA_RESTORER set; are you including the asm signal.h?"
+#error "NO SA_RESTORER defined; are you including the asm signal.h as you should be?"
+#endif
+#ifndef SA_NODEFER
+/* On i386, asm/signal.h does not define SA_NODEFER so we do it ourselves. */
+#ifdef __i386__
+#define SA_NODEFER 0x40000000u
+#warning "Working around lack of SA_NODEFER in i386 asm/signal.h"
+#else
+#error "NO SA_NODEFER defined; are you including the asm signal.h as you should be?"
+#endif
 #endif
 
 /* Which restorer routine do we need? */
