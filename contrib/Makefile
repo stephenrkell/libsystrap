@@ -82,7 +82,7 @@ host-includes-%:
 	triple="$$( if [ "$*" = "i386" ] && [ "$$(uname -m)" = "x86_64" ]; then gcc -m32 -print-multiarch; else gcc -print-multiarch; fi )"; \
 	mkdir -p $@ && for d in /usr/include/linux \
  /usr/include/asm-generic \
- /usr/$$( echo "$${triple}" | sed 's/386/686/')/include/asm; do \
+ /usr/$$( echo "$${triple}" | sed 's/386/686/' )/include/asm; do \
      echo "Expecting to use system include dir $${d}, so symlinking to it"; \
      { test -e "$$d" && ln -s -t $@ "$$d"; } || \
       { d="$$(echo "$$d" | sed "s^/usr/$${triple}/include^/usr/include/$${triple}^" )"; test -e "$$d" \
