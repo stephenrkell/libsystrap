@@ -81,38 +81,21 @@ void trap_all_mappings(void)
 	int fd = raw_open("/proc/self/maps", O_RDONLY, 0);
 	if (fd >= 0)
 	{
-		/* We run during startup, so the number of distinct /proc lines should be small. */
 	#define MAX_LINES 1024
 	#define MAX_ALLBUF 81920 // 80kB
 		static char *lines[MAX_LINES];
 		static char allbuf[MAX_ALLBUF];
-		char *p_allbuf = &allbuf[0];
-		int n = 0;
-		ssize_t linesz;
 		char linebuf[8192];
-		while (-1 != (linesz = get_a_line_from_maps_fd(linebuf, sizeof linebuf, fd)))
-		{
-			/* I have seen alloca blow the stack here on 32-bit, so use a static buffer.
-			 * We simply fill the buffer with all the data we get from get_a_line...(),
-			 * and point lines[i] into it at the start-of-line positions. */
-			//char *a = alloca(linesz + 1);
-			char *a = p_allbuf;
-			// if the combined offset exceeds the size of allbuf, we give up
-			if ((p_allbuf - &allbuf[0]) + linesz + 1 > sizeof allbuf) abort();
-			p_allbuf += (linesz + 1);
-			lines[n] = a;
-			assert(lines[n]);
-			// copy info allbuf from linebuf
-			strncpy(lines[n], linebuf, linesz);
-			lines[n][linesz] = '\0';
-			++n;
-		}
-		
+		int nlines_read = read_all_maps_lines_from_fd(fd,
+			linebuf, sizeof linebuf, lines, MAX_LINES, allbuf, sizeof allbuf);
+		/* We run during startup, so the number of distinct /proc lines should be small. */
+		assert(nlines_read > 0);
+
 		/* Now we have an array containing the lines. */
 		struct maps_entry entry;
-		for (int i = 0; i < n; ++i)
+		for (int i = 0; i < nlines_read; ++i)
 		{
-			int ret = process_one_maps_entry(lines[i], &entry, process_mapping_cb, NULL);
+			int ret = process_one_maps_line(lines[i], &entry, process_mapping_cb, NULL);
 			if (ret) break;
 		}
 
