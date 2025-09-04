@@ -61,4 +61,16 @@ struct generic_syscall;
 /* This is defined in do-syscall.c, but do-syscall.h is not a public header. */
 void *generic_syscall_get_ip(struct generic_syscall *gsp);
 
+/* We must have librunt for these, after fmt_hex_num was moved there. */
+#ifndef write_string
+#define write_string(s) raw_write(2, (s), sizeof (s) - 1)
+#endif
+#ifndef write_chars
+#define write_chars(s, t)  raw_write(2, s, t - s)
+#endif
+const char *fmt_hex_num(unsigned long n) __attribute__((visibility("hidden")));
+#ifndef write_ulong
+#define write_ulong(a)   raw_write(2, fmt_hex_num((a)), 18)
+#endif
+
 #endif
