@@ -785,7 +785,7 @@ do_clone3(struct generic_syscall *gsp)
 		"2:\n"
 		   "nop\n"
 		  : [ret_op]  "+a" (ret_op)
-		  , [gsp]     "+m"(gsp)  /* gsp is a fake output, i.e. a clobber */
+		  , [gsp] "+m"(gsp)  /* gsp is a fake output, i.e. a clobber */
 		   /* We list gsp it as a memory output so that the compiler thinks it's
 		    * clobbered. That way, it will keep it in its stack slot during the asm block,
 		    * and will reload it later if it's needed in a register. Of course it
