@@ -10,13 +10,14 @@ void install_sigill_handler(void);
 void trap_all_mappings(void);
 void create_fake_vdso(ElfW(auxv_t) *auxv);
 void trap_one_executable_region(unsigned char *begin, unsigned char *end, const char *filename,
-	_Bool is_writable, _Bool is_readable);
+	_Bool is_writable, _Bool is_readable, _Bool preserve_exec);
 void trap_one_instruction_range(unsigned char *begin, unsigned char *end,
-	_Bool is_writable, _Bool is_readable);
+	_Bool is_writable, _Bool is_readable, _Bool preserve_exec);
 void trap_one_executable_region_given_shdrs(unsigned char *begin,
 	unsigned char *end, const char *filename,
-	_Bool is_writable, _Bool is_readable,
+	_Bool is_writable, _Bool is_readable, _Bool preserve_exec,
 	ElfW(Shdr) *shdrs, unsigned nshdr, ElfW(Addr) laddr);
+_Bool addr_is_in_ld_so(const void *pos);
 void walk_instructions(unsigned char *pos, unsigned char *end,
 	void (*cb)(unsigned char *pos, unsigned len, void *arg), void *arg);
 void replace_instruction_with(unsigned char *pos, unsigned len,

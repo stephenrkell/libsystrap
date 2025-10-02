@@ -143,42 +143,15 @@ static void instruction_cb(unsigned char *pos, unsigned len, void *arg)
 	}
 }
 
-void *__tls_get_addr(); // in ld.so
-
 void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *end_instr_pos,
-	_Bool is_writable, _Bool is_readable)
+	_Bool is_writable, _Bool is_readable, _Bool preserve_exec)
 {
 	const void *begin_page = ROUND_DOWN_PTR_TO_PAGE((const void *) begin_instr_pos);
 	const void *end_page = ROUND_UP_PTR_TO_PAGE((const void *) end_instr_pos);
-
-	static struct link_map *ld_so_link_map;
-	if (!ld_so_link_map)
-	{
-		/* NOTE: sometimes our own code will need to call into the dynamic
-		 * linker, e.g. to call __tls_get_addr. So if we're walking the
-		 * dynamic linker, leave it executable.
-		 *
-		 * If we are a preload library, this isn't really an extra
-		 * security weakness because our own code is in the same boat.
-		 *
-		 * If we *are* the dynamic linker, this problem goes away, because
-		 * we never take away our own permissions. */
-		ld_so_link_map = get_highest_loaded_object_below(__tls_get_addr);
-	}
-	debug_printf(1, "_r_debug is at %p\n", &_r_debug);
-	debug_printf(1, "We think ld.so's link map is at %p, base %p, filename %s\n",
-		ld_so_link_map,
-		ld_so_link_map ? (void*) ld_so_link_map->l_addr : (void*) -1,
-		ld_so_link_map ? ld_so_link_map->l_name : "(no link map)");
-
-	struct link_map *range_link_map = get_highest_loaded_object_below(begin_instr_pos);
-	_Bool range_is_in_ld_so = (ld_so_link_map && range_link_map &&
-		ld_so_link_map == range_link_map);
-
 	if (!is_writable)
 	{
 		int ret = raw_mprotect(begin_page, end_page - begin_page,
-			PROT_READ | PROT_WRITE | (range_is_in_ld_so ? PROT_EXEC : 0));
+			PROT_READ | PROT_WRITE | (preserve_exec ? PROT_EXEC : 0));
 
 		/* If we failed, it might be on the vdso page or similar. However,
 		 * as of at least Linux 5.15, possibly earlier, it does seem to be
@@ -241,9 +214,28 @@ void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *e
 	}
 }
 
+_Bool addr_is_in_ld_so(const void *pos)
+{
+	extern void *__tls_get_addr(); // in ld.so
+	static struct link_map *ld_so_link_map;
+	if (!ld_so_link_map)
+	{
+		ld_so_link_map = get_highest_loaded_object_below(__tls_get_addr);
+	}
+	debug_printf(1, "_r_debug is at %p\n", &_r_debug);
+	debug_printf(1, "We think ld.so's link map is at %p, base %p, filename %s\n",
+		ld_so_link_map,
+		ld_so_link_map ? (void*) ld_so_link_map->l_addr : (void*) -1,
+		ld_so_link_map ? ld_so_link_map->l_name : "(no link map)");
+
+	struct link_map *range_link_map = get_highest_loaded_object_below(pos);
+	return (ld_so_link_map && range_link_map &&
+		ld_so_link_map == range_link_map);
+}
+
 void trap_one_executable_region_given_shdrs(unsigned char *begin,
 	unsigned char *end, const char *filename,
-	_Bool is_writable, _Bool is_readable,
+	_Bool is_writable, _Bool is_readable, _Bool preserve_exec,
 	ElfW(Shdr) *shdrs, unsigned nshdr, ElfW(Addr) laddr)
 {
 	assert(end >= begin);
@@ -323,12 +315,13 @@ void trap_one_executable_region_given_shdrs(unsigned char *begin,
 		}
 		else
 		{
-			trap_one_instruction_range(begin_instr_pos, end_instr_pos, is_writable, is_readable);
+			trap_one_instruction_range(begin_instr_pos, end_instr_pos, is_writable, is_readable,
+				preserve_exec);
 		}
 	}
 }
 void trap_one_executable_region(unsigned char *begin, unsigned char *end, const char *filename,
-	_Bool is_writable, _Bool is_readable)
+	_Bool is_writable, _Bool is_readable, _Bool preserve_exec)
 {
 	// Q: why was this apparently not necessary previously?
 	// A. it was handled by a failure to mprotect()-to-writable, but that
@@ -339,7 +332,7 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 	}
 	struct file_metadata *fm = __runt_files_metadata_by_addr(begin);
 	trap_one_executable_region_given_shdrs(begin, end, filename, is_writable,
-		is_readable,
+		is_readable, preserve_exec,
 		fm ? fm->shdrs : NULL, fm ? fm->ehdr->e_shnum : 0, fm ? fm->l->l_addr : 0);
 }
 

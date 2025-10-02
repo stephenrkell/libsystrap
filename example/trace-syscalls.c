@@ -63,11 +63,23 @@ static int process_mapping_cb(struct maps_entry *ent, char *linebuf, void *arg)
 		return 0;
 	}
 
+	if (addr_is_in_ld_so((const void*) ent->first)) return 0;
+
 	if (ent->x == 'x')
 	{
+		/* Sometimes our own code will need to call into the dynamic
+		 * linker, e.g. to call __tls_get_addr. So if we're walking the
+		 * dynamic linker, leave it executable.
+		 *
+		 * If we are a preload library, this isn't really an extra
+		 * security weakness because our own code is in the same boat.
+		 *
+		 * If we *are* the dynamic linker, this problem goes away, because
+		 * we never take away our own permissions (see above). */
 		trap_one_executable_region((unsigned char *) ent->first, (unsigned char *) ent->second,
 			 ent->rest[0] ? ent->rest : NULL,
-			ent->w == 'w', ent->r == 'r');
+			ent->w == 'w', ent->r == 'r',
+			/* preserve_exec */ addr_is_in_ld_so((const void*) ent->first));
 	}
 	
 	return 0; // keep going

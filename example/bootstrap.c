@@ -514,7 +514,7 @@ bootstrap_proto(mmap)
 				inferred_vaddr = (uintptr_t) mapping - matched->p_vaddr;
 				// now we can trap the bugger
 				trap_one_executable_region_given_shdrs(mapping, (void*) mapping + length,
-					filename, /* is_writable */ 1, /* is_readable */ 1,
+					filename, /* is_writable */ 1, /* is_readable */ 1, /* preserve_exec */ 0,
 					shdrs, ehdr.e_shnum,
 					/* HMM. What's the load address of the file?
 					 * We can infer this if we can match the mapping to a phdr
