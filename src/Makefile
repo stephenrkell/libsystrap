@@ -116,13 +116,17 @@ $(info Now XED_DIR is $(XED_DIR))
 xed.os: $(XED_DIR)/build-$(arch)/lib/libxed.a
 	$(CC) $(CFLAGS) $(LDFLAGS) -nostdlib -no-pie -fno-lto -Wl,-r -o $@ -Wl,--whole-archive $< -Wl,--no-whole-archive
 
-libsystrap.a: $(OBJS) xed.os
-	$(AR) r "$@" $+
+xed.os.d: $(XED_DIR)/build-$(arch)/lib/libxed.a
+	a="$$(readlink -f "$<")"; mkdir -p $@ && (cd $@ && $(AR) x "$$a") || (rm -rf $@; false)
+
+libsystrap.a: $(OBJS) xed.os.d
+	$(AR) r "$@" $(filter-out xed.os.d,$+) xed.os.d/*.o
 
 .PHONY: clean
 clean:
 	rm -f libsystrap.a
-	rm -f $(OBJS) xed.os
+	rm -f $(OBJS)
+	rm -rf xed.os.d
 	rm -f $(patsubst %.o,%.d,$(OBJS))
 
 endif # run-from-srcdir test
