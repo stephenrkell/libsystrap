@@ -79,7 +79,7 @@ static int process_mapping_cb(struct maps_entry *ent, char *linebuf, void *arg)
 		trap_one_executable_region((unsigned char *) ent->first, (unsigned char *) ent->second,
 			 ent->rest[0] ? ent->rest : NULL,
 			ent->w == 'w', ent->r == 'r',
-			/* preserve_exec */ addr_is_in_ld_so((const void*) ent->first));
+			/* preserve_exec */ addr_is_in_ld_so((const void*) ent->first), set_default_trap, NULL);
 	}
 	
 	return 0; // keep going

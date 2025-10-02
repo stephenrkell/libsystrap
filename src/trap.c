@@ -135,16 +135,28 @@ void walk_instructions(unsigned char *pos, unsigned char *end,
 	}
 }
 
-static void instruction_cb(unsigned char *pos, unsigned len, void *arg)
+int set_default_trap(unsigned char *pos, unsigned len, void *arg_ignored)
 {
+	replace_syscall_with_ud2(pos, len);
+	return 0;
+}
+struct set_trap_closure
+{
+	set_trap_fn_t *set_trap;
+	void *set_trap_arg;
+};
+
+static void maybe_set_trap_cb(unsigned char *pos, unsigned len, void *set_trap_closure_as_void)
+{
+	struct set_trap_closure *s = set_trap_closure_as_void;
 	if (is_syscall_instr(pos, pos + len))
 	{
-		replace_syscall_with_ud2(pos, len);
+		s->set_trap(pos, len, s->set_trap_arg);
 	}
 }
 
 void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *end_instr_pos,
-	_Bool is_writable, _Bool is_readable, _Bool preserve_exec)
+	_Bool is_writable, _Bool is_readable, _Bool preserve_exec, set_trap_fn_t *set_trap, void *set_trap_arg)
 {
 	const void *begin_page = ROUND_DOWN_PTR_TO_PAGE((const void *) begin_instr_pos);
 	const void *end_page = ROUND_UP_PTR_TO_PAGE((const void *) end_instr_pos);
@@ -189,7 +201,8 @@ void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *e
 	 * So we need to figure out where the libc's restorer is, and skip over it.
 	 * We leave this mostly as the client's business. Instead we allow the client
 	 * to define a __systrap_skip_ranges[]. */
-	walk_instructions(begin_instr_pos, end_instr_pos, instruction_cb, NULL);
+	struct set_trap_closure clos = { .set_trap = set_trap, .set_trap_arg = set_trap_arg };
+	walk_instructions(begin_instr_pos, end_instr_pos, maybe_set_trap_cb, &clos);
 	/* Now the paranoid second scan: check for in-betweens. */
 	unsigned char *instr_pos = (unsigned char *) begin_page; // start from the real beginning
 	while (instr_pos != end_page)
@@ -236,7 +249,8 @@ _Bool addr_is_in_ld_so(const void *pos)
 void trap_one_executable_region_given_shdrs(unsigned char *begin,
 	unsigned char *end, const char *filename,
 	_Bool is_writable, _Bool is_readable, _Bool preserve_exec,
-	ElfW(Shdr) *shdrs, unsigned nshdr, ElfW(Addr) laddr)
+	ElfW(Shdr) *shdrs, unsigned nshdr, ElfW(Addr) laddr,
+	set_trap_fn_t *set_trap, void *set_trap_arg)
 {
 	assert(end >= begin);
 	// it's executable; scan for syscall instructions
@@ -316,12 +330,13 @@ void trap_one_executable_region_given_shdrs(unsigned char *begin,
 		else
 		{
 			trap_one_instruction_range(begin_instr_pos, end_instr_pos, is_writable, is_readable,
-				preserve_exec);
+				preserve_exec, set_trap, set_trap_arg);
 		}
 	}
 }
 void trap_one_executable_region(unsigned char *begin, unsigned char *end, const char *filename,
-	_Bool is_writable, _Bool is_readable, _Bool preserve_exec)
+	_Bool is_writable, _Bool is_readable, _Bool preserve_exec,
+	set_trap_fn_t *set_trap, void *set_trap_arg)
 {
 	// Q: why was this apparently not necessary previously?
 	// A. it was handled by a failure to mprotect()-to-writable, but that
@@ -333,7 +348,8 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 	struct file_metadata *fm = __runt_files_metadata_by_addr(begin);
 	trap_one_executable_region_given_shdrs(begin, end, filename, is_writable,
 		is_readable, preserve_exec,
-		fm ? fm->shdrs : NULL, fm ? fm->ehdr->e_shnum : 0, fm ? fm->l->l_addr : 0);
+		fm ? fm->shdrs : NULL, fm ? fm->ehdr->e_shnum : 0, fm ? fm->l->l_addr : 0,
+		set_trap, set_trap_arg);
 }
 
 void handle_sigill(int n) __attribute__((visibility("hidden")));

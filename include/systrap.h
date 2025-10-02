@@ -9,14 +9,16 @@
 void install_sigill_handler(void);
 void trap_all_mappings(void);
 void create_fake_vdso(ElfW(auxv_t) *auxv);
+typedef int set_trap_fn_t(unsigned char *addr, unsigned len, void *arg);
+int set_default_trap(unsigned char *addr, unsigned len, void *arg);
 void trap_one_executable_region(unsigned char *begin, unsigned char *end, const char *filename,
-	_Bool is_writable, _Bool is_readable, _Bool preserve_exec);
+	_Bool is_writable, _Bool is_readable, _Bool preserve_exec, set_trap_fn_t *set_trap, void *set_trap_arg);
 void trap_one_instruction_range(unsigned char *begin, unsigned char *end,
-	_Bool is_writable, _Bool is_readable, _Bool preserve_exec);
+	_Bool is_writable, _Bool is_readable, _Bool preserve_exec, set_trap_fn_t *set_trap, void *set_trap_arg);
 void trap_one_executable_region_given_shdrs(unsigned char *begin,
 	unsigned char *end, const char *filename,
 	_Bool is_writable, _Bool is_readable, _Bool preserve_exec,
-	ElfW(Shdr) *shdrs, unsigned nshdr, ElfW(Addr) laddr);
+	ElfW(Shdr) *shdrs, unsigned nshdr, ElfW(Addr) laddr, set_trap_fn_t *set_trap, void *set_trap_arg);
 _Bool addr_is_in_ld_so(const void *pos);
 void walk_instructions(unsigned char *pos, unsigned char *end,
 	void (*cb)(unsigned char *pos, unsigned len, void *arg), void *arg);

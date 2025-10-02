@@ -522,7 +522,7 @@ bootstrap_proto(mmap)
 					 * In general, multiple phdrs may map the same parts of the
 					 * file. Can we really not get more insight into the ld.so's
 					 * state? I think SEGV is the only way. */
-					inferred_vaddr);
+					inferred_vaddr, set_default_trap, NULL);
 
 				// OK, done the trap so let's fix up the protection (always different)
 				ret = mprotect(mapping, length, prot);
