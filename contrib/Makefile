@@ -125,12 +125,12 @@ varlist += LIBC_A_PATTERN LIBC_CFLAGS_PATTERN
 build-xed: xed/build-$(arch)/lib/libxed.a
 xed/build-$(arch)/lib/libxed.a: $(MBUILD_DIR)
 	cd xed && ./mfile.py install --build-dir=obj-$(arch) --install-dir=build-$(arch) --no-encoder \
-	  --extra-flags='-fPIC -ffreestanding $(MUSL_ABI_CFLAGS)'
+	  --extra-flags='-fPIC -ffreestanding -ffunction-sections -fdata-sections $(MUSL_ABI_CFLAGS)'
 ifeq ($(arch),x86_64)
 build-xed: xed/build-i386/lib/libxed.a
 xed/build-i386/lib/libxed.a: $(MBUILD_DIR)
 	cd xed && ./mfile.py install --build-dir=obj-i386 --install-dir=build-i386 --no-encoder \
-	  --extra-flags='-m32 -fPIC -ffreestanding $(MUSL_ABI_CFLAGS)' --extra-linkflags=-Wl,-melf_i386
+	  --extra-flags='-m32 -fPIC -ffreestanding -ffunction-sections -fdata-sections $(MUSL_ABI_CFLAGS)' --extra-linkflags=-Wl,-melf_i386
 endif
 
 clean::
