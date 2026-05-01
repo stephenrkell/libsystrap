@@ -196,11 +196,6 @@ void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *e
 	// // assert that line_end_pos
 	debug_printf(1, "Scanning for syscall instructions within %p-%p (%s)\n",
 		begin_instr_pos, end_instr_pos, /*debug_buf */ "FIXME: reinstate debug printout");
-	/* If our range contains a signal restorer, it will do a sigreturn.
-	 * We don't want to trap this.
-	 * So we need to figure out where the libc's restorer is, and skip over it.
-	 * We leave this mostly as the client's business. Instead we allow the client
-	 * to define a __systrap_skip_ranges[]. */
 	struct set_trap_closure clos = { .set_trap = set_trap, .set_trap_arg = set_trap_arg };
 	walk_instructions(begin_instr_pos, end_instr_pos, maybe_set_trap_cb, &clos);
 	/* Now the paranoid second scan: check for in-betweens. */
