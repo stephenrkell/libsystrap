@@ -175,7 +175,8 @@ static void startup(int argc, char **argv, char **environ)
 	__runt_auxv_get_env(&p_envv_0, &p_envv_end);
 	__init_libc((char**) p_envv_0, (char*) *p_argv_0);
 	init_fds();
-	const ElfW(auxv_t) *p_auxv_start = NULL, *p_auxv_terminator = NULL;
+	const ElfW(auxv_t) *p_auxv_start = NULL;
+	ElfW(auxv_t) *p_auxv_terminator = NULL;
 	__runt_auxv_get_auxv(&p_auxv_start, &p_auxv_terminator);
 	/* We can create the fake vDSO, but how can we make the program use it?
 	 * In the chain-loader case, we modify the AT_SYSINFO_EHDR auxv entry
@@ -188,7 +189,7 @@ static void startup(int argc, char **argv, char **environ)
 	 * something about TLS.
 	 */
 	// XXX: should these just be a single "enable_systrap()" call?
-	create_fake_vdso(p_auxv_start); // creates in already-trapped form
+	create_fake_vdso((ElfW(auxv_t) *) p_auxv_start); // creates in already-trapped form
 	trap_all_mappings(); // XXX: use this to trap the fake vdso too; have just "copy_vdso(...)"?
 	install_sigill_handler();
 #if defined(__i386__)
