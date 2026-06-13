@@ -36,6 +36,27 @@ unsigned sysinfo_sysenter_offset __attribute__((visibility("hidden")));
 #endif
 void *fake_sysinfo __attribute__((visibility("hidden")));
 
+/* Per-thread pointer to the application sigframe of the syscall we are currently
+ * emulating in handle_sigill, or NULL when this thread is not inside an
+ * emulation. Published with DEFAULT visibility so another preloaded runtime
+ * (e.g. Alaska) can tell that a thread is parked inside a systrap syscall
+ * (-- hence at a GC-safe point --) and collect its roots from the saved application
+ * context (below) instead of unwinding across the nested handler/kernel signal
+ * frames (which corrupts state). Saved/restored, not just set/cleared, so a
+ * nested emulation restores the outer frame on the way out. */
+__thread struct ibcs_sigframe *__systrap_current_frame __attribute__((visibility("default")));
+
+void *__systrap_saved_sp_internal(void)
+{
+	struct ibcs_sigframe *f = __systrap_current_frame;
+	return f ? (void*) f->uc.uc_mcontext.MC_REG_SP : (void*) 0;
+}
+void *__systrap_saved_ip_internal(void)
+{
+	struct ibcs_sigframe *f = __systrap_current_frame;
+	return f ? (void*) f->uc.uc_mcontext.MC_REG_IP : (void*) 0;
+}
+
 /* We may or may not have syscall names linked in.
  * This is just to avoid a dependency on our syscall interface spec.  */
 extern const char *syscall_names[SYSCALL_MAX + 1] __attribute__((weak));
@@ -50,7 +71,27 @@ void handle_sigill(int n)
 	 * not, abort. */
 	unsigned long *frame_base = __builtin_frame_address(0);
 	struct ibcs_sigframe *p_frame = (struct ibcs_sigframe *) (frame_base + 1);
-	if (!is_ud2((void*) p_frame->uc.uc_mcontext.MC_REG_IP)) raw_exit(128 + SIGABRT);
+	/* For the in-systrap marker (see __systrap_current_frame): remember the outer
+	 * value so nested emulations restore it. Captured here (before any goto out)
+	 * so the restore at out: is well-defined; only set below once we know this is
+	 * our trap site and we are about to emulate. */
+	struct ibcs_sigframe *systrap_outer_frame = __systrap_current_frame;
+	/* Is this one of OUR syscall trap sites? It must be a ud2 AND an address we
+	 * recorded when replacing a syscall. Any other SIGILL -- a foreign ud2 
+	 * is not ours: forward it to the client's chained SIGILL handler if one is set.
+	 * 	The chained handler is called SA_SIGINFO-style and shares this sigframe's ucontext, so any context
+	 * changes it makes take effect on our normal return (via sigreturn). */
+	uintptr_t fault_ip = (uintptr_t) p_frame->uc.uc_mcontext.MC_REG_IP;
+	if (!is_ud2((void*) fault_ip) || !__systrap_is_trap_site(fault_ip))
+	{
+		if (__systrap_chained_sigill_handler)
+		{
+			__systrap_chained_sigill_handler((int) SIGILL,
+				(void*) &p_frame->info, (void*) &p_frame->uc);
+			return;
+		}
+		raw_exit(128 + SIGABRT);
+	}
 #if defined(__i386__)
 	unsigned char *tls;
 	__asm__("mov %%gs:0x0,%0" : "=r"(tls));
@@ -240,6 +281,10 @@ void handle_sigill(int n)
 	 * from emulating the return-to-__restore_rt path, i.e. the exit path from
 	 * this function.
 	 */
+	/* From here we are emulating a real syscall on behalf of the application:
+	 * publish the saved application context so a concurrent barrier signal
+	 * sees this thread as in-systrap (see __systrap_current_frame). */
+	__systrap_current_frame = p_frame;
 	__systrap_pre_handling(&gsp);
 	if (replaced_syscalls[gsp.syscall_number])
 	{
@@ -271,6 +316,8 @@ void handle_sigill(int n)
 		do_generic_syscall_and_fixup(&gsp);
 	}
 out:
+	/* No longer emulating on this thread */
+	__systrap_current_frame = systrap_outer_frame;
 	_handle_sigill_debug_printf(1, "Resuming from instruction at %p\n", p_frame->uc.uc_mcontext.MC_REG_IP);
 #if defined(__i386__)
 	*(void**)(tls+16) = saved_sysinfo;

@@ -27,6 +27,8 @@ extern int debug_level;
 // make a noncommital declaration of __assert_fail
 void __assert_fail() __attribute__((noreturn));
 
+extern __thread struct ibcs_sigframe *__systrap_current_frame;
+
 extern uintptr_t our_load_address;
 
 /* FIX_STACK_ALIGNMENT is in raw-syscalls-impl.h, included above */
@@ -641,6 +643,27 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		 * We can detect that using ret_op i.e. clone()'s return value. */
 		(ret_op == 0) ? (void*) (gsp->args[1] /* see fake_arg1 comment above  */)
 			: NULL);
+#if defined(__x86_64__)
+	if (ret_op == 0 && __systrap_clone_child_direct_sigreturn)
+	{
+		/* Child: rt_sigreturn directly from the copied sigframe instead of
+		 * unwinding handle_sigill's epilogue. 
+		 * Use the child's own current SP (on the new thread stack),
+		 * 16-byte aligned; RSP for the syscall must be &uc (kernel reads the frame at RSP-8).
+		 */
+		uintptr_t child_sp;
+		__asm__ volatile ("movq %%rsp, %0" : "=r"(child_sp));
+		gsp->saved_context->uc.uc_mcontext.MC_REG_SP = child_sp & ~(uintptr_t) 0xf;
+		/* Resuming into application code; this thread is no longer in systrap. */
+		__systrap_current_frame = (struct ibcs_sigframe *) 0;
+		void *uc_addr = (void*) &gsp->saved_context->uc;
+		__asm__ volatile ("movq %0, %%rsp\n\t"
+		                  "movq $15, %%rax\n\t" /* __NR_rt_sigreturn */
+		                  "syscall\n\t"
+		                  :: "r"(uc_addr) : "memory");
+		__builtin_unreachable();
+	}
+#endif
 	return ret_op;
 }
 
@@ -808,6 +831,38 @@ do_clone3(struct generic_syscall *gsp)
 		           (uintptr_t)(((struct clone_args *) gsp->args[0])->stack)
 		         + (uintptr_t)(((struct clone_args *) gsp->args[0])->stack_size)
 		): NULL);
+#if defined(__x86_64__)
+	if (ret_op == 0 && __systrap_clone_child_direct_sigreturn)
+	{
+		/* Child: rt_sigreturn directly from the copied sigframe instead of
+		 * unwinding handle_sigill's compiler-generated epilogue. The unwind
+		 * depends on the RBP-swizzle above and the -O2 epilogue being byte-exact
+		 * relative to the relocated frames, which races under some clone-site
+		 * stack layouts (e.g. Alaska's pthread_create interposer). copy_to_new_-
+		 * stack already relocated gsp->saved_context to point at the copied
+		 * sigframe, and fixup_sigframe_for_return set its rax/IP/SP. The kernel's
+		 * rt_sigreturn reads the frame at RSP-8, so set RSP = &uc.
+		 *
+		 * Do NOT trust the resume SP that fixup_sigframe_for_return derived from
+		 * clone_args: clone_args lives on the shared (CLONE_VM) parent stack and
+		 * the parent overwrites that frame once clone3 returns, so reading it
+		 * here races. Use the child's own current SP, which is on the new thread
+		 * stack, and 16-byte align it (x86-64 ABI; else start_thread's SSE-using
+		 * snprintf in name_stack_maps faults).
+		 */
+		uintptr_t child_sp;
+		__asm__ volatile ("movq %%rsp, %0" : "=r"(child_sp));
+		gsp->saved_context->uc.uc_mcontext.MC_REG_SP = child_sp & ~(uintptr_t) 0xf;
+		/* Resuming into application code; this thread is no longer in systrap. */
+		__systrap_current_frame = (struct ibcs_sigframe *) 0;
+		void *uc_addr = (void*) &gsp->saved_context->uc;
+		__asm__ volatile ("movq %0, %%rsp\n\t"
+		                  "movq $15, %%rax\n\t" /* __NR_rt_sigreturn */
+		                  "syscall\n\t"
+		                  :: "r"(uc_addr) : "memory");
+		__builtin_unreachable();
+	}
+#endif
 	return ret_op;
 }
 
@@ -835,6 +890,9 @@ do_sigreturn(struct generic_syscall *gsp)
 	 * sigframe that that first signal's handler was trying to resume with.
 	 */
 	long int ret_op = (long int) gsp->syscall_number; /* either sigreturn or rt_sigreturn */
+	/* We never reach handle_sigill's out: from here; clear the in-systrap marker
+	 * (we are about to sigreturn into application code). */
+	__systrap_current_frame = (struct ibcs_sigframe *) 0;
 	__asm__ volatile (
 #if defined(__x86_64__)
 		  "mov %[orig_sigframe_sp], %%rsp \n" /* stack pointer at the trapped sigreturn syscall */

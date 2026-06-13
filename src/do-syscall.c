@@ -35,6 +35,12 @@ __attribute__((alias("__libsystrap_noop_post_handling")));
 #endif
 syscall_replacement *replaced_syscalls[SYSCALL_MAX] = { NULL };
 
+/* When non-zero, the clone/clone3 child resumes by doing rt_sigreturn directly
+ * from the copied sigframe, instead of unwinding handle_sigill's epilogue.
+ * Off by default.
+ */
+int __systrap_clone_child_direct_sigreturn = 0;
+
 void *generic_syscall_get_ip(struct generic_syscall *gsp)
 {
 	return (void*) gsp->saved_context->uc.uc_mcontext.MC_REG_IP;
