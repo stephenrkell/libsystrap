@@ -241,7 +241,7 @@ void handle_sigill(int n)
 	 * this function.
 	 */
 	__systrap_pre_handling(&gsp);
-	if (replaced_syscalls[gsp.syscall_number])
+	if (unlikely(replaced_syscalls[gsp.syscall_number] != NULL))
 	{
 		/* Since replaced_syscalls holds function pointers, these calls will 
 		 * not be inlined. It follows that if the call ends up doing a real

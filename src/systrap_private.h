@@ -4,6 +4,14 @@
 extern int systrap_debug_level __attribute__((visibility("hidden")));
 extern _Bool is_ud2(const unsigned char *ins) __attribute__((visibility("hidden")));
 
+/* Branch hints for the per-syscall hot path. */
+#ifndef likely
+#define likely(x)   __builtin_expect(!!(x), 1)
+#endif
+#ifndef unlikely
+#define unlikely(x) __builtin_expect(!!(x), 0)
+#endif
+
 #ifdef SYSTRAP_DEFINE_FILE
 struct _IO_FILE;
 typedef struct _IO_FILE FILE;
