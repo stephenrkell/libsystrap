@@ -390,6 +390,20 @@ bootstrap_proto(execveat)
 REPLACE(execveat)
 #endif /* CHAIN_LOADER */
 
+/* lcall-based instrumentation: whenever we map a stack,
+ * map it in the lower 32 bits. */
+static void tweak_flags(int *p_flags)
+{
+#ifdef __x86_64__
+	if (    (*p_flags & MAP_GROWSDOWN)
+		&& !(*p_flags & MAP_FIXED))
+	{
+		*p_flags |= MAP_32BIT;
+		write_string("tweaked a stack mapping!\n");
+	}
+#endif
+}
+
 #ifdef __i386__
 #if defined(__linux__) && !defined(__NR_mmap2)
 #define __NR_mmap2 192
@@ -418,6 +432,7 @@ bootstrap_proto(mmap2)
     v(int, fd, 4) sep        v(unsigned long, offset, 5)
 bootstrap_proto(mmap)
 {
+	tweak_flags(&flags);
 	if (!(prot & PROT_EXEC)) return mmap(addr, length, prot, flags, fd, offset);
 	// else...
 	// always map writable, non-executable

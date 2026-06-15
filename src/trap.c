@@ -91,11 +91,13 @@ void replace_instruction_with(unsigned char *pos, unsigned len,
 	}
 }
 
-void replace_syscall_with_ud2(unsigned char *pos, unsigned len)
+unsigned __next_trap_site;
+struct trap_site __trap_sites[MAX_TRAP_SITES];
+void replace_syscall_with_lcall(unsigned char *pos, unsigned len)
 {
 	assert(len >= 2);
-	unsigned char replacement[] = { (unsigned char) 0x0f, (unsigned char) 0x0b }; // ud2
-	debug_printf(1, "Replacing syscall at %p with trap\n", pos);
+	unsigned char replacement_ud2[] = { (unsigned char) 0x0f, (unsigned char) 0x0b }; // ud2
+	unsigned char replacement_lcall[] = { (unsigned char) 0xff, (unsigned char) 0x98 }; // lcall  *0xnnnnnnnn(%rax) 
 #ifdef __i386__
 	if (is_sysenter_instr(pos, pos + len) &&
 			(uintptr_t) pos >= (uintptr_t) fake_sysinfo &&
@@ -115,7 +117,26 @@ void replace_syscall_with_ud2(unsigned char *pos, unsigned len)
 		}
 	}
 #endif
-	replace_instruction_with(pos, len, replacement, sizeof replacement);
+	int32_t bytes; memcpy(&bytes, pos+len, 4); // HACK
+	if (bytes > 2097152) // HACK: more precise please
+	{
+		debug_printf(1, "Replacing syscall at %p with trap (lcall via *0xPUNNED(%rax))\n", pos);
+		__trap_sites[__next_trap_site++] = (struct trap_site) {
+			.addr = (uintptr_t) pos,
+			.indirect_access_low = /* what's the lowest address we might try to read a selector from?
+		        	  * It's the value of the next four bytes plus zero (lowest syscall number) */
+					bytes,
+			.indirect_access_high = /* what's the highest address plus one that we might try to read a selector from?
+		        	* It's the value of the next four bytes plus ASSUMED_MAX_SYSCALL_NUMBER plus one */
+					bytes + ASSUMED_MAX_SYSCALL_NUMBER + 1
+		};
+		replace_instruction_with(pos, len, replacement_lcall, sizeof replacement_lcall);
+	}
+	else
+	{
+		debug_printf(1, "Replacing syscall at %p with trap (ud2)\n", pos);
+		replace_instruction_with(pos, len, replacement_ud2, sizeof replacement_ud2);
+	}
 }
 
 void walk_instructions(unsigned char *pos, unsigned char *end,
@@ -137,7 +158,7 @@ void walk_instructions(unsigned char *pos, unsigned char *end,
 
 int set_default_trap(unsigned char *pos, unsigned len, void *arg_ignored)
 {
-	replace_syscall_with_ud2(pos, len);
+	replace_syscall_with_lcall(pos, len);
 	return 0;
 }
 struct set_trap_closure
@@ -194,6 +215,7 @@ void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *e
 	// strncpy(debug_buf, line_begin_pos, line_end_pos - line_begin_pos);
 	// debug_buf[sizeof debug_buf - 1] = '\0';
 	// // assert that line_end_pos
+	unsigned orig_ntrapsites = __next_trap_site;
 	debug_printf(1, "Scanning for syscall instructions within %p-%p (%s)\n",
 		begin_instr_pos, end_instr_pos, /*debug_buf */ "FIXME: reinstate debug printout");
 	struct set_trap_closure clos = { .set_trap = set_trap, .set_trap_arg = set_trap_arg };
@@ -210,6 +232,8 @@ void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *e
 		}
 		++instr_pos;
 	}
+	if (__next_trap_site > orig_ntrapsites) qsort(__trap_sites, __next_trap_site,
+		sizeof (struct trap_site), compare_trap_sites_low32);
 
 	// restore original perms
 	if (!is_writable)
@@ -226,19 +250,32 @@ _Bool addr_is_in_ld_so(const void *pos)
 {
 	extern void *__tls_get_addr(); // in ld.so
 	static struct link_map *ld_so_link_map;
+	static void *ld_so_end;
 	if (!ld_so_link_map)
 	{
+		debug_printf(1, "_r_debug is at %p\n", &_r_debug);
 		ld_so_link_map = get_highest_loaded_object_below(__tls_get_addr);
+		debug_printf(1, "We think (the real) ld.so's link map is at %p, base %p, filename %s\n",
+			ld_so_link_map,
+			ld_so_link_map ? (void*) ld_so_link_map->l_addr : (void*) -1,
+			ld_so_link_map ? ld_so_link_map->l_name : "(no link map)");
+		/* XXX: we will use get_highest_loaded_object_below on pos, but
+		 * this is wrong if the real ld.so is the highest loaded object:
+		 * we will deem all higher addresses to be within the ld.so. And more
+		 * generally it's wrong because we don't account for the end of the ld.so.
+		 * Can we apply a length check using etext from the ld.so? No, because
+		 * my ld.so does not define etext. If we could get the phdrs we could
+		 * find the maximum vaddr... can we do this? */
+		if (ld_so_link_map) ld_so_end = get_text_segment_end_from_load_addr(
+			ld_so_link_map->l_addr);
 	}
-	debug_printf(1, "_r_debug is at %p\n", &_r_debug);
-	debug_printf(1, "We think ld.so's link map is at %p, base %p, filename %s\n",
-		ld_so_link_map,
-		ld_so_link_map ? (void*) ld_so_link_map->l_addr : (void*) -1,
-		ld_so_link_map ? ld_so_link_map->l_name : "(no link map)");
 
 	struct link_map *range_link_map = get_highest_loaded_object_below(pos);
-	return (ld_so_link_map && range_link_map &&
-		ld_so_link_map == range_link_map);
+	_Bool ret = (ld_so_link_map && range_link_map &&
+		ld_so_link_map == range_link_map &&
+			(!ld_so_end || (uintptr_t) pos < (uintptr_t) ld_so_end));
+	if (ret) debug_printf(1, "We think %p is within (the real) ld.so\n", pos);
+	return ret;
 }
 
 void trap_one_executable_region_given_shdrs(unsigned char *begin,

@@ -46,11 +46,11 @@ void handle_sigill(int n)
 	 * If it isn't, and if the user has their own sigill handler
 	 * (which we stashed somewhere rather than actually allowing
 	 * to be installed) we need to tail-call that. For now, we
-	 * just do a quick check whether we came from a ud2, and if
+	 * just do a quick check whether we came from a trap byte sequence, and if
 	 * not, abort. */
 	unsigned long *frame_base = __builtin_frame_address(0);
 	struct ibcs_sigframe *p_frame = (struct ibcs_sigframe *) (frame_base + 1);
-	if (!is_ud2((void*) p_frame->uc.uc_mcontext.MC_REG_IP)) raw_exit(128 + SIGABRT);
+	if (!is_trap_bytes((void*) p_frame->uc.uc_mcontext.MC_REG_IP)) raw_exit(128 + SIGABRT);
 #if defined(__i386__)
 	unsigned char *tls;
 	__asm__("mov %%gs:0x0,%0" : "=r"(tls));
@@ -114,7 +114,7 @@ void handle_sigill(int n)
 		unsigned page_size = MIN_PAGE_SIZE; // FIXME: use actual page size from auxv
 		int ret = raw_mprotect((void*)RELF_ROUND_DOWN_(addr, page_size), page_size, PROT_WRITE);
 		assert(ret == 0);
-		assert(is_ud2(addr));
+		assert(is_trap_bytes(addr));
 		// HACK: this assumes we know exactly which instruction we clobbered
 		static const unsigned char syscall_insn[] = {
 #if defined(__x86_64__)

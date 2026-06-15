@@ -17,5 +17,9 @@ run-getpid-chain.stamp: getpid
 
 # freestanding assembly tests -- these use a non-PIC idiom
 true getpid clone3: LDFLAGS += -no-pie -nostartfiles -nostdlib
+true-hipun getpid-pie: LDFLAGS += -nostartfiles -nostdlib
+true-hipun getpid-pie: CFLAGS += -fPIC
+true-hipun getpid-pie: AFLAGS += -fPIC
+
 # HACK: until glibc bug 25486 is fixed, we have to add -lc
-true getpid clone3: LDLIBS += /lib64/ld-linux-x86-64.so.2 -Wl,--no-as-needed -lc
+true getpid clone3 getpid-pie true-hipun: LDLIBS += /lib64/ld-linux-x86-64.so.2 -Wl,--no-as-needed -lc
