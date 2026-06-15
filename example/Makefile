@@ -255,14 +255,17 @@ $(LDSO_OBJS): CFLAGS += -DDONALD_NAME=\"trace-syscalls-ld\" \
 
 bootstrap.o: CFLAGS += -DCHAIN_LOADER
 
-DYNAPPEND ?= $(shell which dynappend)
+DYNAPPEND ?= $(shell which $${ELFTIN:+$${ELFTIN}/dynappend/}dynappend)
+ifeq ($(DYNAPPEND),)
+$(warning No DYNAPPEND or ELFTIN, so trace-syscalls-ld.so will not support debugging properly (ELFTIN is $(ELFTIN)).)
+endif
 # FIXME: localize all global symbols except maybe _start?
 trace-syscalls-ld.so: trace-syscalls-ld.lds $(LDSO_OBJS) $(filter-out fake-tls.o,$(LOCAL_OBJS)) dynamic-list $(srcroot)/build/$(arch)/libsystrap.a
 	$(CC) $(CFLAGS) -fuse-ld=bfd \
             -Bsymbolic -nostdlib -nostartfiles -static-libgcc -shared -o "$@" \
             $(filter-out dynamic-list,$(filter-out %.lds,$(filter-out %.a,$+))) \
             $(LDFLAGS) $(LDLIBS) -lgcc -Wl,-Bsymbolic \
-            -T $(filter %.lds,$+) -Wl,-soname=ld-linux.so.2 \
+            -T $(filter %.lds,$+) -Wl,-soname=trace-syscalls-ld.so \
             -Wl,--dynamic-list,dynamic-list
 	if [ -n "$(DYNAPPEND)" ]; then $(DYNAPPEND) $@ 21 ; fi # DT_DYNAMIC
 
