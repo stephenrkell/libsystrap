@@ -14,15 +14,18 @@
 // that it's our own debug printing in order to filter it
 // out of the footprints, hence this noinline function
 // rather than using the normal macro
-__attribute__ ((noinline)) static void _handle_sigill_debug_printf(int level, const char *fmt, ...) {
-	 va_list vl;
-	 va_start(vl, fmt);
-	 if ((level) <= systrap_debug_level) {
-		  vfprintf(stderr, fmt, vl);
-		  fflush(stderr);
-	 }
-	 va_end(vl);
+__attribute__ ((noinline)) static void _handle_sigill_debug_printf(const char *fmt, ...) {
+	va_list vl;
+	va_start(vl, fmt);
+	vfprintf(stderr, fmt, vl);
+	fflush(stderr);
+	va_end(vl);
 }
+
+// prevent call if we can
+#define handle_sigill_debug_printf(level, ...) \
+	do { if ((level) <= systrap_debug_level) \
+		_handle_sigill_debug_printf( __VA_ARGS__); } while (0)
 
 /* FIXME: for thread-safety, saved_sysinfo should be a local
  * which we thread through to our callees, all the way to the
@@ -62,12 +65,12 @@ void handle_sigill(int n)
 #endif
 
 	/* Decode the syscall using sigcontext. */
-	_handle_sigill_debug_printf(1, "Took a trap from instruction at %p",
+	handle_sigill_debug_printf(1, "Took a trap from instruction at %p",
 			(void*) p_frame->uc.uc_mcontext.MC_REG_IP);
 #ifdef EXECUTABLE
 	if (p_frame->uc.uc_mcontext.MC_REG_IP == (uintptr_t) ignore_ud2_addr)
 	{
-		_handle_sigill_debug_printf(1, " which is our test trap address; continuing.\n");
+		handle_sigill_debug_printf(1, " which is our test trap address; continuing.\n");
 		resume_from_sigframe(0, p_frame, 2);
 #if defined(__i386__)
 		*(void**)(tls+16) = saved_sysinfo;
@@ -85,7 +88,7 @@ void handle_sigill(int n)
 #endif
 	assert(syscall_num >= 0);
 	assert(syscall_num < SYSCALL_MAX);
-	_handle_sigill_debug_printf(1, " which we think is syscall %s/%ld\n",
+	handle_sigill_debug_printf(1, " which we think is syscall %s/%ld\n",
 		&syscall_names[0] ? syscall_names[syscall_num] : "(names not linked in)", syscall_num);
 
 #if 0
@@ -110,7 +113,7 @@ void handle_sigill(int n)
 		 * better solution.
 		 */
 		void *addr = (void*) p_frame->uc.uc_mcontext.MC_REG_IP;
-		_handle_sigill_debug_printf(1, "Untrapping sigreturn site %p\n", addr);
+		handle_sigill_debug_printf(1, "Untrapping sigreturn site %p\n", addr);
 		unsigned page_size = MIN_PAGE_SIZE; // FIXME: use actual page size from auxv
 		int ret = raw_mprotect((void*)RELF_ROUND_DOWN_(addr, page_size), page_size, PROT_WRITE);
 		assert(ret == 0);
@@ -241,7 +244,7 @@ void handle_sigill(int n)
 	 * this function.
 	 */
 	__systrap_pre_handling(&gsp);
-	if (replaced_syscalls[gsp.syscall_number])
+	if (unlikely(replaced_syscalls[gsp.syscall_number] != NULL))
 	{
 		/* Since replaced_syscalls holds function pointers, these calls will 
 		 * not be inlined. It follows that if the call ends up doing a real
@@ -271,7 +274,7 @@ void handle_sigill(int n)
 		do_generic_syscall_and_fixup(&gsp);
 	}
 out:
-	_handle_sigill_debug_printf(1, "Resuming from instruction at %p\n", p_frame->uc.uc_mcontext.MC_REG_IP);
+	handle_sigill_debug_printf(1, "Resuming from instruction at %p\n", p_frame->uc.uc_mcontext.MC_REG_IP);
 #if defined(__i386__)
 	*(void**)(tls+16) = saved_sysinfo;
 	return;

@@ -306,13 +306,18 @@ __attribute__((always_inline,gnu_inline))
 do_generic_syscall_and_fixup(struct generic_syscall *gsp)
 {
 	long ret;
-	switch (is_special_syscall(gsp))
+	enum special_syscall special = is_special_syscall(gsp);
+	/* The overwhelmingly common case is an ordinary (non-special) syscall.
+	 * Keep it as the straight-line path and hint the branch accordingly;
+	 * sigreturn/clone are rare and handled out of line. */
+	if (likely(special == NOT_SPECIAL))
 	{
-		case NOT_SPECIAL:
-			ret = do_real_syscall(gsp);            /* always inlined */
-			fixup_sigframe_for_return(gsp->saved_context, ret,
-				trap_len(&gsp->saved_context->uc.uc_mcontext), NULL);
-			break;
+		ret = do_real_syscall(gsp);            /* always inlined */
+		fixup_sigframe_for_return(gsp->saved_context, ret,
+			trap_len(&gsp->saved_context->uc.uc_mcontext), NULL);
+	}
+	else switch (special)
+	{
 		case SPECIAL_SYSCALL_SIGRETURN:
 			do_sigreturn(gsp);
 			break; // never hit -- sigreturn never returns
