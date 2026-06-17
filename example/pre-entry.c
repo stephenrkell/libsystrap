@@ -9,8 +9,8 @@
 #include "relf.h"
 #include "trace-syscalls.h"
 
-extern uintptr_t __start___replaced_syscalls;
-extern uintptr_t __stop___replaced_syscalls;
+extern uintptr_t __start___replaced_syscalls[];
+extern uintptr_t __stop___replaced_syscalls[];
 
 void __real_enter(void *entry_point);
 void __wrap_enter(void *entry_point)
@@ -55,13 +55,13 @@ void __wrap_enter(void *entry_point)
 	 * Well, it can't be split across multiple files, unlike this approach.
 	 * This is a bit nasty though.
 	 */
-	unsigned nreplacements = (&__stop___replaced_syscalls - &__start___replaced_syscalls) / 2;
+	unsigned nreplacements = (__stop___replaced_syscalls - __start___replaced_syscalls) / 2;
 	for (unsigned n = 0; n < nreplacements; ++n)
 	{
-		uintptr_t syscall_n = (&__start___replaced_syscalls)[2*n];
+		uintptr_t syscall_n = __start___replaced_syscalls[2*n];
 		assert(syscall_n < SYSCALL_MAX);
 		void (*replacement)(struct generic_syscall *s, post_handler *post)
-		 = (void*)(&__start___replaced_syscalls)[2*n + 1];
+		 = (void*)__start___replaced_syscalls[2*n + 1];
 		replaced_syscalls[syscall_n] = replacement;
 	}
 	find_r_debug()->r_map = NULL;

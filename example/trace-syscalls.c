@@ -175,7 +175,8 @@ static void startup(int argc, char **argv, char **environ)
 	__runt_auxv_get_env(&p_envv_0, &p_envv_end);
 	__init_libc((char**) p_envv_0, (char*) *p_argv_0);
 	init_fds();
-	const ElfW(auxv_t) *p_auxv_start = NULL, *p_auxv_terminator = NULL;
+	const ElfW(auxv_t) *p_auxv_start = NULL;
+	ElfW(auxv_t) *p_auxv_terminator = NULL;
 	__runt_auxv_get_auxv(&p_auxv_start, &p_auxv_terminator);
 	/* We can create the fake vDSO, but how can we make the program use it?
 	 * In the chain-loader case, we modify the AT_SYSINFO_EHDR auxv entry
@@ -188,7 +189,7 @@ static void startup(int argc, char **argv, char **environ)
 	 * something about TLS.
 	 */
 	// XXX: should these just be a single "enable_systrap()" call?
-	create_fake_vdso(p_auxv_start); // creates in already-trapped form
+	create_fake_vdso((ElfW(auxv_t) *) p_auxv_start); // creates in already-trapped form
 	trap_all_mappings(); // XXX: use this to trap the fake vdso too; have just "copy_vdso(...)"?
 	install_sigill_handler();
 #if defined(__i386__)
@@ -250,37 +251,86 @@ static void startup(int argc, char **argv, char **environ)
 }
 
 
+/* Lightweight, async-signal-safe trace formatting.
+ *
+ * These functions run in the syscall-trap signal-handler context, on whatever
+ * stack the trapped thread happens to be using. A thread cloned by the guest
+ * may have only a few kilobytes of stack, and musl's stdio needs several kilobytes in a single call
+ */
+static char *trace_put_str(char *p, char *end, const char *s)
+{
+	if (!s) s = "(null)";
+	while (*s && p < end) *p++ = *s++;
+	return p;
+}
+static char *trace_put_hex(char *p, char *end, unsigned long v)
+{
+	static const char digits[] = "0123456789abcdef";
+	char tmp[2 * sizeof v];
+	int n = 0;
+	if (p < end) *p++ = '0';
+	if (p < end) *p++ = 'x';
+	do { tmp[n++] = digits[v & 0xf]; v >>= 4; } while (v);
+	while (n > 0 && p < end) *p++ = tmp[--n];
+	return p;
+}
+static char *trace_put_dec(char *p, char *end, long sv)
+{
+	char tmp[3 * sizeof sv];
+	int n = 0;
+	unsigned long v;
+	if (sv < 0) { if (p < end) *p++ = '-'; v = -(unsigned long) sv; }
+	else v = (unsigned long) sv;
+	do { tmp[n++] = '0' + (char) (v % 10); v /= 10; } while (v);
+	while (n > 0 && p < end) *p++ = tmp[--n];
+	return p;
+}
+
 void print_pre_syscall(void *stream, struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, void *ret)
 			__attribute__((visibility("protected")));
 void print_pre_syscall(void *stream, struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, void *ret) {
-	char namebuf[5];
-	snprintf(namebuf, sizeof namebuf, "%d", gsp->syscall_number);
-	fprintf(stream, "== %d == > %s(%p, %p, %p, %p, %p, %p) @%p (%s+0x%x)\n",
-			raw_gettid(),
-			syscall_names[gsp->syscall_number]?:namebuf,
-			gsp->args[0],
-			gsp->args[1],
-			gsp->args[2],
-			gsp->args[3],
-			gsp->args[4],
-			gsp->args[5],
-			calling_addr,
-			calling_object ? calling_object->l_name : "(unknown)",
-			calling_object ? (char*) calling_addr - (char*) calling_object->l_addr : (ptrdiff_t) 0
-		);
-	fflush(stream);
+	if (!stream) return; /* tracing not enabled */
+	const char *name = syscall_names[gsp->syscall_number];
+	char buf[512];
+	char *p = buf, *end = buf + sizeof buf;
+	p = trace_put_str(p, end, "== ");
+	p = trace_put_dec(p, end, raw_gettid());
+	p = trace_put_str(p, end, " == > ");
+	if (name) p = trace_put_str(p, end, name);
+	else p = trace_put_dec(p, end, gsp->syscall_number);
+	p = trace_put_str(p, end, "(");
+	for (int i = 0; i < 6; ++i)
+	{
+		if (i) p = trace_put_str(p, end, ", ");
+		p = trace_put_hex(p, end, (unsigned long) gsp->args[i]);
+	}
+	p = trace_put_str(p, end, ") @");
+	p = trace_put_hex(p, end, (unsigned long) calling_addr);
+	p = trace_put_str(p, end, " (");
+	p = trace_put_str(p, end, calling_object ? calling_object->l_name : "(unknown)");
+	p = trace_put_str(p, end, "+");
+	p = trace_put_hex(p, end, calling_object
+		? (unsigned long) ((char*) calling_addr - (char*) calling_object->l_addr) : 0UL);
+	p = trace_put_str(p, end, ")\n");
+	raw_write(trace_fd, buf, p - buf);
 }
 
 void print_post_syscall(void *stream, struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, long int ret)
 			__attribute__((visibility("protected")));
 void print_post_syscall(void *stream, struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, long int ret) {
-	fprintf(stream, "== %d == < 0x%lx (from %s @%p)\n",
-		raw_gettid(),
-		(unsigned long) ret,
-		syscall_names[gsp->syscall_number],
-		calling_addr
-	);
-	fflush(stream);
+	if (!stream) return; /* tracing not enabled */
+	char buf[256];
+	char *p = buf, *end = buf + sizeof buf;
+	p = trace_put_str(p, end, "== ");
+	p = trace_put_dec(p, end, raw_gettid());
+	p = trace_put_str(p, end, " == < ");
+	p = trace_put_hex(p, end, (unsigned long) ret);
+	p = trace_put_str(p, end, " (from ");
+	p = trace_put_str(p, end, syscall_names[gsp->syscall_number] ?: "(unknown)");
+	p = trace_put_str(p, end, " @");
+	p = trace_put_hex(p, end, (unsigned long) calling_addr);
+	p = trace_put_str(p, end, ")\n");
+	raw_write(trace_fd, buf, p - buf);
 }
 
 void __attribute__((visibility("protected")))
