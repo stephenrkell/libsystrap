@@ -26,6 +26,9 @@ void replace_instruction_with(unsigned char *pos, unsigned len,
 		unsigned char const *replacement, unsigned replacement_len);
 void replace_syscall_with_ud2(unsigned char *pos, unsigned len);
 
+void __systrap_set_sigill_handler(void (*handler)(int signum, void *info, void *uctxt));
+void (*__systrap_get_sigill_handler(void))(int, void *, void *);
+
 /* really funky clients, e.g. a ld.so, might not run their own constructor, so ... */
 void __libsystrap_force_init(void) __attribute__((visibility("hidden")));
 
@@ -57,8 +60,22 @@ typedef void /*(__attribute__((noreturn))*/ syscall_replacement/*)*/(
 
 extern syscall_replacement *replaced_syscalls[SYSCALL_MAX];
 
+/* When non-zero, a clone/clone3 child resumes by doing rt_sigreturn directly
+ * from the copied sigframe rather than unwinding the SIGILL handler's epilogue.
+ * Default 0 (legacy emulation). Clients that hit the unwind race (e.g. liballocs) (hopefully) set this to 1.
+ */
+extern int __systrap_clone_child_direct_sigreturn;
+
 void __systrap_pre_handling(struct generic_syscall *gsp);
 void __systrap_post_handling(struct generic_syscall *gsp, long int ret, _Bool do_sigframe_resume);
 void __libsystrap_noop_post_handling(struct generic_syscall *gsp, long int ret, _Bool do_sigframe_resume);
+
+/* While a thread is inside handle_sigill emulating a syscall, these return the
+ * saved application stack pointer / instruction pointer at the syscall site;
+ */
+void *__systrap_saved_sp_internal(void);
+void *__systrap_saved_ip_internal(void);
+void *__systrap_current_saved_sp(void);
+void *__systrap_current_saved_ip(void);
 
 #endif
