@@ -146,6 +146,7 @@ void handle_sigill(int n)
 
 	struct generic_syscall gsp = {
 		.saved_context = p_frame,
+		.site = p_frame->uc.uc_mcontext.MC_REG_IP,
 		.syscall_number = syscall_num,
 		.args = {
 #if defined(__x86_64__)

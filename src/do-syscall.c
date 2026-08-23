@@ -37,5 +37,5 @@ syscall_replacement *replaced_syscalls[SYSCALL_MAX] = { NULL };
 
 void *generic_syscall_get_ip(struct generic_syscall *gsp)
 {
-	return (void*) gsp->saved_context->uc.uc_mcontext.MC_REG_IP;
+	return (void*) gsp->site;
 }

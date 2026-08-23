@@ -402,6 +402,7 @@ void clone3_emulated_replacement(struct generic_syscall *s, post_handler *post)
 #endif
 		);
 	gs.saved_context = s->saved_context;
+	gs.site = s->site;
 	do_generic_syscall_and_fixup(&gs); // does post-handling and sets return value in fixed-up context
 }
 

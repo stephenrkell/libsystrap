@@ -65,14 +65,15 @@ int open(const char *pathname, int flags, ...);
 #define REPLACE(name) \
 /* we expect a name_args and name_ret_t... */ \
 /* ... name_args is a higher-order macro expandable with expand_name, above, and friends... */ \
-void replacement_ ## name (struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden"))); \
-void replacement_ ## name (struct generic_syscall *s, post_handler *post) \
+long replacement_ ## name (struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden"))); \
+long replacement_ ## name (struct generic_syscall *s, post_handler *post) \
 { \
 	name ## _args(init_from_generic, ;); \
 	name ## _ret_t ret = bootstrap_ ## name( name ## _args(expand_name, comma) ); \
 	post(s, (uintptr_t) ret, 0); \
-	fixup_sigframe_for_return(s->saved_context, (long int) ret, \
+	fixup_sigframe_for_return(s->saved_context, (long) ret, \
 	    trap_len(&s->saved_context->uc.uc_mcontext), NULL); \
+	return (long) ret; \
 } \
 __asm__( ".pushsection __replaced_syscalls,\"aw\", @progbits\n"\
   ASMPTR " " stringifx(expand(__NR_ ## name)) "\n"\
