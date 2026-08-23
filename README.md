@@ -28,12 +28,18 @@ the JIT must create executable mappings by making system calls, which we
 can intercept as they happen, and perform our breakpointing on the
 dynamically generated instructions.
 
-What about newer ways like SECCOMP-BPF on Linux? The short answer is:
-I don't know. It may be possible to use these within the library, to
-the user's benefit. My first reaction is that newer kernel-side
-mechanisms are more restrictive, more complex, more change-prone,
-and interact badly with programs that themselves want to use those
-features. But they may be worth using despite that.
+What about newer ways like SECCOMP-BPF on Linux? The short answer is
+that seccomp is too restrictive, because:
+
+  In order to use the SECCOMP_SET_MODE_FILTER operation, either the calling
+  thread must have the CAP_SYS_ADMIN capability in its user namespace, or
+  the thread  must already have the no_new_privs bit set
+
+... i.e. this no-new-privs bit is a big change. It may be possible to
+use these within the library, to the user's benefit. My first reaction
+is that newer kernel-side mechanisms are more restrictive, more complex,
+more change-prone, and interact badly with programs that themselves
+want to use those features. But they may be worth using despite that.
 
 # libsystrap
 

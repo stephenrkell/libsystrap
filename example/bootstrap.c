@@ -642,7 +642,11 @@ REPLACE(munmap)
  * able to move away from SIGILL to trampolines. So any incoming signal
  * would be bona fide. But we still want to know about them!
  *
- * Try reading what Rust's signal_hook does.
+ * Try reading what Rust's signal_hook does. It seems to use an underlying
+ * "signal registry" library. As usual, it works only if the whole process
+ * buys in to installing its signal handlers through this registry layer.
+ * We are in a position to do better because we can trap the signal-installing
+ * system calls.
  */
 
 struct __asm_sigaction;
