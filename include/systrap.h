@@ -65,12 +65,13 @@ extern void *fake_sysinfo;
 
 struct generic_syscall {
 	struct ibcs_sigframe *saved_context;
+	void *site;
 	int syscall_number;
 	long int args[6];
 };
 
 typedef void post_handler(struct generic_syscall *s, long int ret, _Bool do_sigframe_resume);
-typedef void /*(__attribute__((noreturn))*/ syscall_replacement/*)*/(
+typedef long /*(__attribute__((noreturn))*/ syscall_replacement/*)*/(
 	struct generic_syscall *s,
 	post_handler *post
 );

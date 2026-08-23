@@ -42,13 +42,13 @@ __systrap_post_handling(struct generic_syscall *gsp, long int ret, _Bool do_call
  * zero-clobber registers that are unrelated to the call. But those
  * struct fields are ignored by the corresponding do_syscallN calls,
  * so that wouldn't happen anyway. Oh well... it's briefer too. */
-#define MKGS0(op)                         { NULL, op }
-#define MKGS1(op, a1)                     { NULL, op, { (long) a1 } }
-#define MKGS2(op, a1, a2)                 { NULL, op, { (long) a1, (long) a2 } }
-#define MKGS3(op, a1, a2, a3)             { NULL, op, { (long) a1, (long) a2, (long) a3 } }
-#define MKGS4(op, a1, a2, a3, a4)         { NULL, op, { (long) a1, (long) a2, (long) a3, (long) a4 } }
-#define MKGS5(op, a1, a2, a3, a4, a5)     { NULL, op, { (long) a1, (long) a2, (long) a3, (long) a4, (long) a5 } }
-#define MKGS6(op, a1, a2, a3, a4, a5, a6) { NULL, op, { (long) a1, (long) a2, (long) a3, (long) a4, (long) a5, (long) a6 } }
+#define MKGS0(op)                         { NULL, NULL, op }
+#define MKGS1(op, a1)                     { NULL, NULL, op, { (long) a1 } }
+#define MKGS2(op, a1, a2)                 { NULL, NULL, op, { (long) a1, (long) a2 } }
+#define MKGS3(op, a1, a2, a3)             { NULL, NULL, op, { (long) a1, (long) a2, (long) a3 } }
+#define MKGS4(op, a1, a2, a3, a4)         { NULL, NULL, op, { (long) a1, (long) a2, (long) a3, (long) a4 } }
+#define MKGS5(op, a1, a2, a3, a4, a5)     { NULL, NULL, op, { (long) a1, (long) a2, (long) a3, (long) a4, (long) a5 } }
+#define MKGS6(op, a1, a2, a3, a4, a5, a6) { NULL, NULL, op, { (long) a1, (long) a2, (long) a3, (long) a4, (long) a5, (long) a6 } }
 
 extern inline long int 
 __attribute__((always_inline,gnu_inline))
@@ -291,7 +291,7 @@ enum special_syscall is_special_syscall(struct generic_syscall *gsp)
 
 extern inline void
 __attribute__((always_inline,gnu_inline,noreturn))
-do_sigreturn(struct generic_syscall *gsp);
+do_sigreturn(struct generic_syscall *gsp, unsigned long frame_sp);
 #ifdef __linux__
 extern inline long
 __attribute__((always_inline,gnu_inline))
@@ -314,7 +314,7 @@ do_generic_syscall_and_fixup(struct generic_syscall *gsp)
 				trap_len(&gsp->saved_context->uc.uc_mcontext), NULL);
 			break;
 		case SPECIAL_SYSCALL_SIGRETURN:
-			do_sigreturn(gsp);
+			do_sigreturn(gsp, gsp->saved_context->uc.uc_mcontext.MC_REG_SP);
 			break; // never hit -- sigreturn never returns
 #ifdef __linux__
 		case SPECIAL_SYSCALL_CLONE_NEWSTACK:
@@ -814,7 +814,7 @@ do_clone3(struct generic_syscall *gsp)
 
 extern inline void
 __attribute__((always_inline,gnu_inline,noreturn))
-do_sigreturn(struct generic_syscall *gsp)
+do_sigreturn(struct generic_syscall *gsp, unsigned long frame_sp)
 {
 	/* To do a sigreturn, we simply restore the user's stack pointer
 	 * to what it was at the site of the trap... i.e. do the same sigreturn
@@ -845,7 +845,7 @@ do_sigreturn(struct generic_syscall *gsp)
 #endif
 		   stringifx(SYSCALL_INSTR) "\n"
 		  : [ret]  "+a" (ret_op)
-		  : [orig_sigframe_sp] "r"(gsp->saved_context->uc.uc_mcontext.MC_REG_SP)
+		  : [orig_sigframe_sp] "r"(frame_sp)
 		  : "memory", DO_SYSCALL_CLOBBER_LIST(0)
 	);
 	/* We should never get here. */

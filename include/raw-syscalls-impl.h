@@ -235,6 +235,7 @@ extern inline void
 __attribute__((always_inline,gnu_inline))
 fixup_sigframe_for_return(struct ibcs_sigframe *p_frame, long int ret, unsigned instr_len, void *maybe_new_sp)
 {
+	if (!p_frame) return; // HACK needed by call-frame (not sigframe) handling path
 	/* Copy the return value of the emulated syscall into the trapping context, and
 	 * resume from *after* the faulting instruction.
 	 *

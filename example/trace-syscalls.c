@@ -271,14 +271,14 @@ void print_pre_syscall(void *stream, struct generic_syscall *gsp, void *calling_
 	fflush(stream);
 }
 
-void print_post_syscall(void *stream, struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, long int ret)
+void print_post_syscall(void *stream, struct generic_syscall *gsp, void *return_addr, struct link_map *calling_object, long int ret)
 			__attribute__((visibility("protected")));
-void print_post_syscall(void *stream, struct generic_syscall *gsp, void *calling_addr, struct link_map *calling_object, long int ret) {
+void print_post_syscall(void *stream, struct generic_syscall *gsp, void *return_addr, struct link_map *calling_object, long int ret) {
 	fprintf(stream, "== %d == < 0x%lx (from %s @%p)\n",
 		raw_gettid(),
 		(unsigned long) ret,
 		syscall_names[gsp->syscall_number],
-		calling_addr
+		return_addr - 2
 	);
 	fflush(stream);
 }
@@ -294,8 +294,8 @@ __systrap_pre_handling(struct generic_syscall *gsp)
 void __attribute__((visibility("protected")))
 __systrap_post_handling(struct generic_syscall *gsp, long ret, _Bool do_fixup)
 {
-	void *calling_addr = generic_syscall_get_ip(gsp) - 2 /* FIXME: inverse traplen hack */;
-	struct link_map *calling_object = get_highest_loaded_object_below(calling_addr);
-	print_post_syscall(traces_out, gsp, calling_addr, calling_object, ret);
+	void *return_addr = generic_syscall_get_ip(gsp) + 2 /* FIXME: inverse traplen hack */;
+	struct link_map *calling_object = get_highest_loaded_object_below(return_addr - 2);
+	print_post_syscall(traces_out, gsp, return_addr, calling_object, ret);
 	__libsystrap_noop_post_handling(gsp, ret, do_fixup);
 }
