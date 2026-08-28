@@ -103,6 +103,7 @@ uintptr_t fixup_return_address_to_trap_site(uintptr_t addr)
 #define RDI_SLOT 112
 #define RSI_SLOT 120
 #define RDX_SLOT 144
+#define RCX_SLOT 160
 #define R10_SLOT 64
 #define R8_SLOT  48
 #define R9_SLOT  56
@@ -190,10 +191,12 @@ __asm__(".text \n\
 	  # %rax remains scratch because handle_sigill returns nothing (except in RAX_SLOT)... \n\
 	1:pushq $0           # 'ret' popped the return addr, so push null pretcode back on the stack \n\
 	  # Now we are back to our home 8-modulo-16 position \n\
+	  # XXX: we must save %rcx because it's a clobber for syscalls... feels like a HACK? \n\
 	  mov "stringifx(RBP_SLOT)"(%rsp), %rbp # \n\
 	  mov "stringifx(RDI_SLOT)"(%rsp), %rdi # \n\
 	  mov "stringifx(RSI_SLOT)"(%rsp), %rsi # \n\
 	  mov "stringifx(RDX_SLOT)"(%rsp), %rdx # \n\
+	  mov "stringifx(RCX_SLOT)"(%rsp), %rcx # \n\
 	  mov "stringifx(R10_SLOT)"(%rsp), %r10 # \n\
 	  mov "stringifx(R8_SLOT)"(%rsp), %r8 # \n\
 	  mov "stringifx(R9_SLOT)"(%rsp), %r9 # ... *almost* finished with the fake signal frame \n\
@@ -554,8 +557,15 @@ void __wrap_enter(void *entry_point)
 	struct auxv_limits limits = get_auxv_limits(p_auxv);
 	/* We need to memcpy the initial stack, otherwise ld.so won't be able to get
 	 * its aux vector and whatnot. */
+#if 1 /* What if we try to copy everything *except* the asciiz stuff?
+       * This will foil librunt!! It expects to get the auxv by looking at
+       * string data. Hmm.... */
+	size_t memcpy_len = RELF_ROUND_UP_PTR_((uintptr_t) limits.asciiz_start, 16)
+		 - (uintptr_t) sp_on_entry;
+#else
 	size_t memcpy_len = RELF_ROUND_UP_PTR_((uintptr_t) limits.asciiz_end, 16)
 		 - (uintptr_t) sp_on_entry;
+#endif
 	void *new_sp_on_entry = (void*) LOW_STACK_TOP - memcpy_len;
 	memcpy(new_sp_on_entry, sp_on_entry, memcpy_len);
 	debug_printf(0, "low stack: replacing rsp=%p with %p\n", sp_on_entry, new_sp_on_entry);
