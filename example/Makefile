@@ -145,10 +145,10 @@ vpath %.S $(DONALD)/src
 vpath %.h $(DONALD)/src
 CFLAGS += -I$(DONALD)/src
 
-C_SRC := $(filter-out %.inc.c,$(wildcard $(srcroot)/example/*.c))
+C_SRC := $(filter-out %/classify-syscalls.c %.inc.c,$(wildcard $(srcroot)/example/*.c))
 C_DEPS := $(patsubst %.c,%.d,$(C_SRC))
 DEPS := $(C_DEPS)
-LOCAL_OBJS := $(filter-out pre-entry.o,$(filter-out write-footprints.o,$(patsubst %.c,%.o,$(notdir $(C_SRC)))))
+LOCAL_OBJS := $(filter-out pre-entry.o classify-syscalls.o,$(filter-out write-footprints.o,$(patsubst %.c,%.o,$(notdir $(C_SRC)))))
 $(info LOCAL_OBJS is $(LOCAL_OBJS))
 
 $(DEPS): %.d: %.c
