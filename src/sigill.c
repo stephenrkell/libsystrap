@@ -57,6 +57,12 @@ void handle_sigill(int n)
 	/* If we haven't set real_sysinfo by now, assume we didn't create a fake one.
 	 * We snarf the real one, as it will be unconditionally restored on return. */
 	if (!real_sysinfo) real_sysinfo = *(void**)(tls+16);
+	/* Save the possibly-fake sysinfo that was active in the user code,
+	 * and switch to the real one, for our use.
+	 *
+	 * FIXME: if a nested signal handler runs here, we will expose the
+	 * real sysinfo. We could do various things about this, e.g. refrain
+	 * from using vdso calls ourselves (cf. now we let musl decide for us...). */
 	void *saved_sysinfo = *(void**)(tls+16);
 	*(void**)(tls+16) = real_sysinfo;
 #endif
