@@ -70,17 +70,6 @@ void handle_sigill(int n)
 	/* Decode the syscall using sigcontext. */
 	_handle_sigill_debug_printf(1, "Took a trap from instruction at %p",
 			(void*) p_frame->uc.uc_mcontext.MC_REG_IP);
-#ifdef EXECUTABLE
-	if (p_frame->uc.uc_mcontext.MC_REG_IP == (uintptr_t) ignore_ud2_addr)
-	{
-		_handle_sigill_debug_printf(1, " which is our test trap address; continuing.\n");
-		resume_from_sigframe(0, p_frame, 2);
-#if defined(__i386__)
-		*(void**)(tls+16) = saved_sysinfo;
-#endif
-		return;
-	}
-#endif
 
 #if defined(__x86_64__)
 	unsigned long syscall_num = (unsigned long) p_frame->uc.uc_mcontext.MC_REG(rax, RAX);
