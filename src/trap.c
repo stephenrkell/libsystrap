@@ -226,19 +226,32 @@ _Bool addr_is_in_ld_so(const void *pos)
 {
 	extern void *__tls_get_addr(); // in ld.so
 	static struct link_map *ld_so_link_map;
+	static void *ld_so_end;
 	if (!ld_so_link_map)
 	{
+		debug_printf(1, "_r_debug is at %p\n", &_r_debug);
 		ld_so_link_map = get_highest_loaded_object_below(__tls_get_addr);
+		debug_printf(1, "We think (the real) ld.so's link map is at %p, base %p, filename %s\n",
+			ld_so_link_map,
+			ld_so_link_map ? (void*) ld_so_link_map->l_addr : (void*) -1,
+			ld_so_link_map ? ld_so_link_map->l_name : "(no link map)");
+		/* XXX: we will use get_highest_loaded_object_below on pos, but
+		 * this is wrong if the real ld.so is the highest loaded object:
+		 * we will deem all higher addresses to be within the ld.so. And more
+		 * generally it's wrong because we don't account for the end of the ld.so.
+		 * Can we apply a length check using etext from the ld.so? No, because
+		 * my ld.so does not define etext. If we could get the phdrs we could
+		 * find the maximum vaddr... can we do this? */
+		if (ld_so_link_map) ld_so_end = get_text_segment_end_from_load_addr(
+			ld_so_link_map->l_addr);
 	}
-	debug_printf(1, "_r_debug is at %p\n", &_r_debug);
-	debug_printf(1, "We think ld.so's link map is at %p, base %p, filename %s\n",
-		ld_so_link_map,
-		ld_so_link_map ? (void*) ld_so_link_map->l_addr : (void*) -1,
-		ld_so_link_map ? ld_so_link_map->l_name : "(no link map)");
 
 	struct link_map *range_link_map = get_highest_loaded_object_below(pos);
-	return (ld_so_link_map && range_link_map &&
-		ld_so_link_map == range_link_map);
+	_Bool ret = (ld_so_link_map && range_link_map &&
+		ld_so_link_map == range_link_map &&
+			(!ld_so_end || (uintptr_t) pos < (uintptr_t) ld_so_end));
+	if (ret) debug_printf(1, "We think %p is within (the real) ld.so\n", pos);
+	return ret;
 }
 
 void trap_one_executable_region_given_shdrs(unsigned char *begin,
