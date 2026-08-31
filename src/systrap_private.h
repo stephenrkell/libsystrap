@@ -4,6 +4,16 @@
 extern int systrap_debug_level __attribute__((visibility("hidden")));
 extern _Bool is_ud2(const unsigned char *ins) __attribute__((visibility("hidden")));
 
+#include <stdint.h>
+/* Trap-site registry: the set of addresses where WE replaced an instruction
+ * with ud2. Used to distinguish our syscall traps from foreign ud2s (e.g.
+ * Alaska's safepoint poll points). See trap.c and sigill.c. */
+void __systrap_record_trap_site(uintptr_t addr) __attribute__((visibility("hidden")));
+_Bool __systrap_is_trap_site(uintptr_t addr) __attribute__((visibility("hidden")));
+/* The client SIGILL handler to chain to for non-trap-site SIGILLs (or NULL). */
+extern void (*__systrap_chained_sigill_handler)(int, void *, void *)
+	__attribute__((visibility("hidden")));
+
 #ifdef SYSTRAP_DEFINE_FILE
 struct _IO_FILE;
 typedef struct _IO_FILE FILE;

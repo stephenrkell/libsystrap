@@ -52,6 +52,63 @@
  * we allow them to set a test trap. */
 void *__libsystrap_ignore_ud2_addr;
 
+#define TRAP_SITES_CAPACITY (1u << 17) /* 131072 slots; real syscall sites are far fewer */
+static uintptr_t *trap_sites; /* mmap'd; TRAP_SITES_CAPACITY entries, 0 == empty */
+static unsigned long trap_sites_count;
+
+void (*__systrap_chained_sigill_handler)(int, void *, void *)
+	__attribute__((visibility("hidden")));
+
+static inline unsigned long trap_site_slot(uintptr_t a)
+{
+	/* Fibonacci hashing of the address (shifted past the always-zero low bit). */
+	return (unsigned long) (((a >> 1) * 0x9E3779B97F4A7C15ull)
+		>> (64 - 17)) & (TRAP_SITES_CAPACITY - 1);
+}
+
+void __systrap_record_trap_site(uintptr_t addr)
+{
+	if (!addr) return;
+	if (!trap_sites)
+	{
+		void *m = raw_mmap(NULL, TRAP_SITES_CAPACITY * sizeof (uintptr_t),
+			PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+		if (MMAP_RETURN_IS_ERROR(m)) abort();
+		trap_sites = (uintptr_t *) m;
+	}
+	unsigned long i = trap_site_slot(addr);
+	while (trap_sites[i] != 0)
+	{
+		if (trap_sites[i] == addr) return; /* already present */
+		i = (i + 1) & (TRAP_SITES_CAPACITY - 1);
+	}
+	trap_sites[i] = addr;
+	++trap_sites_count;
+	/* If we ever approach capacity the O(1) assumption breaks; that would be a bug. */
+	assert(trap_sites_count < (TRAP_SITES_CAPACITY / 4) * 3);
+}
+
+_Bool __systrap_is_trap_site(uintptr_t addr)
+{
+	if (!trap_sites || !addr) return 0;
+	unsigned long i = trap_site_slot(addr);
+	while (trap_sites[i] != 0)
+	{
+		if (trap_sites[i] == addr) return 1;
+		i = (i + 1) & (TRAP_SITES_CAPACITY - 1);
+	}
+	return 0;
+}
+
+void __systrap_set_sigill_handler(void (*handler)(int, void *, void *))
+{
+	__systrap_chained_sigill_handler = handler;
+}
+void (*__systrap_get_sigill_handler(void))(int, void *, void *)
+{
+	return __systrap_chained_sigill_handler;
+}
+
 static int sleep_for_seconds;
 static int stop_self;
 static int self_pid;
@@ -115,6 +172,9 @@ void replace_syscall_with_ud2(unsigned char *pos, unsigned len)
 		}
 	}
 #endif
+	/* Record this site BEFORE writing the ud2, so that by the time any thread
+	 * can fault here, the SIGILL handler will recognise it as ours. */
+	__systrap_record_trap_site((uintptr_t) pos);
 	replace_instruction_with(pos, len, replacement, sizeof replacement);
 }
 
