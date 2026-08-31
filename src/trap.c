@@ -202,7 +202,11 @@ void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *e
 	unsigned char *instr_pos = (unsigned char *) begin_page; // start from the real beginning
 	while (instr_pos != end_page)
 	{
-		if (is_syscall_instr(instr_pos, end_instr_pos))
+		unsigned char b = *instr_pos;
+		/* Every syscall-like instruction begins with 0x0f or 0xcd
+	 	 * gate the expensive call behind a cheap check 
+	 	 */
+		if (unlikely((b == 0x0f || b == 0xcd) && is_syscall_instr(instr_pos, end_instr_pos)))
 		{
 			debug_printf(1, "Warning: after instrumentation, bytes at %p "
 				"could make a syscall on violation of control flow integrity\n",
