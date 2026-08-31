@@ -158,6 +158,11 @@ void __init_libc(char **envp, char *pn); // musl-internal API
  * in a separate file (fake-tls.o). */
 // void __wrap___init_tp() {}
 
+void __attribute__((visibility("protected")))
+__trace_syscalls_pre_handling(struct generic_syscall *gsp);
+void __attribute__((visibility("protected")))
+__trace_syscalls_post_handling(struct generic_syscall *gsp, long ret);
+
 /* This constructor is used only by the preload library. For the
  * chain loader, the equivalent code is in pre-entry.c (which is called
  * from donald, as a wrapper of donald's enter() function) and chain.inc.c
@@ -178,6 +183,10 @@ static void startup(int argc, char **argv, char **environ)
 	const ElfW(auxv_t) *p_auxv_start = NULL;
 	ElfW(auxv_t) *p_auxv_terminator = NULL;
 	__runt_auxv_get_auxv(&p_auxv_start, &p_auxv_terminator);
+
+	__systrap_pre_handling = __trace_syscalls_pre_handling;
+	__systrap_post_handling = __trace_syscalls_post_handling;
+
 	/* We can create the fake vDSO, but how can we make the program use it?
 	 * In the chain-loader case, we modify the AT_SYSINFO_EHDR auxv entry
 	 * before the inferior ld.so sees it. As a plain old preload library, do
@@ -335,7 +344,7 @@ void print_post_syscall(void *stream, struct generic_syscall *gsp, void *return_
 }
 
 void __attribute__((visibility("protected")))
-__systrap_pre_handling(struct generic_syscall *gsp)
+__trace_syscalls_pre_handling(struct generic_syscall *gsp)
 {
 	void *calling_addr = generic_syscall_get_ip(gsp);
 	struct link_map *calling_object = get_highest_loaded_object_below(calling_addr);
@@ -343,10 +352,9 @@ __systrap_pre_handling(struct generic_syscall *gsp)
 }
 
 void __attribute__((visibility("protected")))
-__systrap_post_handling(struct generic_syscall *gsp, long ret, _Bool do_fixup)
+__trace_syscalls_post_handling(struct generic_syscall *gsp, long ret)
 {
 	void *return_addr = generic_syscall_get_ip(gsp) + 2 /* FIXME: inverse traplen hack */;
 	struct link_map *calling_object = get_highest_loaded_object_below(return_addr - 2);
 	print_post_syscall(traces_out, gsp, return_addr, calling_object, ret);
-	__libsystrap_noop_post_handling(gsp, ret, do_fixup);
 }

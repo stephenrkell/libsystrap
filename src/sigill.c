@@ -265,7 +265,7 @@ void handle_sigill(int n)
 		 * "We therefore pass the post-handling as a function."
 		 * WHAT does that mean? Why should the replacement syscall not just
 		 * link to __systrap_post_handling directly?  */
-		replaced_syscalls[gsp.syscall_number](&gsp, &__systrap_post_handling);
+		replaced_syscalls[gsp.syscall_number](&gsp);
 	}
 	else
 	{

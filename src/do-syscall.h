@@ -35,8 +35,10 @@ extern uintptr_t our_load_address;
 	 "stringifx(SYSCALL_INSTR)		" \n\
 	 "UNFIX_STACK_ALIGNMENT" \n"
 
-void __attribute__((weak,visibility("protected")))
-__systrap_post_handling(struct generic_syscall *gsp, long int ret, _Bool do_caller_fixup);
+extern void __attribute__((visibility("protected")))
+(*__systrap_post_handling)(struct generic_syscall *gsp, long int ret);
+extern void __attribute__((visibility("protected")))
+(*__systrap_pre_handling)(struct generic_syscall *gsp);
 
 /* I wrote this using old-style initializers because we don't want to
  * zero-clobber registers that are unrelated to the call. But those
@@ -327,7 +329,7 @@ do_generic_syscall_and_fixup(struct generic_syscall *gsp)
 		default:
 			break;
 	}
-	__systrap_post_handling(gsp, ret, /* do_caller_fixup */ 0);
+	__systrap_post_handling(gsp, ret);
 }
 
 /* At least clone(), and perhaps other system calls, will zap the stack.

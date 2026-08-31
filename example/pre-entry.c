@@ -12,11 +12,25 @@
 extern uintptr_t __start___replaced_syscalls[];
 extern uintptr_t __stop___replaced_syscalls[];
 
+extern void __attribute__((visibility("protected")))
+(*__systrap_post_handling)(struct generic_syscall *gsp, long int ret);
+extern void __attribute__((visibility("protected")))
+(*__systrap_pre_handling)(struct generic_syscall *gsp);
+
+void __attribute__((visibility("protected")))
+__trace_syscalls_pre_handling(struct generic_syscall *gsp);
+void __attribute__((visibility("protected")))
+__trace_syscalls_post_handling(struct generic_syscall *gsp, long ret);
+
 void __real_enter(void *entry_point);
 void __wrap_enter(void *entry_point)
 {
 	// FIXME: libsystrap isn't being init'd, so force it
 	__libsystrap_force_init();
+
+	__systrap_pre_handling = __trace_syscalls_pre_handling;
+	__systrap_post_handling = __trace_syscalls_post_handling;
+
 	init_fds();
 	/* We want to trap only the inferior ld.so's executable phdr(s).
 	 * How do we find them?
