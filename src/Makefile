@@ -16,7 +16,7 @@ endif
 $(MAKECMDGOALS):
 	for arch in `m=$$(uname -m); case "$$m" in (x86_64) echo x86_64 i386 ;; (*) echo "$$m" ;; esac`; do \
              mkdir -p $(srcroot)/build/$${arch} && \
-             $(MAKE) -C $(srcroot)/build/$${arch} -f $(srcdir)/Makefile $(MAKECMDGOALS); \
+             $(MAKE) -C $(srcroot)/build/$${arch} -f $(srcdir)/Makefile $(MAKECMDGOALS) || exit 1; \
         done
 else
 # the rest: we take our arch from the current dir
@@ -79,7 +79,7 @@ DEPS := $(C_DEPS)
 OBJS := $(patsubst %.c,%.o,$(notdir $(C_SRC)))
 
 $(C_DEPS): %.d: %.c
-	$(CC) -MM $(CFLAGS) $+ > "$@" || rm -f "$@"
+	$(CC) -MM $(CFLAGS) $+ > "$@" || { rm -f "$@"; false; }
 
 ifneq ($(MAKECMDGOALS),clean)
 -include $(DEPS)

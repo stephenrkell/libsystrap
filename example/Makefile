@@ -12,8 +12,8 @@ endif
 .PHONY: $(MAKECMDGOALS)
 $(MAKECMDGOALS):
 	for arch in `m=$$(uname -m); case "$$m" in (x86_64) echo x86_64 i386 ;; (*) echo "$$m" ;; esac`; do \
-    	mkdir -p $(srcroot)/build/$${arch} && \
-	    $(MAKE) -C $(srcroot)/build/$${arch} -f $(srcroot)/example/Makefile $(MAKECMDGOALS) ; \
+           mkdir -p $(srcroot)/build/$${arch} && \
+           $(MAKE) -C $(srcroot)/build/$${arch} -f $(srcroot)/example/Makefile $(MAKECMDGOALS) || exit 1; \
     done
 else
 # the rest: we take our arch from the current dir
@@ -152,7 +152,7 @@ LOCAL_OBJS := $(filter-out pre-entry.o classify-syscalls.o,$(filter-out write-fo
 $(info LOCAL_OBJS is $(LOCAL_OBJS))
 
 $(DEPS): %.d: %.c
-	$(CC) -MG -MM $(CFLAGS) $+ > "$@" || rm -f "$@"
+	$(CC) -MG -MM $(CFLAGS) $+ > "$@" || { rm -f "$@"; false; }
 
 ifneq ($(MAKECMDGOALS),clean)
 -include $(DEPS)
