@@ -1,4 +1,9 @@
-///usr/bin/[ "$0".bin -nt "$0" ] || cc -Wall ${CFLAGS:--Og} -g ${LDFLAGS} "$0" -o "$0".bin ${LDLIBS} -lxed <<EOSHELL || exit 1; exec "$0".bin "$@"; exit 42
+///usr/bin/[ "$0".bin -nt "$0" ] || \
+  cc -I"$(dirname "$0")"/../contrib/xed/build-`uname -m`/include \
+     -I"$(dirname "$0")"/../contrib/librunt/include \
+     -DDONALD_LOAD_C=\""$(dirname "$0")"/../contrib/donald/src/load.c\" \
+     -Wall ${CFLAGS:--Og} -g ${LDFLAGS} "$0" -o "$0".bin ${LDLIBS} \
+     -L"$(dirname "$0")"/../contrib/xed/build-`uname -m`/lib -lxed <<EOSHELL || exit 1; exec "$0".bin "$@"; exit 42
 #ifdef EOSHELL
 $(
     # The top half of this file is a shell script.
@@ -480,9 +485,11 @@ int main(int argc, char **argv)
 				 * "e8-patch": in the 256-byte windows available via a 5-byte e8 pun (*or* a 2-byte short jump? hmm, can't return?),
 				 * is there (1) some unreachable nop space, (2) another patched syscall?
 				 * use (1) directly; for (2) jump to it and use stack to disambiguate (FIXME: details)
-				 * OTHER TECHNIQUES here presumably?
+				 * OTHER TECHNIQUES here presumably? i.e. the above don't seem likely very fruitful.
+				 *
 				 * IDEA: "known register values" -- pun against other regs if knowable?
 				 *       will many syscall sites pass constant args? not in libc, but maybe in open-coded cases
+				 *  ^^ yes, worth investigating
 				 * PROBLEM of executable rodata: remove execute permission from the overlap,
 				 *    on a trap, can copy the code elsewhere and run that, if it's PIC
 				 *      (CHECK safety of this! need to patch references to text/rodata outside this range?
