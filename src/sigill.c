@@ -66,6 +66,31 @@ void handle_sigill(int n)
 	void *saved_sysinfo = *(void**)(tls+16);
 	*(void**)(tls+16) = real_sysinfo;
 #endif
+	/* NEW: let's exit the sighandler as quickly as possible and instead
+	 * handle everything from an asm path in non-signal context. */
+#if 0 && defined(__x86_64__)  /* <-- remove when ready */
+	__asm__ volatile ("mov %1, %0" : "=m"(p_frame->uc.uc_mcontext.MC_REG(rcx, RCX)) : "r"(p_frame->uc.uc_mcontext.MC_REG_IP));
+	__asm__ volatile ("mov %1, %0" : "=m"(p_frame->uc.uc_mcontext.MC_REG_IP) : "r"(&__systrap_call_handler));
+#if 0
+	p_frame->uc.uc_mcontext.MC_REG(rcx, RCX) = p_frame->uc.uc_mcontext.MC_REG_IP;
+	p_frame->uc.uc_mcontext.MC_REG_IP = &__systrap_call_handler;
+#endif
+	return;
+#elif defined(__i386__)
+	/* Are we free to clobber %ecx in 32-bit mode? No, I don't think so.
+	 * Maybe we could push something? This means we can't ensure that
+	 * the handler will get the same register file that was current at
+	 * the system call site. The other option is to use a thread-local,
+	 * which is playing with fire... do we have working TLS in this
+	 * context, even? Let's just not support call-frame hnadling on
+	 * i386 for now. We could do something like (1) on the initial thread,
+	 * save space high up the stack, while (2) on an non-initial thread,
+	 * ensure we have working TLS by then. */
+#elif defined(__x86_64__)
+	/* continue with the fallback path below */
+#else
+#error "Unrecognised architecture"
+#endif
 
 	/* Decode the syscall using sigcontext. */
 	_handle_sigill_debug_printf(1, "Took a trap from instruction at %p",
@@ -83,65 +108,12 @@ void handle_sigill(int n)
 	_handle_sigill_debug_printf(1, " which we think is syscall %s/%ld\n",
 		&syscall_names[0] ? syscall_names[syscall_num] : "(names not linked in)", syscall_num);
 
-#if 0
-	if (syscall_num == __NR_rt_sigreturn
-#ifdef __i386__
-	    || syscall_num == __NR_sigreturn
-#endif
-	) {
-		/* We can't trap sigreturn. But also, we can't easily know at load time
-		 * which syscall sites are going to do sigreturn. (Some static analysis
-		 * could figure that out, but we're not clever enough yet.)
-		 *
-		 * So the approach for now is: untrap the site, then immediately resume
-		 * without advancing the program context. It will proceed with the
-		 * sigreturn as if we never trapped it.
-		 *
-		 * This is potentially unsound, e.g. if it does sigreturn via syscall()
-		 * (which would be whacked, but anyway) as it would untrap a generic
-		 * syscall site, missing future syscalls. So we still need that clever
-		 * static analysis, or a sigreturn-from-userspace, or a sandboxed
-		 * "process supervisor" that can somehow do the sigreturn, or... some
-		 * better solution.
-		 */
-		void *addr = (void*) p_frame->uc.uc_mcontext.MC_REG_IP;
-		_handle_sigill_debug_printf(1, "Untrapping sigreturn site %p\n", addr);
-		unsigned page_size = MIN_PAGE_SIZE; // FIXME: use actual page size from auxv
-		int ret = raw_mprotect((void*)RELF_ROUND_DOWN_(addr, page_size), page_size, PROT_WRITE);
-		assert(ret == 0);
-		assert(is_ud2(addr));
-		// HACK: this assumes we know exactly which instruction we clobbered
-		static const unsigned char syscall_insn[] = {
-#if defined(__x86_64__)
-		0x0f, 0x05 /* syscall */
-#elif defined(__i386__)
-		0xcd, 0x80 /* int 0x80 */
-#else
-#error "Unsupported architecture"
-#endif
-		};
-		replace_instruction_with(addr, sizeof syscall_insn, syscall_insn, sizeof syscall_insn);
-		ret = raw_mprotect((void*)RELF_ROUND_DOWN_(addr, page_size), page_size, PROT_READ|PROT_EXEC);
-		assert(ret == 0);
-		/* Hmm. Do we need to set a successful return value? No because sigreturn
-		 * doesn't return a value, it just resumes a context (which is oblivious). */
-#if 0
-#if defined(__x86_64__)
-		p_frame->uc.uc_mcontext.MC_REG(rax, RAX) = 0;
-#elif defined(__i386__)
-		p_frame->uc.uc_mcontext.MC_REG(eax, EAX) = 0;
-#endif
-#endif
-		goto out;
-	}
-#endif
-
 	/* FIXME: check whether this syscall creates executable mappings; if so,
 	 * we make them nx, do the rewrite, then make them x. */
 
 	struct generic_syscall gsp = {
 		.saved_context = p_frame,
-		.site = p_frame->uc.uc_mcontext.MC_REG_IP,
+		.site = (void*) p_frame->uc.uc_mcontext.MC_REG_IP,
 		.syscall_number = syscall_num,
 		.args = {
 #if defined(__x86_64__)
