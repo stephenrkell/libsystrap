@@ -176,8 +176,8 @@ void handle_sigill(int n)
             // Do the call we actually want to do
             void *ret = raw_frob(old_addr ^ 0x42);
             // Do the post-handling
-            post(s, (long) ret, 1); //<------- "1" means YES PLEASE FIXUP THE SIGFRAME
-                                    // i.e. "we did not fix it up ourselves, lazy lazy"
+            post(s, (long) ret);
+            fixup_sigframe_for_return(s->saved_context, (long) ret, 2);
         // NOW return to the caller so it can do the resume for us
     }
 
@@ -188,27 +188,13 @@ void handle_sigill(int n)
 	 * "replace". And the replacement has the option of calling the post-handling.
 	 * (The pre-handling is always called, before the replacement.)
 	 *
-	 * We tell the post-handler whether it's necessary to do the sigframe
-	 * fixup. This lets the fixup appear only in the post-handler in the common case,
-	 * but some replacement syscalls may do their own fixup and tell the handler
-	 * they don't need the usual fixup.
-	 *
-	 * XXX: is this flexibility really needed? Are there any applications which
-	 * want to replace a syscall while doing their own fixup, so would pass 0 not
-	 * 1 above? Possibly yes, e.g. doing funky things with clone(). Our generic
-	 * emulation of clone() does its own sigframe fixup.
-	 *
-	 * Conversely, are there any emulation paths where we *do* want the
-	 * post-handler to do the fixup, i.e. we would pass 1 here? Yes, it keeps the
-	 * frob_replacement code simpler if we don't have to do the fixup explicitly (save "1").
-	 *
-	 * Why not have replacement syscalls, e.g. have post_handler be noreturn?
-	 * Now it is not noreturn; it fixes up the sigframe but then returns here,
-	 * and it is our return path that does the sigreturn. That at least saves us
-	 * from emulating the return-to-__restore_rt path, i.e. the exit path from
-	 * this function.
+	 * We took away the option for some replacement syscalls to do their own
+	 * fixup and tell the handler they don't need the usual fixup... will see
+	 * if this bites. Support for a replacement clone() seems to be the issue...
+	 * more below.
 	 */
-	__systrap_pre_handling(&gsp);
+	if (__systrap_pre_handling) __systrap_pre_handling(&gsp);
+	long ret;
 	if (replaced_syscalls[gsp.syscall_number])
 	{
 		/* Since replaced_syscalls holds function pointers, these calls will 
@@ -226,18 +212,21 @@ void handle_sigill(int n)
 		 * ask it to fix up the sigframe.
 		 *
 		 * Replacement syscalls should have the *option* of doing their own sigframe fixup,
-		 * just like we have for our own clone handler. That's why it makes sense to
-		 * pass the post-handler an argument for whether to fix up or not.
+		 * just like we have for our own clone handler. That's why we don't just do the
+		 * fixup below, along the exit path; the replacement has to do it, as shown in
+		 * frob_replacement() above.
 		 *
-		 * "We therefore pass the post-handling as a function."
-		 * WHAT does that mean? Why should the replacement syscall not just
-		 * link to __systrap_post_handling directly?  */
-		replaced_syscalls[gsp.syscall_number](&gsp);
+		 * Does clone() prevent control from returning here? Actually no... our
+		 * clone() handling is painstakingly crafted to return through here
+		 * and hit the usual sigreturn path, even in the child thread.
+		 */
+		ret = replaced_syscalls[gsp.syscall_number](&gsp);  /* XXX: this skips the post-syscall handling! FIXME! */
 	}
 	else
 	{
-		do_generic_syscall_and_fixup(&gsp);
+		ret = do_generic_syscall_and_fixup(&gsp); /* this does the post-syscall handling */
 	}
+	if (__systrap_post_handling) __systrap_post_handling(&gsp, ret);
 out:
 	_handle_sigill_debug_printf(1, "Resuming from instruction at %p\n", p_frame->uc.uc_mcontext.MC_REG_IP);
 #if defined(__i386__)

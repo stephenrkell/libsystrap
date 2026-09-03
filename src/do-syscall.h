@@ -303,7 +303,7 @@ __attribute__((always_inline,gnu_inline))
 do_clone3(struct generic_syscall *gsp);
 #endif
 
-extern inline void
+extern inline long
 __attribute__((always_inline,gnu_inline))
 do_generic_syscall_and_fixup(struct generic_syscall *gsp)
 {
@@ -317,19 +317,42 @@ do_generic_syscall_and_fixup(struct generic_syscall *gsp)
 			break;
 		case SPECIAL_SYSCALL_SIGRETURN:
 			do_sigreturn(gsp, gsp->saved_context->uc.uc_mcontext.MC_REG_SP);
-			break; // never hit -- sigreturn never returns
+			break; // never hit -- sigreturn never returns.
+			/* There is nothing to fix up: either the old signal frame is torn down
+			 * and provides the return context, or the kernel will kill us. */
 #ifdef __linux__
 		case SPECIAL_SYSCALL_CLONE_NEWSTACK:
-			ret = do_clone(gsp); // does its own fixup
+			ret = do_clone(gsp);
+			// FIXME: can we do this fixup before the clone, but
+			// after the stack copy? We just fix up the copied context
+			// on the stack, speculatively. Might be cleaner and fit with our
+			// "walk the stack and fix up saved BPs only" idea, i.e. minimise
+			// how many on-stack pointers have to work to get us to the sigreturn.
+			fixup_sigframe_for_return(gsp->saved_context, /*post_zap_top_of_stack - sizeof (struct ibcs_sigframe), */
+				ret, trap_len(&gsp->saved_context->uc.uc_mcontext),
+				/* new_sp: we have a new sp only if we're the child.
+				 * We can detect that using ret_op i.e. clone()'s return value. */
+				(ret == 0) ? (void*) (gsp->args[1] /* see fake_arg1 comment in do_clone()  */)
+					: NULL);
 			break;
 		case SPECIAL_SYSCALL_CLONE3_NEWSTACK:
-			ret = do_clone3(gsp); // does its own fixup
+			ret = do_clone3(gsp);
+			fixup_sigframe_for_return(gsp->saved_context, ret,
+				trap_len(&gsp->saved_context->uc.uc_mcontext),
+				/* new_sp: we have a new sp only if we're the child.
+				 * We can detect that using clone's return value.
+				 * XXX: it is possible to clone without replacing the stack, which
+				 * is not handled correctly here. */
+				(ret == 0) ? (void*) (
+					   (uintptr_t)(((struct clone_args *) gsp->args[0])->stack)
+					 + (uintptr_t)(((struct clone_args *) gsp->args[0])->stack_size)
+				): NULL);
 			break;
 #endif
 		default:
 			break;
 	}
-	__systrap_post_handling(gsp, ret);
+	return ret;
 }
 
 /* At least clone(), and perhaps other system calls, will zap the stack.
@@ -509,10 +532,11 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 	 * The basic idea is that everything we might need, if
 	 * our stack gets zapped, is copied to the *new* stack.
 	 */
-	long int ret_op = (long int) gsp->syscall_number;
+	long int ret;
 	__asm__ volatile (
 	#if defined(__x86_64__) /* XXX: rationalise this by combining with later pops*/
-		  "mov %[arg0], %%"stringifx(argreg0)" \n\
+		  "mov $"stringifx(__NR_clone)", %%rax\n\
+		   mov %[arg0], %%"stringifx(argreg0)" \n\
 		   mov %[arg1], %%"stringifx(argreg1)" \n\
 		   mov %[arg2], %%"stringifx(argreg2)" \n\
 		   mov %[arg3], %%"stringifx(argreg3)" \n\
@@ -616,7 +640,7 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		    */
 		"2:\n"
 		   "nop\n"
-		  : [ret_op]  "+a" (ret_op)
+		  : [ret]  "=a" (ret)
 		  , [gsp] "+m"(gsp)  /* gsp is a fake output, i.e. a clobber */
 		   /* We list gsp it as a memory in/out so that the compiler thinks it's
 		    * clobbered. That way, it will keep it in its stack slot during the asm block,
@@ -632,28 +656,18 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%"stringifx(argreg2),
 		    "%"stringifx(argreg3), "%"stringifx(argreg4), "memory", DO_SYSCALL_CLOBBER_LIST(5)
 	);
-	// FIXME: can we do this fixup before the clone, but
-	// after the stack copy? We just fix up the copied context
-	// on the stack, speculatively. Might be cleaner and fit with our
-	// "walk the stack and fix up saved BPs only" idea, i.e. minimise
-	// how many on-stack pointers have to work to get us to the sigreturn.
-	fixup_sigframe_for_return(gsp->saved_context, /*post_zap_top_of_stack - sizeof (struct ibcs_sigframe), */
-		ret_op, trap_len(&gsp->saved_context->uc.uc_mcontext),
-		/* new_sp: we have a new sp only if we're the child.
-		 * We can detect that using ret_op i.e. clone()'s return value. */
-		(ret_op == 0) ? (void*) (gsp->args[1] /* see fake_arg1 comment above  */)
-			: NULL);
-	return ret_op;
+	return ret;
 }
 
 extern inline long
 __attribute__((always_inline,gnu_inline))
 do_clone3(struct generic_syscall *gsp)
 {
-	long int ret_op = (long int) gsp->syscall_number;
+	long int ret;
 	__asm__ volatile (
 	#if defined(__x86_64__)
-		  "mov %[arg0], %%"stringifx(argreg0)" \n\
+		  "mov $"stringifx(__NR_clone3)", %%rax\n\
+		   mov %[arg0], %%"stringifx(argreg0)" \n\
 		   mov %[arg1], %%"stringifx(argreg1)" \n"
 		  "mov %[gsp],  %%r12 \n"    /* Put gsp in r12, for copy_to_new_stack */
 		  "pushq %%rbp\n"            /* See below. We need this to restore BP in the parent... */
@@ -728,6 +742,7 @@ do_clone3(struct generic_syscall *gsp)
 		   "addq $0x8, %%rsp    # discard the unwanted saved BP (actually uninitialized/zero in the child) \n"
 		   "jmp 2f \n"
 #elif defined (__i386__)
+		  "mov $"stringifx(__NR_clone3)", %%eax\n"
 		  "mov %[arg0], %%"stringifx(argreg0) /* ebx */" \n"
 		  "push %%ebp\n"            /* See below. We need this to restore BP in the parent... */
 		  "mov %%esp, %%eax\n"      /* ecx will form arg3 of sysv+regparm3 call, i.e. sp_at_clone */
@@ -786,7 +801,7 @@ do_clone3(struct generic_syscall *gsp)
 		    */
 		"2:\n"
 		   "nop\n"
-		  : [ret_op]  "+a" (ret_op)
+		  : [ret]  "=a" (ret)
 		  , [gsp] "+m"(gsp)  /* gsp is a fake output, i.e. a clobber */
 		   /* We list gsp it as a memory output so that the compiler thinks it's
 		    * clobbered. That way, it will keep it in its stack slot during the asm block,
@@ -800,17 +815,8 @@ do_clone3(struct generic_syscall *gsp)
 		  , [stack_size_offs] "i" (offsetof (struct clone_args, stack_size))
 		  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%ecx", "memory", DO_SYSCALL_CLOBBER_LIST(2)
 	);
-	fixup_sigframe_for_return(gsp->saved_context, ret_op,
-		trap_len(&gsp->saved_context->uc.uc_mcontext),
-		/* new_sp: we have a new sp only if we're the child.
-		 * We can detect that using ret_op i.e. clone3()'s return value.
-		 * XXX: it is possible to clone without replacing the stack, which
-		 * is not handled correctly here. */
-		(ret_op == 0) ? (void*) (
-		           (uintptr_t)(((struct clone_args *) gsp->args[0])->stack)
-		         + (uintptr_t)(((struct clone_args *) gsp->args[0])->stack_size)
-		): NULL);
-	return ret_op;
+
+	return ret;
 }
 
 
