@@ -23,6 +23,7 @@ else
 arch := $(notdir $(realpath .))
 vpath %.c $(srcdir)
 vpath %.s $(srcdir)
+vpath %.S $(srcdir)
 
 # don't delete intermediates
 .SECONDARY:
@@ -45,13 +46,13 @@ LDFLAGS += -m32 -Wl,-melf_i386
 endif
 
 # we are to be linked with the librunt archive
-CFLAGS += -DIN_LIBRUNT_DSO
+CPPFLAGS += -DIN_LIBRUNT_DSO
 # musl has 'int' for line number, unlike glibc... librunt can hack around for us
 # FIXME: should be a configure-time thing perhaps? in which repo?
 # Problem is that configure might not see same libc headers as we plumb through here.
 CFLAGS += -DASSERT_FAIL_LINE_SIGNED
 CFLAGS += -DSYSTRAP_DEFINE_FILE
-CFLAGS += -I$(srcroot)/include
+CPPFLAGS += -I$(srcroot)/include
 CFLAGS += -g
 CFLAGS += -Wall -Wno-unused-label -Wno-comment
 CFLAGS += -O2
@@ -69,7 +70,7 @@ else
 endif
 
 $(info LIBC_CFLAGS is $(LIBC_CFLAGS))
-CFLAGS += -nostdinc $(LIBC_CFLAGS)
+CPPFLAGS += -nostdinc $(LIBC_CFLAGS)
 
 C_SRC := $(wildcard $(srcdir)/*.c)
 $(info C_SRC is $(C_SRC))
@@ -78,8 +79,24 @@ $(info C_DEPS is $(C_DEPS))
 DEPS := $(C_DEPS)
 OBJS := $(patsubst %.c,%.o,$(notdir $(C_SRC)))
 
+S_SRC := $(wildcard $(srcdir)/*.S)
+S_DEPS := $(patsubst %.S,%.d,$(notdir $(S_SRC)))
+DEPS += $(S_DEPS)
+# add the call handler, on 64-bit builds only
+$(info arch is $(arch))
+ifeq ($(arch),x86_64)
+OBJS += $(patsubst %.S,%.o,$(notdir $(S_SRC)))
+else
+OBJS += $(filter-out call-handler.o,$(patsubst %.S,%.o,$(notdir $(S_SRC))))
+endif
+
+%.o: %.S
+	$(CC) $(CPPFLAGS) $(ASFLAGS) -c -o "$@" "$<"
+
 $(C_DEPS): %.d: %.c
-	$(CC) -MM $(CFLAGS) $+ > "$@" || { rm -f "$@"; false; }
+	$(CC) -MM $(CPPFLAGS) $(CFLAGS) $+ > "$@" || { rm -f "$@"; false; }
+$(S_DEPS): %.d: %.S
+	$(CC) -MM $(CPPFLAGS) $(CFLAGS) $+ > "$@" || { rm -f "$@"; false; }
 
 ifneq ($(MAKECMDGOALS),clean)
 -include $(DEPS)
@@ -87,14 +104,14 @@ endif
 
 $(info XED_DIR is $(XED_DIR))
 ifneq ($(realpath $(XED_DIR)),)
-CFLAGS += -I$(XED_DIR)/include/public -I$(XED_DIR)/build-$(arch)/include/xed
+CPPFLAGS += -I$(XED_DIR)/include/public -I$(XED_DIR)/build-$(arch)/include/xed
 endif
 ifneq ($(realpath $(LIBX86EMULATE_DIR)),)
-CFLAGS += -I$(LIBX86EMULATE_DIR)/src
+CPPFLAGS += -I$(LIBX86EMULATE_DIR)/src
 OBJS += x86_decode.o
 endif
 # always add librunt
-CFLAGS += -I$(LIBRUNT_DIR)/include
+CPPFLAGS += -I$(LIBRUNT_DIR)/include
 
 CFLAGS += -std=c99
 
@@ -114,7 +131,7 @@ $(info OBJS is $(OBJS))
 # automatically if needed.
 $(info Now XED_DIR is $(XED_DIR))
 xed.os: $(XED_DIR)/build-$(arch)/lib/libxed.a
-	$(CC) $(CFLAGS) $(LDFLAGS) -nostdlib -no-pie -fno-lto -Wl,-r -o $@ -Wl,--whole-archive $< -Wl,--no-whole-archive
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -nostdlib -no-pie -fno-lto -Wl,-r -o $@ -Wl,--whole-archive $< -Wl,--no-whole-archive
 
 xed.os.d: $(XED_DIR)/build-$(arch)/lib/libxed.a
 	a="$$(readlink -f "$<")"; mkdir -p $@ && (cd $@ && $(AR) x "$$a") || (rm -rf $@; false)
