@@ -127,8 +127,11 @@ void init_fds(void)
 	debug_printf(0, "TRACE_SYSCALLS_TRACE_FD is %s, ", trace_fd_str ?: "(none)");
 	if (!trace_fd_str || trace_fd == 2)
 	{
-		debug_printf(0, "dup'ing stderr, ");
-		trace_fd = dup(2);
+		//debug_printf(0, "dup'ing stderr, ");
+		trace_fd = 2; // dup(2); // FIXME: some other defence against the process closing stderr
+		/* XXX: we avoid the dup because it helps to have fd numbers aligned
+		 * between tracing and non-tracing runs. That way, we can diff the strace output
+		 * and not get too much noise. */
 	}
 	/* The user is allowed to ask for traces on a particular fd, which must
 	 * be open at process start. We fdopen it to get a FILE object. */
