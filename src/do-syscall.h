@@ -186,12 +186,12 @@ do_syscall6(struct generic_syscall *gsp)
 #endif
 	  : [ret]  "+a" (ret_op)
 #ifdef __i386__
-	  : [arg0] "m" ((long int) gsp->args[0])
-	  , [arg1] "m" ((long int) gsp->args[1])
-	  , [arg2] "m" ((long int) gsp->args[2])
-	  , [arg3] "m" ((long int) gsp->args[3])
-	  , [arg4] "m" ((long int) gsp->args[4])
-	  , [arg5] "m" ((long int) gsp->args[5])
+	  : [arg0] "rm" ((long int) gsp->args[0])
+	  , [arg1] "rm" ((long int) gsp->args[1])
+	  , [arg2] "rm" ((long int) gsp->args[2])
+	  , [arg3] "rm" ((long int) gsp->args[3])
+	  , [arg4] "rm" ((long int) gsp->args[4])
+	  , [arg5] "rm" ((long int) gsp->args[5])
 	  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%"stringifx(argreg2),
 	    "%"stringifx(argreg3), "%"stringifx(argreg4),
 	    /*"%"stringifx(argreg5), -- argreg5 is %ebp, which the compiler knows
