@@ -12,7 +12,10 @@
 
 void (__attribute__((noreturn)) raw_exit)(int status)
 {
-	DO_EXIT_SYSCALL(status);
+	__asm__ volatile (FIX_STACK_ALIGNMENT " \n\
+			   "stringifx(SYSCALL_INSTR)"	     # do the syscall \n\
+			  "UNFIX_STACK_ALIGNMENT " \n" \
+	  : /* no output*/ : csyscallnumreg(SYS_exit), cargreg0(status) : DO_SYSCALL_CLOBBER_LIST(1));
 	__builtin_unreachable();
 }
 

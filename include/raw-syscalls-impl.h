@@ -157,26 +157,6 @@ struct __libc_timeval;
 	do { ((cond) ? ((void) 0) : (__assert_fail("Assertion failed: \"" stringify((cond)) "\"", __FILE__, __LINE__, __func__ ))); }  while (0)
 #endif
 
-#define DO_EXIT_SYSCALL(exitcode) \
-	long retcode = (exitcode); \
-	long op = SYS_exit; \
-	__asm__ volatile ("mov %0, %%"stringifx(argreg0)"      # \n\
-			  "FIX_STACK_ALIGNMENT " \n\
-			   mov %1, %%"stringifx(syscallnumreg)"      # \n\
-			   "stringifx(SYSCALL_INSTR)"	     # do the syscall \n\
-			  "UNFIX_STACK_ALIGNMENT " \n" \
-	  : /* no output*/ : "rm"(retcode), "rm"(op) : DO_SYSCALL_CLOBBER_LIST(1));
-
-#define DO_SIGRETURN_SYSCALL(num /* SYS_rt_sigreturn */) \
-	long unused_val = 0; \
-	long op = num; \
-	__asm__ volatile ("mov %0, %%"stringifx(argreg0)"      # \n\
-			  "FIX_STACK_ALIGNMENT " \n\
-			   mov %1, %%"stringifx(syscallnumreg)"      # \n\
-			   "stringifx(SYSCALL_INSTR)"	     # do the syscall \n\
-			  "UNFIX_STACK_ALIGNMENT " \n" \
-	  : /* no output*/ : "rm"(unused_val), "rm"(op) : DO_SYSCALL_CLOBBER_LIST(1));
-
 /* In kernel-speak this is a "struct sigframe" / "struct rt_sigframe" --
  * sadly no user-level header defines it. But it seems to be vaguely standard
  * per-architecture (here Intel iBCS). */
