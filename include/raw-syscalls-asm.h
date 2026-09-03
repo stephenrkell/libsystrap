@@ -12,6 +12,14 @@
 #endif
 #endif
 
+#define SYSCALL_CLOBBERS(nargs) SYSCALL_CLOBBERS_ ## nargs
+#define SYSCALL_CLOBBER_LIST(nargs) \
+	ANY_SYSCALL_CLOBBER_LIST  \
+	SYSCALL_CLOBBERS(nargs) \
+	"cc" /*, "memory" */
+#define DO_SYSCALL_CLOBBER_LIST(nargs) \
+    DO_SYSCALL_EXTRA_CLOBBERS  SYSCALL_CLOBBER_LIST(nargs)
+
 #if defined(__x86_64__)
 /* The x86-64 syscall argument passing convention goes like this:
  * RAX: syscall_number
@@ -24,6 +32,7 @@
  */
 #define syscallnumreg rax
 #define SYSCALLNUMREG RAX
+#define csyscallnumreg "a"
 #define argreg0 rdi
 #define argreg1 rsi
 #define argreg2 rdx
@@ -49,20 +58,16 @@
  * only %rcx, %r11 and %rax are clobbered.
  * But the clobber list applies not only to the syscall instruction,
  * but also to our argument-setting sequences.
- * We use the "+a" constraint for rax, so it is not listed. */
-#define ANY_SYSCALL_CLOBBER_LIST "%rcx", "%r11"
+ * NOTE: we now MUST use constraints for setting argments 0..2. For arguments 3..5,
+ * we still set them explicitly because the constraints are ont reliable. */
+#define ANY_SYSCALL_CLOBBER_LIST "%rcx", "%r11", 
 #define SYSCALL_CLOBBERS_0
-#define SYSCALL_CLOBBERS_1 SYSCALL_CLOBBERS_0 ,  "%rdi"
-#define SYSCALL_CLOBBERS_2 SYSCALL_CLOBBERS_1 ,  "%rsi"
-#define SYSCALL_CLOBBERS_3 SYSCALL_CLOBBERS_2 ,  "%rdx"
-#define SYSCALL_CLOBBERS_4 SYSCALL_CLOBBERS_3 ,  "%r10"
-#define SYSCALL_CLOBBERS_5 SYSCALL_CLOBBERS_4 ,  "%r8"
-#define SYSCALL_CLOBBERS_6 SYSCALL_CLOBBERS_5 ,  "%r9"
-#define SYSCALL_CLOBBERS(nargs) SYSCALL_CLOBBERS_ ## nargs
-#define SYSCALL_CLOBBER_LIST(nargs) \
-	ANY_SYSCALL_CLOBBER_LIST \
-	SYSCALL_CLOBBERS(nargs) \
-	, "cc" /*, "memory" */
+#define SYSCALL_CLOBBERS_1 SYSCALL_CLOBBERS_0
+#define SYSCALL_CLOBBERS_2 SYSCALL_CLOBBERS_1 
+#define SYSCALL_CLOBBERS_3 SYSCALL_CLOBBERS_2 
+#define SYSCALL_CLOBBERS_4 SYSCALL_CLOBBERS_3   "%r10",
+#define SYSCALL_CLOBBERS_5 SYSCALL_CLOBBERS_4   "%r8",
+#define SYSCALL_CLOBBERS_6 SYSCALL_CLOBBERS_5   "%r9",
 
 #define FIX_STACK_ALIGNMENT \
 	"movq %%rsp, %%r12\n\
@@ -72,8 +77,7 @@
 #define UNFIX_STACK_ALIGNMENT \
 	"addq %%r12, %%rsp\n"
 
-#define DO_SYSCALL_CLOBBER_LIST(nargs) \
-   "%r12", SYSCALL_CLOBBER_LIST(nargs)
+#define DO_SYSCALL_EXTRA_CLOBBERS  "%r12",
 
 #define SYSCALL_INSTR syscall
 
@@ -90,6 +94,7 @@
  */
 #define syscallnumreg eax
 #define SYSCALLNUMREG EAX
+#define csyscallnumreg "a"
 #define argreg0 ebx
 #define argreg1 ecx
 #define argreg2 edx
@@ -114,8 +119,7 @@
  * but all others need to be in the clobber list.
  *	 condition codes, memory
  */
-#define SYSCALL_CLOBBER_LIST(nargs) \
-	"cc" /*, "memory" */
+
 /* HACK: we can't declare all registers as clobbered, as gcc complains --
  * not just about ebp (special) but about unsatisfiable constraints. Instead
  * of clobbering we need to save/restore.
@@ -170,30 +174,27 @@
  * Instead we push it four times to preserve 16-byte alignment. */
 #define FIX_STACK_ALIGNMENT \
   ""
-#if 0
-	"mov %%esp, %%eax\n\
-	 and $0xf, %%eax    # now we have either 8 or 0 in eax \n\
-	 sub %%eax, %%esp   # fix the stack pointer \n\
-	 push %%eax \n\
-	 push %%eax \n\
-	 push %%eax \n\
-	 push %%eax \n\
-	 "
-#endif
 /* To undo our push-hack, we pop the replicated value four times.
  * This clobbers ebx. */
 #define UNFIX_STACK_ALIGNMENT \
 
-#if 0
-	"pop %%ebx\n\
-	 pop %%ebx\n\
-	 pop %%ebx\n\
-	 pop %%ebx\n\
-	 add %%ebx, %%esp\n\
-	"
-#endif
-#define DO_SYSCALL_CLOBBER_LIST(nargs) \
-   /*"ebx",*/  SYSCALL_CLOBBER_LIST(nargs)
+
+#define ANY_SYSCALL_CLOBBER_LIST 
+#define SYSCALL_CLOBBERS_0
+#define SYSCALL_CLOBBERS_1 SYSCALL_CLOBBERS_0
+#define SYSCALL_CLOBBERS_2 SYSCALL_CLOBBERS_1 
+#define SYSCALL_CLOBBERS_3 SYSCALL_CLOBBERS_2 
+#define SYSCALL_CLOBBERS_4 SYSCALL_CLOBBERS_3   "%edi",
+#define SYSCALL_CLOBBERS_5 SYSCALL_CLOBBERS_4   "%esi",
+#define SYSCALL_CLOBBERS_6 SYSCALL_CLOBBERS_5   /* we push/pop %ebp rather than clobber it, since copiler can't cope with this  */
+
+#define SYSCALL_CLOBBERS(nargs) SYSCALL_CLOBBERS_ ## nargs
+#define SYSCALL_CLOBBER_LIST(nargs) \
+	ANY_SYSCALL_CLOBBER_LIST  \
+	SYSCALL_CLOBBERS(nargs) \
+	"cc" /*, "memory" */
+
+#define DO_SYSCALL_EXTRA_CLOBBERS  /* no extra clobbers on i386 */
 
 #define SYSCALL_INSTR int $0x80
 

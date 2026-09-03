@@ -72,11 +72,10 @@ do_syscall1(struct generic_syscall *gsp)
 	long int ret_op = (long int) gsp->syscall_number;
 
 	__asm__ volatile (
-			  "mov %[arg0], %%"stringifx(argreg0)" \n"
 			   PERFORM_SYSCALL
 	  : [ret]  "+a" (ret_op)
-	  : [arg0] "rm" ((long int) gsp->args[0])
-	  : "%"stringifx(argreg0), DO_SYSCALL_CLOBBER_LIST(1));
+	  : [arg0] cargreg0 ((long int) gsp->args[0])
+	  : DO_SYSCALL_CLOBBER_LIST(1));
 
 	return ret_op;
 }
@@ -87,13 +86,11 @@ do_syscall2(struct generic_syscall *gsp)
 {
 	long int ret_op = (long int) gsp->syscall_number;
 	__asm__ volatile (
-			  "mov %[arg0], %%"stringifx(argreg0)" \n\
-			   mov %[arg1], %%"stringifx(argreg1)" \n"
 			   PERFORM_SYSCALL
 	  : [ret]  "+a" (ret_op)
-	  : [arg0] "rm" ((long int) gsp->args[0])
-	  , [arg1] "rm" ((long int) gsp->args[1])
-	  : "%"stringifx(argreg0), "%"stringifx(argreg1), DO_SYSCALL_CLOBBER_LIST(2));
+	  : [arg0] cargreg0 ((long int) gsp->args[0])
+	  , [arg1] cargreg1 ((long int) gsp->args[1])
+	  : DO_SYSCALL_CLOBBER_LIST(2));
 
 	return ret_op;
 }
@@ -104,16 +101,12 @@ do_syscall3(struct generic_syscall *gsp)
 {
 	long int ret_op = (long int) gsp->syscall_number;
 	__asm__ volatile (
-			  "mov %[arg0], %%"stringifx(argreg0)" \n\
-			   mov %[arg1], %%"stringifx(argreg1)" \n\
-			   mov %[arg2], %%"stringifx(argreg2)" \n"
 			   PERFORM_SYSCALL
 	  : [ret]  "+a" (ret_op)
-	  : [arg0] "rm" ((long int) gsp->args[0])
-	  , [arg1] "rm" ((long int) gsp->args[1])
-	  , [arg2] "rm" ((long int) gsp->args[2])
-	  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%"stringifx(argreg2),
-	    DO_SYSCALL_CLOBBER_LIST(3));
+	  : [arg0] cargreg0 ((long int) gsp->args[0])
+	  , [arg1] cargreg1 ((long int) gsp->args[1])
+	  , [arg2] cargreg2 ((long int) gsp->args[2])
+	  : DO_SYSCALL_CLOBBER_LIST(3));
 
 	return ret_op;
 }
@@ -124,18 +117,14 @@ do_syscall4(struct generic_syscall *gsp)
 {
 	long int ret_op = (long int) gsp->syscall_number;
 	__asm__ volatile (
-			  "mov %[arg0], %%"stringifx(argreg0)" \n\
-			   mov %[arg1], %%"stringifx(argreg1)" \n\
-			   mov %[arg2], %%"stringifx(argreg2)" \n\
-			   mov %[arg3], %%"stringifx(argreg3)" \n"
+			   "mov %[arg3], %%"stringifx(argreg3)"  \n"
 			   PERFORM_SYSCALL
 	  : [ret]  "+a" (ret_op)
-	  : [arg0] "rm" ((long int) gsp->args[0])
-	  , [arg1] "rm" ((long int) gsp->args[1])
-	  , [arg2] "rm" ((long int) gsp->args[2])
+	  : [arg0] cargreg0 ((long int) gsp->args[0])
+	  , [arg1] cargreg1 ((long int) gsp->args[1])
+	  , [arg2] cargreg2 ((long int) gsp->args[2])
 	  , [arg3] "rm" ((long int) gsp->args[3])
-	  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%"stringifx(argreg2), "%"stringifx(argreg3),
-	    DO_SYSCALL_CLOBBER_LIST(4));
+	  : DO_SYSCALL_CLOBBER_LIST(4));
 
 	return ret_op;
 }
@@ -146,20 +135,16 @@ do_syscall5(struct generic_syscall *gsp)
 {
 	long int ret_op = (long int) gsp->syscall_number;
 	__asm__ volatile (
-			  "mov %[arg0], %%"stringifx(argreg0)" \n\
-			   mov %[arg1], %%"stringifx(argreg1)" \n\
-			   mov %[arg2], %%"stringifx(argreg2)" \n\
-			   mov %[arg3], %%"stringifx(argreg3)" \n\
-			   mov %[arg4], %%"stringifx(argreg4)"  \n"
+			   "mov %[arg3], %%"stringifx(argreg3)"  \n"
+			   "mov %[arg4], %%"stringifx(argreg4)"  \n"
 			   PERFORM_SYSCALL
 	  : [ret]  "+a" (ret_op)
-	  : [arg0] "rm" ((long int) gsp->args[0])
-	  , [arg1] "rm" ((long int) gsp->args[1])
-	  , [arg2] "rm" ((long int) gsp->args[2])
+	  : [arg0] cargreg0 ((long int) gsp->args[0])
+	  , [arg1] cargreg1 ((long int) gsp->args[1])
+	  , [arg2] cargreg2 ((long int) gsp->args[2])
 	  , [arg3] "rm" ((long int) gsp->args[3])
 	  , [arg4] "rm" ((long int) gsp->args[4])
-	  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%"stringifx(argreg2), 
-	    "%"stringifx(argreg3), "%"stringifx(argreg4), DO_SYSCALL_CLOBBER_LIST(5));
+	  : DO_SYSCALL_CLOBBER_LIST(5));
 
 	return ret_op;
 }
@@ -170,11 +155,8 @@ do_syscall6(struct generic_syscall *gsp)
 {
 	long int ret_op = (long int) gsp->syscall_number;
 	__asm__ volatile (
-			  "mov %[arg0], %%"stringifx(argreg0)" \n\
-			   mov %[arg1], %%"stringifx(argreg1)" \n\
-			   mov %[arg2], %%"stringifx(argreg2)" \n\
-			   mov %[arg3], %%"stringifx(argreg3)" \n\
-			   mov %[arg4], %%"stringifx(argreg4)" \n\
+			   "mov %[arg3], %%"stringifx(argreg3)"  \n"
+			  " mov %[arg4], %%"stringifx(argreg4)" \n\
 			 "
 #ifdef __i386__
 			  "push %%ebp \n"
@@ -186,28 +168,24 @@ do_syscall6(struct generic_syscall *gsp)
 #endif
 	  : [ret]  "+a" (ret_op)
 #ifdef __i386__
-	  : [arg0] "rm" ((long int) gsp->args[0])
-	  , [arg1] "rm" ((long int) gsp->args[1])
-	  , [arg2] "rm" ((long int) gsp->args[2])
+	  : [arg0] cargreg0 ((long int) gsp->args[0])
+	  , [arg1] cargreg1 ((long int) gsp->args[1])
+	  , [arg2] cargreg2 ((long int) gsp->args[2])
 	  , [arg3] "rm" ((long int) gsp->args[3])
 	  , [arg4] "rm" ((long int) gsp->args[4])
 	  , [arg5] "rm" ((long int) gsp->args[5])
-	  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%"stringifx(argreg2),
-	    "%"stringifx(argreg3), "%"stringifx(argreg4),
-	    /*"%"stringifx(argreg5), -- argreg5 is %ebp, which the compiler knows
+	  : /*"%"stringifx(argreg5), -- argreg5 is %ebp, which the compiler knows
 	     * is special, so does not allow us to mention in a clobber list. And
 	     * it's OK, because we don't clobber it! Witness the pushes and pops above. */
 	    DO_SYSCALL_CLOBBER_LIST(6)
 #else
-	  : [arg0] "rm" ((long int) gsp->args[0])
-	  , [arg1] "rm" ((long int) gsp->args[1])
-	  , [arg2] "rm" ((long int) gsp->args[2])
+	  : [arg0] cargreg0 ((long int) gsp->args[0])
+	  , [arg1] cargreg1 ((long int) gsp->args[1])
+	  , [arg2] cargreg2 ((long int) gsp->args[2])
 	  , [arg3] "rm" ((long int) gsp->args[3])
 	  , [arg4] "rm" ((long int) gsp->args[4])
 	  , [arg5] "rm" ((long int) gsp->args[5])
-	  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%"stringifx(argreg2),
-	    "%"stringifx(argreg3), "%"stringifx(argreg4), "%"stringifx(argreg5),
-	    DO_SYSCALL_CLOBBER_LIST(6)
+	  : DO_SYSCALL_CLOBBER_LIST(6)
 #endif
 	);
 	return ret_op;
@@ -648,13 +626,13 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		    * will be reloading the new, fixed-up version, but that is all transparent
 		    * to the compiler. */
 		   :
-		    [arg0] "m" ((long int) gsp->args[0])
-		  , [arg1] "m" ((long int) gsp->args[1])
-		  , [arg2] "m" ((long int) gsp->args[2])
-		  , [arg3] "m" ((long int) gsp->args[3])
-		  , [arg4] "m" ((long int) gsp->args[4])
+		    [arg0] "rm" ((long int) gsp->args[0])
+		  , [arg1] "rm" ((long int) gsp->args[1])
+		  , [arg2] "rm" ((long int) gsp->args[2])
+		  , [arg3] "rm" ((long int) gsp->args[3])
+		  , [arg4] "rm" ((long int) gsp->args[4])
 		  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%"stringifx(argreg2),
-		    "%"stringifx(argreg3), "%"stringifx(argreg4), "memory", DO_SYSCALL_CLOBBER_LIST(5)
+		    "memory", DO_SYSCALL_CLOBBER_LIST(5) // <-- this includes args 3,4,5 but not 0,1,2, hence the above
 	);
 	return ret;
 }
