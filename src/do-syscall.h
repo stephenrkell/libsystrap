@@ -56,139 +56,205 @@ extern inline long int
 __attribute__((always_inline,gnu_inline))
 do_syscall0(struct generic_syscall *gsp)
 {
-	long int ret_op = (long int) gsp->syscall_number;
-
-	__asm__ volatile (PERFORM_SYSCALL
-	  : [ret] "+a" (ret_op) :
+	long int ret;
+	__asm__ volatile (
+			POPULATE_ARGREGS(0)
+			PERFORM_SYSCALL
+			UNPOPULATE_ARGREGS(0)
+	  : [ret] "=a" (ret) : [num] csyscallnumreg((long int) gsp->syscall_number)
 	  : DO_SYSCALL_CLOBBER_LIST(0));
 
-	return ret_op;
+	return ret;
 }
 
 extern inline long int
 __attribute__((always_inline,gnu_inline))
 do_syscall1(struct generic_syscall *gsp)
 {
-	long int ret_op = (long int) gsp->syscall_number;
-
+	long int ret;
 	__asm__ volatile (
+			   POPULATE_ARGREGS(1)
 			   PERFORM_SYSCALL
-	  : [ret]  "+a" (ret_op)
-	  : [arg0] cargreg0 ((long int) gsp->args[0])
+			   UNPOPULATE_ARGREGS(1)
+	  : [ret]  "=a" (ret)
+	  : [num]  csyscallnumreg((long int) gsp->syscall_number)
+	  , [arg0] cargreg0 ((long int) gsp->args[0])
 	  : DO_SYSCALL_CLOBBER_LIST(1));
 
-	return ret_op;
+	return ret;
 }
 
 extern inline long int 
 __attribute__((always_inline,gnu_inline))
 do_syscall2(struct generic_syscall *gsp)
 {
-	long int ret_op = (long int) gsp->syscall_number;
+	long int ret;
 	__asm__ volatile (
+			   POPULATE_ARGREGS(2)
 			   PERFORM_SYSCALL
-	  : [ret]  "+a" (ret_op)
-	  : [arg0] cargreg0 ((long int) gsp->args[0])
+			   UNPOPULATE_ARGREGS(2)
+	  : [ret]  "=a" (ret)
+	  : [num]  csyscallnumreg((long int) gsp->syscall_number)
+	  , [arg0] cargreg0 ((long int) gsp->args[0])
 	  , [arg1] cargreg1 ((long int) gsp->args[1])
 	  : DO_SYSCALL_CLOBBER_LIST(2));
 
-	return ret_op;
+	return ret;
 }
 
 extern inline long int 
 __attribute__((always_inline,gnu_inline))
 do_syscall3(struct generic_syscall *gsp)
 {
-	long int ret_op = (long int) gsp->syscall_number;
+	long int ret;
 	__asm__ volatile (
+			   POPULATE_ARGREGS(3)
 			   PERFORM_SYSCALL
-	  : [ret]  "+a" (ret_op)
-	  : [arg0] cargreg0 ((long int) gsp->args[0])
+			   UNPOPULATE_ARGREGS(3)
+	  : [ret]  "=a" (ret)
+	  : [num]  csyscallnumreg((long int) gsp->syscall_number)
+	  , [arg0] cargreg0 ((long int) gsp->args[0])
 	  , [arg1] cargreg1 ((long int) gsp->args[1])
 	  , [arg2] cargreg2 ((long int) gsp->args[2])
 	  : DO_SYSCALL_CLOBBER_LIST(3));
 
-	return ret_op;
+	return ret;
 }
 
 extern inline long int
 __attribute__((always_inline,gnu_inline)) 
 do_syscall4(struct generic_syscall *gsp)
 {
-	long int ret_op = (long int) gsp->syscall_number;
+	long int ret;
 	__asm__ volatile (
-			   "mov %[arg3], %%"stringifx(argreg3)"  \n"
+			   POPULATE_ARGREGS(4)
 			   PERFORM_SYSCALL
-	  : [ret]  "+a" (ret_op)
-	  : [arg0] cargreg0 ((long int) gsp->args[0])
+			   UNPOPULATE_ARGREGS(4)
+	  : [ret]  "=a" (ret)
+	  : [num]  csyscallnumreg((long int) gsp->syscall_number)
+	  , [arg0] cargreg0 ((long int) gsp->args[0])
 	  , [arg1] cargreg1 ((long int) gsp->args[1])
 	  , [arg2] cargreg2 ((long int) gsp->args[2])
-	  , [arg3] "rm" ((long int) gsp->args[3])
+	  , [arg3] cargreg3 ((long int) gsp->args[3])
 	  : DO_SYSCALL_CLOBBER_LIST(4));
 
-	return ret_op;
+	return ret;
 }
 
 extern inline long int
 __attribute__((always_inline,gnu_inline))
 do_syscall5(struct generic_syscall *gsp)
 {
-	long int ret_op = (long int) gsp->syscall_number;
+	long int ret;
 	__asm__ volatile (
-			   "mov %[arg3], %%"stringifx(argreg3)"  \n"
-			   "mov %[arg4], %%"stringifx(argreg4)"  \n"
+			   POPULATE_ARGREGS(5)
 			   PERFORM_SYSCALL
-	  : [ret]  "+a" (ret_op)
-	  : [arg0] cargreg0 ((long int) gsp->args[0])
+			   UNPOPULATE_ARGREGS(5)
+	  : [ret]  "=a" (ret)
+	  : [num]  csyscallnumreg((long int) gsp->syscall_number)
+	  , [arg0] cargreg0 ((long int) gsp->args[0])
 	  , [arg1] cargreg1 ((long int) gsp->args[1])
 	  , [arg2] cargreg2 ((long int) gsp->args[2])
-	  , [arg3] "rm" ((long int) gsp->args[3])
-	  , [arg4] "rm" ((long int) gsp->args[4])
+	  , [arg3] cargreg3 ((long int) gsp->args[3])
+	  , [arg4] cargreg4 ((long int) gsp->args[4])
 	  : DO_SYSCALL_CLOBBER_LIST(5));
 
-	return ret_op;
+	return ret;
 }
 
 extern inline long int
 __attribute__((always_inline,gnu_inline)) 
 do_syscall6(struct generic_syscall *gsp)
 {
-	long int ret_op = (long int) gsp->syscall_number;
+#if 1 /*ndef __i386__*/
+	long int ret;
 	__asm__ volatile (
-			   "mov %[arg3], %%"stringifx(argreg3)"  \n"
-			  " mov %[arg4], %%"stringifx(argreg4)" \n\
-			 "
-#ifdef __i386__
-			  "push %%ebp \n"
-#endif
-			  "mov %[arg5], %%"stringifx(argreg5)" \n"
+			   POPULATE_ARGREGS(6)
 			   PERFORM_SYSCALL
-#ifdef __i386__
-			  "pop %%ebp \n"    /* handy is never a clone() or clone3() -- our stack lives */
-#endif
-	  : [ret]  "+a" (ret_op)
-#ifdef __i386__
-	  : [arg0] cargreg0 ((long int) gsp->args[0])
+			   UNPOPULATE_ARGREGS(6)
+	  : [ret]  "=a" (ret)
+	  : [num]  csyscallnumreg ((long int) gsp->syscall_number)
+	  , [arg0] cargreg0 ((long int) gsp->args[0])
 	  , [arg1] cargreg1 ((long int) gsp->args[1])
 	  , [arg2] cargreg2 ((long int) gsp->args[2])
-	  , [arg3] "rm" ((long int) gsp->args[3])
-	  , [arg4] "rm" ((long int) gsp->args[4])
-	  , [arg5] "rm" ((long int) gsp->args[5])
-	  : /*"%"stringifx(argreg5), -- argreg5 is %ebp, which the compiler knows
-	     * is special, so does not allow us to mention in a clobber list. And
-	     * it's OK, because we don't clobber it! Witness the pushes and pops above. */
-	    DO_SYSCALL_CLOBBER_LIST(6)
-#else
-	  : [arg0] cargreg0 ((long int) gsp->args[0])
-	  , [arg1] cargreg1 ((long int) gsp->args[1])
-	  , [arg2] cargreg2 ((long int) gsp->args[2])
-	  , [arg3] "rm" ((long int) gsp->args[3])
-	  , [arg4] "rm" ((long int) gsp->args[4])
-	  , [arg5] "rm" ((long int) gsp->args[5])
+	  , [arg3] cargreg3 ((long int) gsp->args[3])
+	  , [arg4] cargreg4 ((long int) gsp->args[4])
+	  , [arg5] cargreg5 ((long int) gsp->args[5])
 	  : DO_SYSCALL_CLOBBER_LIST(6)
-#endif
 	);
-	return ret_op;
+	return ret;
+	// this is the version that is known to build, from revision f3f9be5...
+	// but it doesn't build here! so the problem is the context??!
+	// Seems to work now I've changed "m" to "rm" and added "memory" to the clobber list.
+	// Ah, no. It works in some contexts but not others?!
+#elif 0 /* __i386__ */
+ long int ret_op = (long int) gsp->syscall_number;
+ __asm__ volatile (
+     "mov %[arg0], %%""ebx"" \n                    mov %[arg1], %%"
+                      "ecx"" \n                    mov %[arg2], %%"
+                      "edx"" \n                    mov %[arg3], %%"
+                      "esi"" \n                    mov %[arg4], %%"
+                      "edi"" \n                  "
+
+
+     "push %%ebp \n"
+
+     "mov %[arg5], %%""ebp"" \n"
+      "" "  \n   ""int $0x80" " \n       "" \n"
+
+     "pop %%ebp \n"
+
+   : [ret] "+a" (ret_op)
+
+   : [arg0] "rm" ((long int) gsp->args[0])
+   , [arg1] "rm" ((long int) gsp->args[1])
+   , [arg2] "rm" ((long int) gsp->args[2])
+   , [arg3] "rm" ((long int) gsp->args[3])
+   , [arg4] "rm" ((long int) gsp->args[4])
+   , [arg5] "rm" ((long int) gsp->args[5])
+   : "%""ebx", "%""ecx", "%""edx",
+     "%""esi", "%""edi",
+     "cc", "memory");
+  return ret_op;
+#else /* __i386__ really -- heavily tweaked version using local register vars. 
+  Could the problem with the above be a lack of -fomit-frame-pointer? i.e. the compiler
+  runs out of registers.... Hmm. On a quick test, this does help. Maybe add the pragmas
+  to the handler in sigill.c? We also want the compiler not to use SSE/AVX/..., so
+  already want a bunch of pragmas in place. */
+long ret;
+long tnum = gsp->syscall_number;
+long targ0 = gsp->args[0];
+long targ1 = gsp->args[1];
+long targ2 = gsp->args[2];
+long targ3 = gsp->args[3];
+long targ4 = gsp->args[4];
+long targ5 = gsp->args[5];
+register long arg0 __asm("rbx") = targ0;
+register long arg1 __asm("rcx") = targ1;
+register long arg2 __asm("rdx") = targ2;
+register long arg3 __asm("rsi") = targ3;
+register long arg4 __asm("rdi") = targ4;
+long arg5 = targ5;
+ __asm__ volatile (
+     "push %%ebp \n"
+
+     "mov %[arg5], %%""ebp"" \n"
+      "" "  \n   ""int $0x80" " \n       "" \n"
+
+     "pop %%ebp \n"
+
+   : [ret] "=a" (ret)
+   : [num]  "a" (tnum)
+   , [arg0] "r"(arg0)
+   , [arg1] "r"(arg1)
+   , [arg2] "r"(arg2)
+   , [arg3] "r"(arg3)
+   , [arg4] "r"(arg4)
+   , [arg5] "m"(arg5)
+   : "cc", "memory");
+  return ret;
+
+#endif
 }
 
 __attribute__((always_inline,gnu_inline))
@@ -472,7 +538,7 @@ do_clone(struct generic_syscall *gsp)
 
      our stack                                         new stack
      :   ...  :
-__  X|________|<-- sp at clone() site                 Y.________ <--stack limit! == post_zap_top_of_stack
+__  X|________|<-- sp at clone() site                 Y.________ <--stack limit == post_zap_top_of_stack
  ^^  | . . .  |\                                       | . . .  |\
  ||  |  . . . | sigframe stuff                         |  . . . | COPY of sigframe stuff
 Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved ip = clone site (AGAIN; YES)
@@ -512,7 +578,7 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 	 */
 	long int ret;
 	__asm__ volatile (
-	#if defined(__x86_64__) /* XXX: rationalise this by combining with later pops*/
+	#if defined(__x86_64__)
 		  "mov $"stringifx(__NR_clone)", %%rax\n\
 		   mov %[arg0], %%"stringifx(argreg0)" \n\
 		   mov %[arg1], %%"stringifx(argreg1)" \n\
@@ -521,7 +587,6 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		   mov %[arg4], %%"stringifx(argreg4)"  \n"
 		  "mov %[gsp],  %%r12 \n"    /* Put gsp in r12 (our extra clobber), for copy_to_new_stack */
 		  "pushq %%rbp\n"            /* See below. We need this to restore BP in the parent... */
-		   /* begin PERFORM_SYSCALL replacement */
 		  "movq %%rsp, %%rcx\n"      /* rcx will form arg3 of sysv call, i.e. sp_at_clone */
 		  "pushq %%rax\n"
 		  "pushq %%rdx\n"
@@ -558,7 +623,6 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		                           might need to reference the BP. In the non-child case we restore the
 		                           parent BP that we pushed above. */
 		   stringifx(SYSCALL_INSTR) "\n"
-		   /* end PERFORM_SYSCALL replacement */
 		   /* Immediately test: did our stack actually get zapped? */
 		   "cmpq %%rsp, %%"stringifx(argreg1)"\n"
 		   "je 1f           # if taken, it means we are the child with a new stack \n"

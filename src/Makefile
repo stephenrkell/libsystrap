@@ -25,6 +25,10 @@ vpath %.c $(srcdir)
 vpath %.s $(srcdir)
 vpath %.S $(srcdir)
 
+# This is only needed for the i386 build, but it does no harm on x86-64.
+# Can we do this with a pragma/attribute instead? It seems not... see comment in call.c.
+call.o: CFLAGS += -fomit-frame-pointer
+
 # don't delete intermediates
 .SECONDARY:
 

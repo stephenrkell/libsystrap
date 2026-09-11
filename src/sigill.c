@@ -237,25 +237,3 @@ out:
 #endif
 }
 
-/* When we're called, it means we need to do the described syscall
- * with pre- and/or post-actions around it. There may or may not be a
- * defined replacement. We return through the call chain's return path.
- * In other words it's just like the body above. */
-long __systrap_call_handler_slow(struct generic_syscall *gsp)
-{
-	if (__systrap_pre_handling) __systrap_pre_handling(gsp);
-	long ret;
-	if (replaced_syscalls[gsp->syscall_number])
-	{
-		ret = replaced_syscalls[gsp->syscall_number](gsp);  /* XXX: this skips the post-syscall handling! FIXME! */
-	}
-	else
-	{
-		ret = do_generic_syscall_and_fixup(gsp);
-		/* this does the post-syscall handling as part of do_generic_syscall_and_fixup,
-		 * but instead it should happen here (and above).
-		 * FIXME: this causes asm constraint problems here. WHY? */
-	}
-	if (__systrap_post_handling) __systrap_post_handling(gsp, ret);
-	return ret;
-}
