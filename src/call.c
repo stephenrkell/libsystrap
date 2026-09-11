@@ -34,8 +34,7 @@ long __systrap_call_handler_slow(struct generic_syscall *gsp)
 	{
 		ret = do_generic_syscall_and_fixup(gsp);
 		/* this does the post-syscall handling as part of do_generic_syscall_and_fixup,
-		 * but instead it should happen here (and above).
-		 * FIXME: this causes asm constraint problems here. WHY? */
+		 * but instead it should happen here (and above). */
 	}
 	if (__systrap_post_handling) __systrap_post_handling(gsp, ret);
 	return ret;

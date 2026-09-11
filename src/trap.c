@@ -394,7 +394,8 @@ void __libsystrap_force_init(void)
 	startup();
 }
 
-void clone3_emulated_replacement(struct generic_syscall *s, post_handler *post)
+#ifdef __linux__
+long clone3_emulated_replacement(struct generic_syscall *s)
 {
 	struct clone_args *cl_args = (struct clone_args *) s->args[0];
 	size_t size = s->args[1];
@@ -402,7 +403,7 @@ void clone3_emulated_replacement(struct generic_syscall *s, post_handler *post)
 	 * All the hairy stuff is in do-syscall.h. */
 	struct generic_syscall gs = MKGS5(SYS_clone,
 		/* flags */ cl_args->flags | (cl_args->exit_signal & 0xff),
-		/* stack */ (long long) (cl_args->stack ? ((char*)(uintptr_t)cl_args->stack + cl_args->stack_size) : NULL),
+		/* stack */ (uintptr_t) (cl_args->stack ? ((char*)(uintptr_t)cl_args->stack + cl_args->stack_size) : NULL),
 		/* parent_tid */ (pid_t *)(uintptr_t) cl_args->parent_tid,
 #if defined(__x86_64__)
 		/* child_tid */ (pid_t *)cl_args->child_tid,
@@ -416,8 +417,24 @@ void clone3_emulated_replacement(struct generic_syscall *s, post_handler *post)
 		);
 	gs.saved_context = s->saved_context;
 	gs.site = s->site;
+#if 0
 	do_generic_syscall_and_fixup(&gs); // does post-handling and sets return value in fixed-up context
+#else
+	// FIXME: duplicating this code here to avoid the dreaded "impossible constraints"
+	// from the do_generic_syscall_and_fixup call.
+	long ret = do_clone(&gs);
+#if 0
+	// FIXME: see note about stack handling in do_generic_syscall_and_fixup
+	fixup_sigframe_for_return(gs.saved_context, ret,
+		trap_len(&gs.saved_context->uc.uc_mcontext),
+		(ret == 0) ? (void*) (gs.args[1] /* see fake_arg1 comment in do_clone()  */)
+			: NULL);
+#else
+	return ret;
+#endif
+#endif
 }
+#endif
 
 void install_sigill_handler(void)
 {
