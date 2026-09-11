@@ -36,7 +36,7 @@ extern uintptr_t our_load_address;
 	 "UNFIX_STACK_ALIGNMENT" \n"
 
 extern void __attribute__((visibility("protected")))
-(*__systrap_post_handling)(struct generic_syscall *gsp, long int ret);
+(*__systrap_post_handling)(struct generic_syscall *gsp, long ret);
 extern void __attribute__((visibility("protected")))
 (*__systrap_pre_handling)(struct generic_syscall *gsp);
 
@@ -52,213 +52,140 @@ extern void __attribute__((visibility("protected")))
 #define MKGS5(op, a1, a2, a3, a4, a5)     { NULL, NULL, op, { (long) a1, (long) a2, (long) a3, (long) a4, (long) a5 } }
 #define MKGS6(op, a1, a2, a3, a4, a5, a6) { NULL, NULL, op, { (long) a1, (long) a2, (long) a3, (long) a4, (long) a5, (long) a6 } }
 
-extern inline long int 
+extern inline long
 __attribute__((always_inline,gnu_inline))
 do_syscall0(struct generic_syscall *gsp)
 {
-	long int ret;
+	long ret;
 	__asm__ volatile (
 			POPULATE_ARGREGS(0)
 			PERFORM_SYSCALL
 			UNPOPULATE_ARGREGS(0)
-	  : [ret] "=a" (ret) : [num] csyscallnumreg((long int) gsp->syscall_number)
+	  : [ret] "=a" (ret) : [num] csyscallnumreg((long) gsp->syscall_number)
 	  : DO_SYSCALL_CLOBBER_LIST(0));
 
 	return ret;
 }
 
-extern inline long int
+extern inline long
 __attribute__((always_inline,gnu_inline))
 do_syscall1(struct generic_syscall *gsp)
 {
-	long int ret;
+	long ret;
 	__asm__ volatile (
 			   POPULATE_ARGREGS(1)
 			   PERFORM_SYSCALL
 			   UNPOPULATE_ARGREGS(1)
 	  : [ret]  "=a" (ret)
-	  : [num]  csyscallnumreg((long int) gsp->syscall_number)
-	  , [arg0] cargreg0 ((long int) gsp->args[0])
+	  : [num]  csyscallnumreg((long) gsp->syscall_number)
+	  , [arg0] cargreg0 (gsp->args[0])
 	  : DO_SYSCALL_CLOBBER_LIST(1));
 
 	return ret;
 }
 
-extern inline long int 
+extern inline long
 __attribute__((always_inline,gnu_inline))
 do_syscall2(struct generic_syscall *gsp)
 {
-	long int ret;
+	long ret;
 	__asm__ volatile (
 			   POPULATE_ARGREGS(2)
 			   PERFORM_SYSCALL
 			   UNPOPULATE_ARGREGS(2)
 	  : [ret]  "=a" (ret)
-	  : [num]  csyscallnumreg((long int) gsp->syscall_number)
-	  , [arg0] cargreg0 ((long int) gsp->args[0])
-	  , [arg1] cargreg1 ((long int) gsp->args[1])
+	  : [num]  csyscallnumreg((long) gsp->syscall_number)
+	  , [arg0] cargreg0 (gsp->args[0])
+	  , [arg1] cargreg1 (gsp->args[1])
 	  : DO_SYSCALL_CLOBBER_LIST(2));
 
 	return ret;
 }
 
-extern inline long int 
+extern inline long
 __attribute__((always_inline,gnu_inline))
 do_syscall3(struct generic_syscall *gsp)
 {
-	long int ret;
+	long ret;
 	__asm__ volatile (
 			   POPULATE_ARGREGS(3)
 			   PERFORM_SYSCALL
 			   UNPOPULATE_ARGREGS(3)
 	  : [ret]  "=a" (ret)
-	  : [num]  csyscallnumreg((long int) gsp->syscall_number)
-	  , [arg0] cargreg0 ((long int) gsp->args[0])
-	  , [arg1] cargreg1 ((long int) gsp->args[1])
-	  , [arg2] cargreg2 ((long int) gsp->args[2])
+	  : [num]  csyscallnumreg((long) gsp->syscall_number)
+	  , [arg0] cargreg0 (gsp->args[0])
+	  , [arg1] cargreg1 (gsp->args[1])
+	  , [arg2] cargreg2 (gsp->args[2])
 	  : DO_SYSCALL_CLOBBER_LIST(3));
 
 	return ret;
 }
 
-extern inline long int
+extern inline long
 __attribute__((always_inline,gnu_inline)) 
 do_syscall4(struct generic_syscall *gsp)
 {
-	long int ret;
+	long ret;
 	__asm__ volatile (
 			   POPULATE_ARGREGS(4)
 			   PERFORM_SYSCALL
 			   UNPOPULATE_ARGREGS(4)
 	  : [ret]  "=a" (ret)
-	  : [num]  csyscallnumreg((long int) gsp->syscall_number)
-	  , [arg0] cargreg0 ((long int) gsp->args[0])
-	  , [arg1] cargreg1 ((long int) gsp->args[1])
-	  , [arg2] cargreg2 ((long int) gsp->args[2])
-	  , [arg3] cargreg3 ((long int) gsp->args[3])
+	  : [num]  csyscallnumreg((long) gsp->syscall_number)
+	  , [arg0] cargreg0 (gsp->args[0])
+	  , [arg1] cargreg1 (gsp->args[1])
+	  , [arg2] cargreg2 (gsp->args[2])
+	  , [arg3] cargreg3 (gsp->args[3])
 	  : DO_SYSCALL_CLOBBER_LIST(4));
 
 	return ret;
 }
 
-extern inline long int
+extern inline long
 __attribute__((always_inline,gnu_inline))
 do_syscall5(struct generic_syscall *gsp)
 {
-	long int ret;
+	long ret;
 	__asm__ volatile (
 			   POPULATE_ARGREGS(5)
 			   PERFORM_SYSCALL
 			   UNPOPULATE_ARGREGS(5)
 	  : [ret]  "=a" (ret)
-	  : [num]  csyscallnumreg((long int) gsp->syscall_number)
-	  , [arg0] cargreg0 ((long int) gsp->args[0])
-	  , [arg1] cargreg1 ((long int) gsp->args[1])
-	  , [arg2] cargreg2 ((long int) gsp->args[2])
-	  , [arg3] cargreg3 ((long int) gsp->args[3])
-	  , [arg4] cargreg4 ((long int) gsp->args[4])
+	  : [num]  csyscallnumreg((long) gsp->syscall_number)
+	  , [arg0] cargreg0 (gsp->args[0])
+	  , [arg1] cargreg1 (gsp->args[1])
+	  , [arg2] cargreg2 (gsp->args[2])
+	  , [arg3] cargreg3 (gsp->args[3])
+	  , [arg4] cargreg4 (gsp->args[4])
 	  : DO_SYSCALL_CLOBBER_LIST(5));
 
 	return ret;
 }
 
-extern inline long int
+extern inline long
 __attribute__((always_inline,gnu_inline)) 
 do_syscall6(struct generic_syscall *gsp)
 {
-#if 1 /*ndef __i386__*/
-	long int ret;
+	long ret;
 	__asm__ volatile (
 			   POPULATE_ARGREGS(6)
 			   PERFORM_SYSCALL
 			   UNPOPULATE_ARGREGS(6)
 	  : [ret]  "=a" (ret)
-	  : [num]  csyscallnumreg ((long int) gsp->syscall_number)
-	  , [arg0] cargreg0 ((long int) gsp->args[0])
-	  , [arg1] cargreg1 ((long int) gsp->args[1])
-	  , [arg2] cargreg2 ((long int) gsp->args[2])
-	  , [arg3] cargreg3 ((long int) gsp->args[3])
-	  , [arg4] cargreg4 ((long int) gsp->args[4])
-	  , [arg5] cargreg5 ((long int) gsp->args[5])
+	  : [num]  csyscallnumreg ((long) gsp->syscall_number)
+	  , [arg0] cargreg0 (gsp->args[0])
+	  , [arg1] cargreg1 (gsp->args[1])
+	  , [arg2] cargreg2 (gsp->args[2])
+	  , [arg3] cargreg3 (gsp->args[3])
+	  , [arg4] cargreg4 (gsp->args[4])
+	  , [arg5] cargreg5 (gsp->args[5])
 	  : DO_SYSCALL_CLOBBER_LIST(6)
 	);
 	return ret;
-	// this is the version that is known to build, from revision f3f9be5...
-	// but it doesn't build here! so the problem is the context??!
-	// Seems to work now I've changed "m" to "rm" and added "memory" to the clobber list.
-	// Ah, no. It works in some contexts but not others?!
-#elif 0 /* __i386__ */
- long int ret_op = (long int) gsp->syscall_number;
- __asm__ volatile (
-     "mov %[arg0], %%""ebx"" \n                    mov %[arg1], %%"
-                      "ecx"" \n                    mov %[arg2], %%"
-                      "edx"" \n                    mov %[arg3], %%"
-                      "esi"" \n                    mov %[arg4], %%"
-                      "edi"" \n                  "
-
-
-     "push %%ebp \n"
-
-     "mov %[arg5], %%""ebp"" \n"
-      "" "  \n   ""int $0x80" " \n       "" \n"
-
-     "pop %%ebp \n"
-
-   : [ret] "+a" (ret_op)
-
-   : [arg0] "rm" ((long int) gsp->args[0])
-   , [arg1] "rm" ((long int) gsp->args[1])
-   , [arg2] "rm" ((long int) gsp->args[2])
-   , [arg3] "rm" ((long int) gsp->args[3])
-   , [arg4] "rm" ((long int) gsp->args[4])
-   , [arg5] "rm" ((long int) gsp->args[5])
-   : "%""ebx", "%""ecx", "%""edx",
-     "%""esi", "%""edi",
-     "cc", "memory");
-  return ret_op;
-#else /* __i386__ really -- heavily tweaked version using local register vars. 
-  Could the problem with the above be a lack of -fomit-frame-pointer? i.e. the compiler
-  runs out of registers.... Hmm. On a quick test, this does help. Maybe add the pragmas
-  to the handler in sigill.c? We also want the compiler not to use SSE/AVX/..., so
-  already want a bunch of pragmas in place. */
-long ret;
-long tnum = gsp->syscall_number;
-long targ0 = gsp->args[0];
-long targ1 = gsp->args[1];
-long targ2 = gsp->args[2];
-long targ3 = gsp->args[3];
-long targ4 = gsp->args[4];
-long targ5 = gsp->args[5];
-register long arg0 __asm("rbx") = targ0;
-register long arg1 __asm("rcx") = targ1;
-register long arg2 __asm("rdx") = targ2;
-register long arg3 __asm("rsi") = targ3;
-register long arg4 __asm("rdi") = targ4;
-long arg5 = targ5;
- __asm__ volatile (
-     "push %%ebp \n"
-
-     "mov %[arg5], %%""ebp"" \n"
-      "" "  \n   ""int $0x80" " \n       "" \n"
-
-     "pop %%ebp \n"
-
-   : [ret] "=a" (ret)
-   : [num]  "a" (tnum)
-   , [arg0] "r"(arg0)
-   , [arg1] "r"(arg1)
-   , [arg2] "r"(arg2)
-   , [arg3] "r"(arg3)
-   , [arg4] "r"(arg4)
-   , [arg5] "m"(arg5)
-   : "cc", "memory");
-  return ret;
-
-#endif
 }
 
 __attribute__((always_inline,gnu_inline))
-extern inline long int
+extern inline long
 do_real_syscall(struct generic_syscall *gsp)
 {
 	return do_syscall6(gsp);
@@ -576,7 +503,7 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 	 * The basic idea is that everything we might need, if
 	 * our stack gets zapped, is copied to the *new* stack.
 	 */
-	long int ret;
+	long ret;
 	__asm__ volatile (
 	#if defined(__x86_64__)
 		  "mov $"stringifx(__NR_clone)", %%rax\n\
@@ -690,11 +617,11 @@ Z||Z'|________|/    incl. saved ip = clone site (1)    |________|/    incl saved
 		    * will be reloading the new, fixed-up version, but that is all transparent
 		    * to the compiler. */
 		   :
-		    [arg0] "rm" ((long int) gsp->args[0])
-		  , [arg1] "rm" ((long int) gsp->args[1])
-		  , [arg2] "rm" ((long int) gsp->args[2])
-		  , [arg3] "rm" ((long int) gsp->args[3])
-		  , [arg4] "rm" ((long int) gsp->args[4])
+		    [arg0] "rm" (gsp->args[0])
+		  , [arg1] "rm" (gsp->args[1])
+		  , [arg2] "rm" (gsp->args[2])
+		  , [arg3] "rm" (gsp->args[3])
+		  , [arg4] "rm" (gsp->args[4])
 		  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%"stringifx(argreg2),
 		    "memory", DO_SYSCALL_CLOBBER_LIST(5) // <-- this includes args 3,4,5 but not 0,1,2, hence the above
 	);
@@ -705,7 +632,7 @@ extern inline long
 __attribute__((always_inline,gnu_inline))
 do_clone3(struct generic_syscall *gsp)
 {
-	long int ret;
+	long ret;
 	__asm__ volatile (
 	#if defined(__x86_64__)
 		  "mov $"stringifx(__NR_clone3)", %%rax\n\
@@ -851,8 +778,8 @@ do_clone3(struct generic_syscall *gsp)
 		    * will be reloading the new, fixed-up version, but that is all transparent
 		    * to the compiler. */
 		  :
-		    [arg0] "m" ((long int) gsp->args[0])
-		  , [arg1] "m" ((long int) gsp->args[1])
+		    [arg0] "m" (gsp->args[0])
+		  , [arg1] "m" (gsp->args[1])
 		  , [new_stack_offs]  "i" (offsetof (struct clone_args, stack))
 		  , [stack_size_offs] "i" (offsetof (struct clone_args, stack_size))
 		  : "%"stringifx(argreg0), "%"stringifx(argreg1), "%ecx", "memory", DO_SYSCALL_CLOBBER_LIST(2)
@@ -884,7 +811,7 @@ do_sigreturn(struct generic_syscall *gsp, unsigned long frame_sp)
 	 * that was caused by our trap, and heading straight for the actual
 	 * sigframe that that first signal's handler was trying to resume with.
 	 */
-	long int ret_op = (long int) gsp->syscall_number; /* either sigreturn or rt_sigreturn */
+	long ret_op = gsp->syscall_number; /* either sigreturn or rt_sigreturn */
 	__asm__ volatile (
 #if defined(__x86_64__)
 		  "mov %[orig_sigframe_sp], %%rsp \n" /* stack pointer at the trapped sigreturn syscall */
