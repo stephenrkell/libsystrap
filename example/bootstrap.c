@@ -23,7 +23,7 @@
 #include "systrap.h"
 #include "vas.h"
 #include "trace-syscalls.h" // FIXME: move us out of example/ into src/
-#include "chain.h"
+#include "chain-decls.h"
 
 /* HACK: x86-specific, and hard-codes installation paths */
 static const char *ldso_names[] = {

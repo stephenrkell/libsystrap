@@ -127,6 +127,9 @@ CFLAGS += -I$(XED_DIR)/build-$(arch)/include/xed
 CFLAGS += -I$(XED_DIR)/include/public
 CFLAGS += -std=c99
 
+# This is necessary to make wrapping less unreliable
+CFLAGS += -ffunction-sections
+
 # musl has 'int' for line number, unlike glibc... librunt can hack around for us
 # FIXME: should be a configure-time thing perhaps? in which repo?
 # Problem is that configure might not see same libc headers as we plumb through here.
@@ -148,11 +151,15 @@ CFLAGS += -I$(DONALD)/src
 C_SRC := $(filter-out %/classify-syscalls.c %.inc.c,$(wildcard $(srcroot)/example/*.c))
 C_DEPS := $(patsubst %.c,%.d,$(C_SRC))
 DEPS := $(C_DEPS)
-LOCAL_OBJS := $(filter-out pre-entry.o classify-syscalls.o,$(filter-out write-footprints.o,$(patsubst %.c,%.o,$(notdir $(C_SRC)))))
+LOCAL_OBJS := $(filter-out bootstrap.o chain-ext.o classify-syscalls.o,$(filter-out write-footprints.o,$(patsubst %.c,%.o,$(notdir $(C_SRC)))))
 $(info LOCAL_OBJS is $(LOCAL_OBJS))
+CHAIN_LOADER_OBJS := chain-ext.o bootstrap.o
+$(info CHAIN_LOADER_OBJS is $(CHAIN_LOADER_OBJS))
+# these files are built from donald sources
+LDSO_OBJS := premain.o main.o entry.o load.o debug.o start.o chain.o
+$(info LDSO_OBJS is $(LDSO_OBJS))
 
-$(DEPS): %.d: %.c
-	$(CC) -MG -MM $(CFLAGS) $+ > "$@" || { rm -f "$@"; false; }
+$(CHAIN_LOADER_OBJS) $(LOCAL_OBJS) $(LDSO_OBJS): CFLAGS += -MD -MF $*.d
 
 ifneq ($(MAKECMDGOALS),clean)
 -include $(DEPS)
@@ -226,10 +233,18 @@ trace-syscalls.so trace-syscalls-ld.so: LDFLAGS += -Wl,--wrap,__init_tp
 # ... we can just use musl's for -ld.so, but for preload we need more.
 trace-syscalls.so: LDFLAGS += -Wl,-z,muldefs -Wl,--defsym,__init_tp=__wrap___init_tp
 
-# we insert our startup logic by wrapping enter()
-trace-syscalls-ld.so: LDFLAGS += -Wl,--wrap,enter -Wl,--wrap,load_one_phdr \
+# we insert our startup logic by wrapping donald's enter()
+trace-syscalls-ld.so: LDFLAGS += -Wl,--wrap,enter
+# we also experimentally wrap donald's load_one_phdr()
+trace-syscalls-ld.so: LDFLAGS += -Wl,--wrap,load_one_phdr
+# we also really really wrap donald's get_loadee_path and get_loadee_base_addr_hint
+trace-syscalls-ld.so: LDFLAGS += \
+-Wl,--wrap,get_loadee_path -Wl,--wrap,get_loadee_base_addr_hint
+# we use librunt's own file metadata thingy
+trace-syscalls-ld.so: LDFLAGS += \
 -Wl,--defsym,__wrap___runt_files_notify_load=__runt_files_notify_load \
 -Wl,--wrap,__runt_files_metadata_by_addr
+
 trace-syscalls-ld.so: LDLIBS += -Bstatic \
   $(srcroot)/build/$(arch)/libsystrap.a \
   $(LIBRUNT_DIR)/build/$(librunt_frag)-$(arch)/librunt_preload.a \
@@ -244,23 +259,18 @@ trace-syscalls.so: $(srcroot)/build/$(arch)/libsystrap.a
 		-o "$@" $(filter-out %.a,$+) \
 		$(LDFLAGS) $(LDLIBS)
 
-LDSO_OBJS := premain.o main.o entry.o load.o pre-entry.o debug.o start.o
 # ask for a spare .dynamic slot
 trace-syscalls-ld.so: LDFLAGS += -Wl,--spare-dynamic-tags=5
 
-$(LDSO_OBJS): CFLAGS += -DDONALD_NAME=\"trace-syscalls-ld\" \
-  -DCHAIN_LOADER \
-  -DCHAIN_LOADER_COVER_TRACKS_H='"$(srcroot)/example/chain-decls.h"' \
-  -DCHAIN_LOADER_COVER_TRACKS_INC='"$(srcroot)/example/chain.inc.c"'
-
-bootstrap.o: CFLAGS += -DCHAIN_LOADER
+$(LDSO_OBJS): CFLAGS += -DDONALD_NAME=\"trace-syscalls-ld\" -DCHAIN_LOADER
+$(CHAIN_LOADER_OBJS): CFLAGS += -DCHAIN_LOADER
 
 DYNAPPEND ?= $(shell which $${ELFTIN:+$${ELFTIN}/dynappend/}dynappend)
 ifeq ($(DYNAPPEND),)
 $(warning No DYNAPPEND or ELFTIN, so trace-syscalls-ld.so will not support debugging properly (ELFTIN is $(ELFTIN)).)
 endif
 # FIXME: localize all global symbols except maybe _start?
-trace-syscalls-ld.so: trace-syscalls-ld.lds $(LDSO_OBJS) $(filter-out fake-tls.o,$(LOCAL_OBJS)) dynamic-list $(srcroot)/build/$(arch)/libsystrap.a
+trace-syscalls-ld.so: trace-syscalls-ld.lds $(LDSO_OBJS) $(CHAIN_LOADER_OBJS) $(filter-out fake-tls.o,$(LOCAL_OBJS)) dynamic-list $(srcroot)/build/$(arch)/libsystrap.a
 	$(CC) $(CFLAGS) -fuse-ld=bfd \
             -Bsymbolic -nostdlib -nostartfiles -static-libgcc -shared -o "$@" \
             $(filter-out dynamic-list,$(filter-out %.lds,$(filter-out %.a,$+))) \

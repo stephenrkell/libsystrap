@@ -169,7 +169,9 @@ __trace_syscalls_post_handling(struct generic_syscall *gsp, long ret);
 /* This constructor is used only by the preload library. For the
  * chain loader, the equivalent code is in pre-entry.c (which is called
  * from donald, as a wrapper of donald's enter() function) and chain.inc.c
- * which is called immediately *before* this, in the context of donald's main. */
+ * which is called immediately *before* this, in the context of donald's main.
+ * TODO: consolidate this: ideally we don't want a per-tool pre-entry.c or
+ * chain.inc.c. */
 static void startup(int argc, char **argv, char **environ) __attribute__((constructor(101)));
 static void startup(int argc, char **argv, char **environ)
 {
