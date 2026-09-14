@@ -182,49 +182,13 @@ void __hook_pre_enter(struct chain_load_ctxt *cc)
 		(void*)cc->load->loadee->phdrs_addr,
 		cc->load->loadee->base_addr,
 		cc->our_dt_debug);
-	create_fake_vdso(p_auxv);
 	close(inferior_fd);
 
 	// FIXME: libsystrap isn't being init'd, so force it
 	__libsystrap_force_init();
-
-	__systrap_pre_handling = __trace_syscalls_pre_handling;
-	__systrap_post_handling = __trace_syscalls_post_handling;
-
-	init_fds();
-	/* We want to trap only the inferior ld.so's executable phdr(s).
-	 * How do we find them?
-	 * We could wrap load_one_phdr -- is that good value?
-	 * We will need to do some stuff for vdso,
-	 * and some stuff for bootstrapping, but that will probably
-	 * be different.
-	 * Oh.
-	 * But we needed librunt to find the section boundaries.
-	 * Does it make sense to run librunt in our primordial ld.so environment?
-	 * It wants to be able to do struct R_DEBUG_STRUCT_TAG *find_r_debug(void)
-	 * Do we want to create a fake _r_debug so that relf.h can work?
-	 * Maybe none of librunt works in this environment?
-	 * And what about when our signal handler runs? Does it
-	 * need to see the "real" link map of the guest program?
-	 * The host/guest distinction seems good.
+	/* Install replacements. Recall that these are used for bootstrapping,
+	 * since unlike the preload library case, most text is not loaded yet.
 	 *
-	 * Can I locate the _r_debug via the DT_DEBUG, as a fallback?
-	 * Then as long as *some* _DYNAMIC with a DT_DEBUG can be found,
-	 * we have a pointer to the process's unique "real" _r_debug, which
-	 * is defined... where? Yes, in the ld.so.
-	 */
-	trap_all_mappings();
-	install_sigill_handler();
-	// FIXME: should go in the real entry point?
-#if defined(__i386__)
-	if (fake_sysinfo)
-	{
-		unsigned char *tls;
-		__asm__("mov %%gs:0x0,%0" : "=r"(tls));
-		*(void**)(tls+16) = fake_sysinfo; // FIXME: need a reference for this please
-	}
-#endif
-	/* Install replacements.
 	 * Why not just initialize the replaced_syscalls array itself?
 	 * Well, it can't be split across multiple files, unlike this approach.
 	 * This is a bit nasty though.
@@ -238,6 +202,9 @@ void __hook_pre_enter(struct chain_load_ctxt *cc)
 		 = (void*)__start___replaced_syscalls[2*n + 1];
 		replaced_syscalls[syscall_n] = replacement;
 	}
+
+	start_tracing(p_auxv);
+
 	// this is undoing the effect of set_temporary_link_map
 	clear_temporary_link_map(cc->our_dt_debug);
 	// now we will proceed to the real entry point

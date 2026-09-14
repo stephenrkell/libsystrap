@@ -2,9 +2,11 @@
 #define TRACE_SYSCALLS_H_
 
 #include <stdio.h>
+#include <elf.h>
 
 void init_fds(void) __attribute__((visibility("hidden")));
 void trap_all_mappings(void) __attribute__((visibility("hidden")));
+void start_tracing(ElfW(auxv_t) *p_auxv) __attribute__((visibility("hidden")));
 extern int debug_level __attribute__((visibility("hidden")));
 extern FILE **p_err_stream __attribute__((visibility("hidden")));
 extern FILE *our_fake_stderr  __attribute__((visibility("hidden"))); // will fdopen stderr if necessary

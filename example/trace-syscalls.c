@@ -166,29 +166,10 @@ __trace_syscalls_pre_handling(struct generic_syscall *gsp);
 void __attribute__((visibility("protected")))
 __trace_syscalls_post_handling(struct generic_syscall *gsp, long ret);
 
-/* This constructor is used only by the preload library. For the
- * chain loader, the equivalent code is in pre-entry.c (which is called
- * from donald, as a wrapper of donald's enter() function) and chain.inc.c
- * which is called immediately *before* this, in the context of donald's main.
- * TODO: consolidate this: ideally we don't want a per-tool pre-entry.c or
- * chain.inc.c. */
-static void startup(int argc, char **argv, char **environ) __attribute__((constructor(101)));
-static void startup(int argc, char **argv, char **environ)
+__attribute__((visibility("hidden")))
+void start_tracing(ElfW(auxv_t) *p_auxv_start)
 {
-	/* We use musl as our libc. That means there are (up to) two libc instances
-	 * in the process! Before we do any libc calls, make sure musl's state
-	 * is initialized. We use librunt to get the env/arg values. */
-	const char **p_argv_0 = NULL, **p_argv_end = NULL;
-	const char **p_envv_0 = NULL, **p_envv_end = NULL;
-	__runt_auxv_init();
-	__runt_auxv_get_argv(&p_argv_0, &p_argv_end);
-	__runt_auxv_get_env(&p_envv_0, &p_envv_end);
-	__init_libc((char**) p_envv_0, (char*) *p_argv_0);
 	init_fds();
-	const ElfW(auxv_t) *p_auxv_start = NULL;
-	ElfW(auxv_t) *p_auxv_terminator = NULL;
-	__runt_auxv_get_auxv(&p_auxv_start, &p_auxv_terminator);
-
 	__systrap_pre_handling = __trace_syscalls_pre_handling;
 	__systrap_post_handling = __trace_syscalls_post_handling;
 
@@ -202,7 +183,6 @@ static void startup(int argc, char **argv, char **environ)
 	 * it! The VDSO is a shared object after all. Still I do vaguely remember
 	 * something about TLS.
 	 */
-	// XXX: should these just be a single "enable_systrap()" call?
 	create_fake_vdso((ElfW(auxv_t) *) p_auxv_start); // creates in already-trapped form
 	trap_all_mappings(); // XXX: use this to trap the fake vdso too; have just "copy_vdso(...)"?
 	install_sigill_handler();
@@ -263,6 +243,28 @@ static void startup(int argc, char **argv, char **environ)
 	}
 #endif
 }
+
+/* This constructor is used only by the preload library. For the
+ * chain loader, the equivalent code is in chain-ext.c (which is called
+ * from donald, as a wrapper of donald's enter() function). */
+static void startup(int argc, char **argv, char **environ) __attribute__((constructor(101)));
+static void startup(int argc, char **argv, char **environ)
+{
+	/* We use musl as our libc. That means there are (up to) two libc instances
+	 * in the process! Before we do any libc calls, make sure musl's state
+	 * is initialized. We use librunt to get the env/arg values. */
+	const char **p_argv_0 = NULL, **p_argv_end = NULL;
+	const char **p_envv_0 = NULL, **p_envv_end = NULL;
+	__runt_auxv_init();
+	__runt_auxv_get_argv(&p_argv_0, &p_argv_end);
+	__runt_auxv_get_env(&p_envv_0, &p_envv_end);
+	const ElfW(auxv_t) *p_auxv_start = NULL;
+	ElfW(auxv_t) *p_auxv_terminator = NULL;
+	__runt_auxv_get_auxv(&p_auxv_start, &p_auxv_terminator);
+	__init_libc((char**) p_envv_0, (char*) *p_argv_0);
+	start_tracing(p_auxv_start);
+}
+
 
 
 /* Lightweight, async-signal-safe trace formatting.
