@@ -149,8 +149,6 @@ vpath %.h $(DONALD)/src
 CFLAGS += -I$(DONALD)/src
 
 C_SRC := $(filter-out %/classify-syscalls.c %.inc.c,$(wildcard $(srcroot)/example/*.c))
-C_DEPS := $(patsubst %.c,%.d,$(C_SRC))
-DEPS := $(C_DEPS)
 LOCAL_OBJS := $(filter-out bootstrap.o chain-ext.o classify-syscalls.o,$(filter-out write-footprints.o,$(patsubst %.c,%.o,$(notdir $(C_SRC)))))
 $(info LOCAL_OBJS is $(LOCAL_OBJS))
 CHAIN_LOADER_OBJS := chain-ext.o bootstrap.o
@@ -158,8 +156,10 @@ $(info CHAIN_LOADER_OBJS is $(CHAIN_LOADER_OBJS))
 # these files are built from donald sources
 LDSO_OBJS := premain.o main.o entry.o load.o debug.o start.o chain.o
 $(info LDSO_OBJS is $(LDSO_OBJS))
+ALL_OBJS := $(LOCAL_OBJS) $(LDSO_OBJS) $(CHAIN_LOADER_OBJS)
+DEPS := $(patsubst %.o,%.d,$(ALL_OBJS))
 
-$(CHAIN_LOADER_OBJS) $(LOCAL_OBJS) $(LDSO_OBJS): CFLAGS += -MD -MF $*.d
+$(ALL_OBJS): CFLAGS += -MD -MF $(basename $@).d
 
 ifneq ($(MAKECMDGOALS),clean)
 -include $(DEPS)
