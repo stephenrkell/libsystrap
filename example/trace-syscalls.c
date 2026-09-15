@@ -170,8 +170,10 @@ __attribute__((visibility("hidden")))
 void start_tracing(ElfW(auxv_t) *p_auxv_start)
 {
 	init_fds();
+#ifndef NOOP_SYSCALL_ACTION
 	__systrap_pre_handling = __trace_syscalls_pre_handling;
 	__systrap_post_handling = __trace_syscalls_post_handling;
+#endif
 
 	/* We can create the fake vDSO, but how can we make the program use it?
 	 * In the chain-loader case, we modify the AT_SYSINFO_EHDR auxv entry

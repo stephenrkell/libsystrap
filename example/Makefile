@@ -26,7 +26,7 @@ vpath %.lds $(srcroot)/example
 # set arch options based on the name of the build dir
 
 .PHONY: default
-default: trace-syscalls.so trace-syscalls-ld.so
+default: trace-syscalls.so trace-syscalls-ld.so noop-syscalls-ld.so
 
 SYS := $(shell uname -s | tr A-Z a-z )
 
@@ -135,6 +135,9 @@ CFLAGS += -ffunction-sections
 # Problem is that configure might not see same libc headers as we plumb through here.
 CFLAGS += -DASSERT_FAIL_LINE_SIGNED
 
+PRELOAD_TARGETS := trace-syscalls.so
+LOADER_TARGETS := trace-syscalls-ld.so noop-syscalls-ld.so
+
 syscall-names.o: syscall-macros.h
 # for syscall-macros.h
 CFLAGS += -I.
@@ -148,15 +151,15 @@ vpath %.S $(DONALD)/src
 vpath %.h $(DONALD)/src
 CFLAGS += -I$(DONALD)/src
 
-C_SRC := $(filter-out %/classify-syscalls.c %.inc.c,$(wildcard $(srcroot)/example/*.c))
-LOCAL_OBJS := $(filter-out bootstrap.o chain-ext.o classify-syscalls.o,$(filter-out write-footprints.o,$(patsubst %.c,%.o,$(notdir $(C_SRC)))))
+LOCAL_OBJS := 
 $(info LOCAL_OBJS is $(LOCAL_OBJS))
 CHAIN_LOADER_OBJS := chain-ext.o bootstrap.o
 $(info CHAIN_LOADER_OBJS is $(CHAIN_LOADER_OBJS))
 # these files are built from donald sources
 LDSO_OBJS := premain.o main.o entry.o load.o debug.o start.o chain.o
 $(info LDSO_OBJS is $(LDSO_OBJS))
-ALL_OBJS := $(LOCAL_OBJS) $(LDSO_OBJS) $(CHAIN_LOADER_OBJS)
+TRACER_OBJS := syscall-names.o dlmalloc.o fake-tls.o
+ALL_OBJS := $(LOCAL_OBJS) $(LDSO_OBJS) $(CHAIN_LOADER_OBJS) $(TRACER_OBJS)
 DEPS := $(patsubst %.o,%.d,$(ALL_OBJS))
 
 $(ALL_OBJS): CFLAGS += -MD -MF $(basename $@).d
@@ -194,65 +197,71 @@ endif
 # We don't want user code calling into our exit(), hence having us make its syscalls.
 # NOTE: the --whole-archive is only necessary for debugging, to ensure that
 # functions we might want to call from the debugger are actually linked in
-trace-syscalls.so: LDLIBS := -Bstatic \
+$(PRELOAD_TARGETS): LDLIBS := -Bstatic \
 	$(srcroot)/build/$(arch)/libsystrap.a \
 	-Wl,--whole-archive $(LIBRUNT_DIR)/build/$(librunt_frag)-$(arch)/librunt_preload.a -Wl,--no-whole-archive \
 	-ldl
 
 # FIXME: what's the right way to pull in libgcc.a? It seems that
 # the compiler should do it for us, but for some reason it doesn't.
-trace-syscalls.so: LDLIBS += \
+$(PRELOAD_TARGETS): LDLIBS += \
 	dlmalloc.a \
 	$(LD_SO) \
 	$(LIBC_A) -lunwind-$(UNWIND_MACHINE) -lunwind -lpthread -lgcc
 
 # we used to insist -Wl,--hash-style=sysv here, but relf.h now groks GNU-style
-trace-syscalls.so trace-syscalls-ld.so: LDFLAGS += \
+$(PRELOAD_TARGETS) $(LOADER_TARGETS): LDFLAGS += \
 -fno-lto -nostdlib -Wl,--no-as-needed
-trace-syscalls.so: LDFLAGS += \
+$(PRELOAD_TARGETS): LDFLAGS += \
 -Wl,--defsym,__private_malloc=malloc \
 -Wl,--defsym,__private_free=free \
 -Wl,--defsym,__wrap___runt_files_notify_load=__runt_files_notify_load \
 -Wl,--defsym,__wrap___runt_files_metadata_by_addr=__runt_files_metadata_by_addr \
 -Wl,--defsym,__private_strdup=strdup
 # hmm -- is this necessary now? FIXME: CHECK
-trace-syscalls.so: LDFLAGS += \
+$(PRELOAD_TARGETS): LDFLAGS += \
 -Wl,--defsym,stat=raw_stat
 # don't use lazy binding -- it's bad if we've removed exec permission
-trace-syscalls.so trace-syscalls-ld.so: LDFLAGS += \
+$(PRELOAD_TARGETS) $(LOADER_TARGETS): LDFLAGS += \
 	-Wl,-z,now
 # generate a map file, for debugging
-trace-syscalls.so trace-syscalls-ld.so: LDFLAGS += -Wl,-Map,$@.map
+$(PRELOAD_TARGETS) $(LOADER_TARGETS): LDFLAGS += -Wl,-Map,$@.map
 # don't re-export symbols from any archives we link in
-trace-syscalls.so trace-syscalls-ld.so: LDFLAGS += \
+$(PRELOAD_TARGETS) $(LOADER_TARGETS): LDFLAGS += \
       -Wl,--exclude-libs=ALL
 
 # To avoid clashing implementations of TLS,
 # we define our own, simpler __init_tp -- wrapping DOESN'T WORK...
-trace-syscalls.so trace-syscalls-ld.so: LDFLAGS += -Wl,--wrap,__init_tp
+$(PRELOAD_TARGETS) $(LOADER_TARGETS): LDFLAGS += -Wl,--wrap,__init_tp
 # ... we can just use musl's for -ld.so, but for preload we need more.
-trace-syscalls.so: LDFLAGS += -Wl,-z,muldefs -Wl,--defsym,__init_tp=__wrap___init_tp
+$(PRELOAD_TARGETS): LDFLAGS += -Wl,-z,muldefs -Wl,--defsym,__init_tp=__wrap___init_tp
 
 # we insert our startup logic by wrapping donald's enter()
-trace-syscalls-ld.so: LDFLAGS += -Wl,--wrap,enter
+$(LOADER_TARGETS): LDFLAGS += -Wl,--wrap,enter
 # we also experimentally wrap donald's load_one_phdr()
-trace-syscalls-ld.so: LDFLAGS += -Wl,--wrap,load_one_phdr
+$(LOADER_TARGETS): LDFLAGS += -Wl,--wrap,load_one_phdr
 # we also really really wrap donald's get_loadee_path and get_loadee_base_addr_hint
-trace-syscalls-ld.so: LDFLAGS += \
+$(LOADER_TARGETS): LDFLAGS += \
 -Wl,--wrap,get_loadee_path -Wl,--wrap,get_loadee_base_addr_hint
 # we use librunt's own file metadata thingy
-trace-syscalls-ld.so: LDFLAGS += \
+$(LOADER_TARGETS): LDFLAGS += \
 -Wl,--defsym,__wrap___runt_files_notify_load=__runt_files_notify_load \
 -Wl,--wrap,__runt_files_metadata_by_addr
 
-trace-syscalls-ld.so: LDLIBS += -Bstatic \
+$(LOADER_TARGETS): LDLIBS += -Bstatic \
   $(srcroot)/build/$(arch)/libsystrap.a \
   $(LIBRUNT_DIR)/build/$(librunt_frag)-$(arch)/librunt_preload.a \
   $(LIBC_A)
 
-trace-syscalls.so: trace-syscalls.o syscall-names.o dlmalloc.a fake-tls.o
+# Here's how the two loader targets are different....
+trace-syscalls-ld.so: trace-syscalls.o syscall-names.o dlmalloc.a
+noop-syscalls-ld.so: noop-syscalls.o syscall-names.o dlmalloc.a
 
-trace-syscalls.so: $(srcroot)/build/$(arch)/libsystrap.a
+noop-syscalls.o: CFLAGS += -DNOOP_SYSCALL_ACTION
+noop-syscalls.o: trace-syscalls.c
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
+
+$(PRELOAD_TARGETS): $(srcroot)/build/$(arch)/libsystrap.a
 	$(CC) -shared -static-libgcc \
 		-fuse-ld=gold \
 		-Wl,-soname=$@ \
@@ -260,7 +269,7 @@ trace-syscalls.so: $(srcroot)/build/$(arch)/libsystrap.a
 		$(LDFLAGS) $(LDLIBS)
 
 # ask for a spare .dynamic slot
-trace-syscalls-ld.so: LDFLAGS += -Wl,--spare-dynamic-tags=5
+$(LOADER_TARGETS): LDFLAGS += -Wl,--spare-dynamic-tags=5
 
 $(LDSO_OBJS): CFLAGS += -DDONALD_NAME=\"trace-syscalls-ld\" -DCHAIN_LOADER
 $(CHAIN_LOADER_OBJS): CFLAGS += -DCHAIN_LOADER
@@ -270,7 +279,7 @@ ifeq ($(DYNAPPEND),)
 $(warning No DYNAPPEND or ELFTIN, so trace-syscalls-ld.so will not support debugging properly (ELFTIN is $(ELFTIN)).)
 endif
 # FIXME: localize all global symbols except maybe _start?
-trace-syscalls-ld.so: trace-syscalls-ld.lds $(LDSO_OBJS) $(CHAIN_LOADER_OBJS) $(filter-out fake-tls.o,$(LOCAL_OBJS)) dynamic-list $(srcroot)/build/$(arch)/libsystrap.a
+$(LOADER_TARGETS): trace-syscalls-ld.lds $(LDSO_OBJS) $(CHAIN_LOADER_OBJS) $(filter-out fake-tls.o,$(LOCAL_OBJS)) dynamic-list $(srcroot)/build/$(arch)/libsystrap.a
 	$(CC) $(CFLAGS) -fuse-ld=bfd \
             -Bsymbolic -nostdlib -nostartfiles -static-libgcc -shared -o "$@" \
             $(filter-out dynamic-list,$(filter-out %.lds,$(filter-out %.a,$+))) \
