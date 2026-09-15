@@ -446,7 +446,7 @@ do_clone(struct generic_syscall *gsp)
 {
 	// we should have a new top of stack
 	assert(gsp->args[1] /* a.k.a. 'stack' argument to raw clone() syscall */);
-	void *post_zap_top_of_stack = (void*) gsp->args[1];
+	void *post_zap_top_of_stack __attribute__((unused)) = (void*) gsp->args[1];
 	// our new stack should be aligned
 	assert(0 == (uintptr_t) post_zap_top_of_stack % STACK_ALIGN);
 

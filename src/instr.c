@@ -104,7 +104,7 @@ static int instr_len_xed(unsigned char *ins, unsigned char *end)
 	 * because I've seen the xedd zero call to an out-of-DSO memset, and that will
 	 * not work during systrapping. We should be self-contained of course. */
 	xed_decoded_inst_t xedd = (struct xed_decoded_inst_s) { ._decoded_length = 0 };
-	xed_decoded_inst_t *decoded = do_xed_decode(ins, end, &xedd);
+	xed_decoded_inst_t *decoded = do_xed_decode((unsigned char *) ins, (unsigned char *) end, &xedd);
 	if (decoded) return xed_decoded_inst_get_length(decoded);
     return -1;
 }
@@ -489,9 +489,9 @@ instr_len_extended(unsigned const char *ins, unsigned const char *end)
 	/* How can we figure out the relocatable fields using xed? */
 	/* HACK: manual zeroing. See comment elsewhere for the other similar 'xedd'. */
 	xed_decoded_inst_t xedd = (struct xed_decoded_inst_s) { ._decoded_length = 0 };
-	xed_decoded_inst_t *decoded = do_xed_decode(ins, end, &xedd);
+	xed_decoded_inst_t *decoded = do_xed_decode((unsigned char *) ins, (unsigned char *) end, &xedd);
 	if (!decoded) return ret; // length==-1 signals error
-	unsigned nfields_used = 0;
+	unsigned nfields_used __attribute__((unused)) = 0;
 #if 0 /* We need to test this */
 	if (decoded->_operands.disp_width > 0)
 	{

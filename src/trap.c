@@ -41,9 +41,9 @@
 #include <err.h>
 #include <link.h>
 #include <assert.h>
+#include <librunt.h>
 #include <relf.h>
 #include <vas.h>
-#include <librunt.h>
 #include <dso-meta.h>
 #include "systrap_private.h"
 #include "do-syscall.h"
@@ -162,7 +162,7 @@ void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *e
 	const void *end_page = ROUND_UP_PTR_TO_PAGE((const void *) end_instr_pos);
 	if (!is_writable)
 	{
-		int ret = raw_mprotect(begin_page, end_page - begin_page,
+		int ret __attribute__((unused)) = raw_mprotect(begin_page, end_page - begin_page,
 			PROT_READ | PROT_WRITE | (preserve_exec ? PROT_EXEC : 0));
 
 		/* If we failed, it might be on the vdso page or similar. However,
@@ -243,10 +243,10 @@ _Bool addr_is_in_ld_so(const void *pos)
 		 * my ld.so does not define etext. If we could get the phdrs we could
 		 * find the maximum vaddr... can we do this? */
 		if (ld_so_link_map) ld_so_end = get_text_segment_end_from_load_addr(
-			ld_so_link_map->l_addr);
+			(void*) ld_so_link_map->l_addr);
 	}
 
-	struct link_map *range_link_map = get_highest_loaded_object_below(pos);
+	struct link_map *range_link_map = get_highest_loaded_object_below((void*) pos);
 	_Bool ret = (ld_so_link_map && range_link_map &&
 		ld_so_link_map == range_link_map &&
 			(!ld_so_end || (uintptr_t) pos < (uintptr_t) ld_so_end));
@@ -398,7 +398,7 @@ void __libsystrap_force_init(void)
 long clone3_emulated_replacement(struct generic_syscall *s)
 {
 	struct clone_args *cl_args = (struct clone_args *) s->args[0];
-	size_t size = s->args[1];
+	// size_t size = s->args[1];
 	/* Build a vanilla clone generic_syscall and let it handle the rest.
 	 * All the hairy stuff is in do-syscall.h. */
 	struct generic_syscall gs = MKGS5(SYS_clone,

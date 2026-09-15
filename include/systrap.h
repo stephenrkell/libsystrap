@@ -58,7 +58,7 @@ typedef long /*(__attribute__((noreturn))*/ syscall_replacement/*)*/(
 extern syscall_replacement *replaced_syscalls[SYSCALL_MAX];
 
 extern void __systrap_call_handler(); /* defined in assembly code */
-extern void (*__systrap_pre_handling)(struct generic_syscall *gsp);
-extern void (*__systrap_post_handling)(struct generic_syscall *gsp, long int ret);
+extern void (*__systrap_pre_handling)(struct generic_syscall *gsp)  __attribute__((visibility("protected")));;
+extern void (*__systrap_post_handling)(struct generic_syscall *gsp, long int ret)  __attribute__((visibility("protected")));;
 
 #endif

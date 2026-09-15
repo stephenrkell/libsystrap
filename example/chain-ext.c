@@ -17,18 +17,13 @@
 #include "dso-meta.h" // includes link.h
 #include "donald.h"
 #include "chain.h"    // from donald
-#include "chain-decls.h"  // ours (FIXME: rename chain-ext.h)
+#include "chain-ext.h"  // ours
 #include "relf.h"
 #include "systrap.h"
 #include "trace-syscalls.h"
 
 extern uintptr_t __start___replaced_syscalls[];
 extern uintptr_t __stop___replaced_syscalls[];
-
-extern void __attribute__((visibility("protected")))
-(*__systrap_post_handling)(struct generic_syscall *gsp, long int ret);
-extern void __attribute__((visibility("protected")))
-(*__systrap_pre_handling)(struct generic_syscall *gsp);
 
 void __attribute__((visibility("protected")))
 __trace_syscalls_pre_handling(struct generic_syscall *gsp);
