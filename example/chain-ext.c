@@ -41,37 +41,14 @@ extern int _start;
 uintptr_t ldso_load_addr;
 uintptr_t ldso_end_addr;
 struct file_metadata temporary_file_metadata = {
-
 	.filename = "",
 	.load_site = &_start,
 	.l = &temporary_link_map,
-
-	// phdrs; /* always mapped or copied by ld.so */
-	// phnum;
-	// nload; /* number of segments that are LOADs */
-	// vaddr_begin; /* the lowest mapped vaddr in the object */
-	// vaddr_end; /* one past the last mapped vaddr in the object */
-
 	.dynsym = NULL,/* always mapped by ld.so */
 	.dynstr = NULL, /* always mapped by ld.so */
 	.dynstr_end = NULL,
-
 	.dynsymndx = 0, // section header idx of dynsym, or 0 if none such
-	.dynstrndx = 0 //,
-
-	//.extra_mappings = {
-	//	(struct extra_mapping) { .mapping_pagealigned = , .fileoff_pagealigned = , .size =  }
-	//},
-
-	// .ehdr = ,
-	// .shdrs = //,
-	// shstrtab;
-	// symtab; // NOTE this really is symtab, not dynsym
-	// symtabndx;
-	// strtab; // NOTE this is strtab, not dynstr
-	// strtabndx;
-	
-	//.segments = { (struct segment_metadata) { } }
+	.dynstrndx = 0
 };
 
 /* The purpose of this function is to make librunt introspection work
