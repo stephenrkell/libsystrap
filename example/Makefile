@@ -151,15 +151,14 @@ vpath %.S $(DONALD)/src
 vpath %.h $(DONALD)/src
 CFLAGS += -I$(DONALD)/src
 
-LOCAL_OBJS := 
-$(info LOCAL_OBJS is $(LOCAL_OBJS))
 CHAIN_LOADER_OBJS := chain-ext.o bootstrap.o
 $(info CHAIN_LOADER_OBJS is $(CHAIN_LOADER_OBJS))
 # these files are built from donald sources
 LDSO_OBJS := premain.o main.o entry.o load.o debug.o start.o chain.o
 $(info LDSO_OBJS is $(LDSO_OBJS))
-TRACER_OBJS := syscall-names.o dlmalloc.o fake-tls.o
-ALL_OBJS := $(LOCAL_OBJS) $(LDSO_OBJS) $(CHAIN_LOADER_OBJS) $(TRACER_OBJS)
+TRACER_OBJS := syscall-names.o
+ALL_OBJS := $(LDSO_OBJS) $(CHAIN_LOADER_OBJS) $(TRACER_OBJS) dlmalloc.o \
+  trace-syscalls.o # noop-syscalls.o
 DEPS := $(patsubst %.o,%.d,$(ALL_OBJS))
 
 $(ALL_OBJS): CFLAGS += -MD -MF $(basename $@).d
@@ -253,20 +252,18 @@ $(LOADER_TARGETS): LDLIBS += -Bstatic \
   $(LIBRUNT_DIR)/build/$(librunt_frag)-$(arch)/librunt_preload.a \
   $(LIBC_A)
 
-# Here's how the two loader targets are different....
-trace-syscalls-ld.so: trace-syscalls.o syscall-names.o dlmalloc.a
-noop-syscalls-ld.so: noop-syscalls.o syscall-names.o dlmalloc.a
-
 noop-syscalls.o: CFLAGS += -DNOOP_SYSCALL_ACTION
 noop-syscalls.o: trace-syscalls.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
 
-$(PRELOAD_TARGETS): $(srcroot)/build/$(arch)/libsystrap.a
-	$(CC) -shared -static-libgcc \
-		-fuse-ld=gold \
+trace-syscalls.so: trace-syscalls.o
+$(PRELOAD_TARGETS): $(TRACER_OBJS) fake-tls.o dynamic-list $(srcroot)/build/$(arch)/libsystrap.a dlmalloc.a
+	$(CC) -fuse-ld=gold \
+		-static-libgcc -shared -o "$@" \
+		$(filter-out dynamic-list,$(filter-out %.a,$+)) \
+		$(LDFLAGS) $(LDLIBS) \
 		-Wl,-soname=$@ \
-		-o "$@" $(filter-out %.a,$+) \
-		$(LDFLAGS) $(LDLIBS)
+		-Wl,--dynamic-list,dynamic-list
 
 # ask for a spare .dynamic slot
 $(LOADER_TARGETS): LDFLAGS += -Wl,--spare-dynamic-tags=5
@@ -279,7 +276,9 @@ ifeq ($(DYNAPPEND),)
 $(warning No DYNAPPEND or ELFTIN, so trace-syscalls-ld.so will not support debugging properly (ELFTIN is $(ELFTIN)).)
 endif
 # FIXME: localize all global symbols except maybe _start?
-$(LOADER_TARGETS): trace-syscalls-ld.lds $(LDSO_OBJS) $(CHAIN_LOADER_OBJS) $(filter-out fake-tls.o,$(LOCAL_OBJS)) dynamic-list $(srcroot)/build/$(arch)/libsystrap.a
+trace-syscalls-ld.so: trace-syscalls.o
+noop-syscalls-ld.so: noop-syscalls.o
+$(LOADER_TARGETS): trace-syscalls-ld.lds $(LDSO_OBJS) $(CHAIN_LOADER_OBJS) $(TRACER_OBJS) dynamic-list $(srcroot)/build/$(arch)/libsystrap.a
 	$(CC) $(CFLAGS) -fuse-ld=bfd \
             -Bsymbolic -nostdlib -nostartfiles -static-libgcc -shared -o "$@" \
             $(filter-out dynamic-list,$(filter-out %.lds,$(filter-out %.a,$+))) \
@@ -308,8 +307,8 @@ trace-syscalls-ld.lds: $(shell which ld) $(THIS_MAKEFILE)
 .PHONY: clean
 clean:
 	rm -f trace-syscalls.so trace-syscalls-ld.so
-	rm -f $(LOCAL_OBJS) $(LDSO_OBJS) dlmalloc.o
-	rm -f $(patsubst %.o,%.d,$(LOCAL_OBJS) $(LDSO_OBJS) dlmalloc.o)
+	rm -f $(ALL_OBJS) noop-syscalls.o dlmalloc.a
+	rm -f $(patsubst %.o,%.d,$(ALL_OBJS) noop-syscalls.o) noop-syscalls.o
 	rm -f syscall-macros.h $(SYS)-syscall-macros.h
 	rm -f dynamic-list
 	rm -f trace-syscalls-ld.lds
