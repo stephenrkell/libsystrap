@@ -68,7 +68,7 @@ void handle_sigill(int n)
 #endif
 	/* NEW: let's exit the sighandler as quickly as possible and instead
 	 * handle everything from an asm path in non-signal context. */
-#if 0 && defined(__x86_64__)  /* <-- remove when ready */
+#if 1 && defined(__x86_64__)  /* <-- remove when ready */
 	__asm__ volatile ("mov %1, %0" : "=m"(p_frame->uc.uc_mcontext.MC_REG(rcx, RCX)) : "r"(p_frame->uc.uc_mcontext.MC_REG_IP));
 	__asm__ volatile ("mov %1, %0" : "=m"(p_frame->uc.uc_mcontext.MC_REG_IP) : "r"(&__systrap_call_handler));
 #if 0

@@ -1,18 +1,43 @@
 .text
 .globl __systrap_call_handler
 __systrap_call_handler:
+    # We have the trap site in %rcx, but other registers are the same as
+    # at the intended site of the intended system call. %r11 is clobberable.
+    #
     # We may have been jumped to from a signal handler, which exited into us,
     # or directly-ish from a fallthrough path above (TODO).
-    # We have the trap site in %rcx.
+    #
     # If we have no generic handlers defined, we can execute a straight replacement.
     cmpq $0, __systrap_pre_handling(%rip)
     jnz Lslow_path
     cmpq $0, __systrap_post_handling(%rip)
     jnz Lslow_path
     # Do we have a replacement for this syscall?
+    # XXX: this will buffer-overflow if %rax has a bogus value, or is x32-ABI.
+    # One idea is to AND it with some bitmask that leaves twice as much value-space
+    # as we need, then reserve the top half of the replacements table with a generic
+    # "error" replacement. GAH. That doesn't work because it ANDs away high-order bits.
+    # We probably want to count the leading zeros and slow-path if fewer than some N.
     lea replaced_syscalls(%rip), %r11
     cmp $0, (%r11,%rax,8)
     jnz Lslow_path
+    # TODO: instead of jumping to a slow path if non-zero, just jump to the
+    # handler! Then macroise the slow path written below, so that we can wrap
+    # any "raw handler" or "asm handler" in it. There are a few flavours of
+    # handler we can imagine...
+    # - "raw" or "asm": takes full responsibility for its register footprint; returns to original site?
+    # - nongeneric "scalarint-only" / "noextension" (good name needed!): can be written in C
+    #     after disabling vector and floating-point extensions, but has the plain syscall signature
+    #     rather than a generic / packed version.
+    # - generic version of the same
+    # - nongeneric wrapped in a full xsave
+    # - generic wrapped in a full xsave
+    # TODO: figure out which of these can/should return to the caller vs returning here
+    # TODO: what if we have pre/post handlers but a *non*-generic replacement? We still
+    # have to build the packed version. One solution would be to make the pre/post-handlers
+    # themselves non-generic by default, and force the user to wrap them if they want this. YES.
+    # The generic-or-no, fpavail-or-no choices are orthogonal.
+
     # If we got here, we have no replacement so we can just do the syscall.
     # PROBLEM: the syscall will clobber %rcx which is our return address.
     # See https://doc.liz6.com/en/systems-programming/02-system-call-abi/01-x86-64-system-call-abi
@@ -22,17 +47,17 @@ __systrap_call_handler:
     #   not allowed to be used by kernel code. Kernel code should be compiled by GCC
     #   with the option -mno-red-zone."
     # ... which does not tell us whether the kernel clobbers this *or* whether user code can
-    # assume it doesn't.
+    # assume it doesn't. I think "does not honor" really means "does not use" i.e. "does preserve".
     mov %rcx, -136(%rsp)    # XXX: is this OK? using space *below* the red zone
     syscall
     mov -136(%rsp), %rcx
-
-    # XXX: can't do this! %rcx is clobbered.
-    # Even if we use the red zone, what happens if we do clone()? We could fall back to the
-    # stack-virtualised version of that. It's a shame to do so. Some registers *are* preserved
-    # across syscalls, so there should be a way to do it? Albeit specialized to clone()?
+    # FIXME: what happens if we're doing clone() or clone3() with a new stack? %rcx is lost.
+    # We could fall back to the stack-virtualised version of clone(), but ideally wouldn't.
+    # Idea: pre-populate the new stack with our %rcx at -136(stack_top). This does
+    # clobber some data on that initial stack; ideally we wouldn't. I'd take that hit for now.
+    
     lea 2(%rcx), %rcx
-    jmp %rcx
+    jmp *%rcx
 Lslow_path:
     # We build a struct generic_syscall right here on the stack. context ptr is null.
     # ibcs_sigframe *context

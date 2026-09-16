@@ -22,9 +22,6 @@
 #include "systrap.h"
 #include "trace-syscalls.h"
 
-extern uintptr_t __start___replaced_syscalls[];
-extern uintptr_t __stop___replaced_syscalls[];
-
 void __attribute__((visibility("protected")))
 __trace_syscalls_pre_handling(struct generic_syscall *gsp);
 void __attribute__((visibility("protected")))
@@ -158,24 +155,8 @@ void __hook_pre_enter(struct chain_load_ctxt *cc)
 
 	// FIXME: libsystrap isn't being init'd, so force it
 	__libsystrap_force_init();
-	/* Install replacements. Recall that these are used for bootstrapping,
-	 * since unlike the preload library case, most text is not loaded yet.
-	 *
-	 * Why not just initialize the replaced_syscalls array itself?
-	 * Well, it can't be split across multiple files, unlike this approach.
-	 * This is a bit nasty though.
-	 */
-	unsigned nreplacements = (__stop___replaced_syscalls - __start___replaced_syscalls) / 2;
-	for (unsigned n = 0; n < nreplacements; ++n)
-	{
-		uintptr_t syscall_n = __start___replaced_syscalls[2*n];
-		assert(syscall_n < SYSCALL_MAX);
-		void (*replacement)(struct generic_syscall *s/*, post_handler *post*/)
-		 = (void*)__start___replaced_syscalls[2*n + 1];
-		replaced_syscalls[syscall_n] = replacement;
-	}
 
-	start_tracing(p_auxv);
+	start_tracing(p_auxv, /* apply replacements from asm block? */ 1);
 
 	// this is undoing the effect of set_temporary_link_map
 	clear_temporary_link_map(cc->our_dt_debug);
