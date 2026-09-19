@@ -75,9 +75,10 @@ long replacement_ ## name (struct generic_syscall *s) \
 	    trap_len(&s->saved_context->uc.uc_mcontext), NULL); \
 	return (long) ret; \
 } \
+WRAP_GENERIC_AS_RAW(replacement_ ## name); \
 __asm__( ".pushsection __replaced_syscalls,\"aw\", @progbits\n"\
   ASMPTR " " stringifx(expand(__NR_ ## name)) "\n"\
-  ASMPTR " replacement_" #name "\n"\
+  ASMPTR " __raw_replacement_" #name "\n"\
   ".popsection\n"\
 );
 #define bootstrap_proto(n) __attribute__((visibility("hidden"))) n ## _ret_t  bootstrap_ ## n( n ## _args (expand_name_and_type, comma) )

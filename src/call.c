@@ -18,7 +18,17 @@ __attribute__((optimize("omit-frame-pointer")))
  * free enough registers for do_syscall6 to be compilable. So for now,
  * we are a separate file whose CFLAGS can control this. */
   
-/* When we're called, it means we need to do the described syscall
+/* We're called when there's pre- or post-handling *or* a replacement.
+ * The fourth case is "do the call".
+ * XXX: how should this interact with wrapping etc?
+ * Pre- and post-actions are different from doing the call:
+ * they should preserve %rax. And %rcx and %r11?
+ *
+ * I think this "slow handler" should go away. Now that pre- and post-actions
+ * and replacements are all potentially "raw", we just call them directly
+ * from the assembly.
+ *
+ * When we're called, it means we need to do the described syscall
  * with pre- and/or post-actions around it. There may or may not be a
  * defined replacement. We return through the call chain's return path.
  * In other words it's just like the body above. */

@@ -58,7 +58,105 @@ typedef long /*(__attribute__((noreturn))*/ syscall_replacement/*)*/(
 extern syscall_replacement *replaced_syscalls[SYSCALL_MAX];
 
 extern void __systrap_call_handler(); /* defined in assembly code */
-extern void (*__systrap_pre_handling)(struct generic_syscall *gsp)  __attribute__((visibility("protected")));;
-extern void (*__systrap_post_handling)(struct generic_syscall *gsp, long int ret)  __attribute__((visibility("protected")));;
+extern void (*__systrap_pre_handling)()  __attribute__((visibility("protected")));;
+extern void (*__systrap_post_handling)()  __attribute__((visibility("protected")));;
+
+/* Macros wrap a C function s.t. it can be called straight
+ * from the assembly layer. That means two orthogonal wrappers:
+ * - raw to generic_syscall argument signature
+ * - saving/restoring all extended registers.
+ * How do we do the wrapping?
+ * We could output some top-level assembly before and after the
+ * wrapped function, and assume that the
+ * compiler will output code in order, but that is not a sound
+ * assumption. AHA. Under GCC, -fno-toplevel-reorder will 
+ * We probably have to make the wrapper create prologues and epilogues
+ * surrounded by jumps. */
+
+/* We have to make a call, because the wrappee will 'ret' rather
+ * than fall through... so it needs a return address. So clever stuff
+ * involving -fno-toplevel-reorder is not needed
+ */
+
+/* What does 'raw' mean?
+ * It means a thing we can call
+ * where
+ * the register file matches a syscall site except for rcx (the site) and r11 (clobbered)
+ * and the stack pointer which is 8 below the syscall site's (on-stack return address) */
+
+// _Pragma("GCC optimize(\"-fno-toplevel-reorder\")") \
+
+// #define WRAP_FXSAVE(fnname) \
+
+#ifdef __x86_64__
+#define WRAP_GENERIC_AS_RAW(generic_fnname) \
+extern long __raw_ ## generic_fnname (); \
+__asm__(".globl __raw_" #generic_fnname "\n\
+__raw_" #generic_fnname ":\n\
+    # Save what a SystemV call will clobber and which is not saved in a generic_syscall? \n\
+    # On a raw syscall path, this is not necessary. WHAT DOES THIS MEAN? It means \n\
+    # the system calling path itself does not need to preserve these, so if we do this \n\
+    # it's because our own code, in the call handler, wants us to. We could instead \n\
+    # write *that* code to save them itself. Which of these do we want to be the 'raw' \n\
+    # calling convention? Answer: the more minimal one. So don't do it! \n\
+    # \n\
+    # We need a spare System V callee-save register, so use %r12. \n\
+    push %r12 \n\
+    # Now build a struct generic_syscall right here on the stack. context ptr is null.\n\
+    # ibcs_sigframe *context\n\
+    # void *site;\n\
+    # int syscall_number;\n\
+    # long int args[6];\n\
+    push %r9     # args[5]\n\
+    push %r8     # args[4]\n\
+    push %r10    # args[3]\n\
+    push %rdx    # args[2]\n\
+    push %rsi    # args[1]\n\
+    push %rdi    # args[0]\n\
+    push %rax    # syscall_number\n\
+    push %rcx    # site\n\
+    push $0      # signal context is null\n\
+    # Of the main general-purpose x86-64 registers, we've now \n\
+    # pushed all those that are callee-save in the syscall ABI \n\
+    # and not also callee-save in the System V ABI. \n\
+    # So it's OK if the code we jump to next trashes them, as long \n\
+    # as we come back here and restore them. \n\
+    # BUT \n\
+    # The code we jump to next is not arbitrary SysV: we have not\n\
+    # saved the floating-point or SSE or AVX registers. \n\
+    # But it should be programmable in C with the right pragmas\n\
+    # and options for disabling those extensions. \n\
+    mov %rsp, %rdi \n\
+    # Now the regs we saved above are usable as scratch... we will \n\
+    # restore them. Don't use others, even %r12! We need to preserve \n\
+    # our caller's value of it. \n\
+    # Since a post action wants to know the return value of the syscall that happened, \n\
+    # and the raw convention puts that in %r11 (see call-handler.S), copy %r11 into %rsi. \n\
+    mov %r11, %rsi \n\
+    # Now we're ready to do the call, modulo stack-alignment. We need to remember\n\
+    # the amount we pad the stack by, using our callee-save register. \n\
+    and $0xf, %r12    # ... since %rbp is our only available SysV-callee-saved register! \n\
+    sub %r12, %rsp    # align stack to 16 bytes \n\
+    # BUT WAIT -- the generic syscall needs to know the original %rsp somehow \n\
+    # when it is to implement clone(). Maybe it needs to go in the args? \n\
+    # since sigreturn and clone are essentially using %rsp as an arg. \n\
+    callq " #generic_fnname " \n\
+    add %r12, %rsp    # undo stack alignment \n\
+    add $8, %rsp      # pop the zero ('context') \n\
+    pop %rcx          # pop the real %rcx ('site') \n\
+    add $8, %rsp      # no longer syscall_number; %rax has the return value, so leave it there \n\
+    pop %rdi \n\
+    pop %rsi \n\
+    pop %rdx \n\
+    pop %r10 \n\
+    pop %r8 \n\
+    pop %r9 \n\
+    pop %r12  # the callee-save register we freed up for ourselves above \n\
+    ret \n\
+")
+/* NOTE: we don't save/restore %rax, %rcx, %r11. See comment above.*/
+#else
+#define WRAP_GENERIC_AS_RAW(generic_fnname)   /* FIXME: i386 version */
+#endif
 
 #endif

@@ -165,6 +165,10 @@ void __attribute__((visibility("protected")))
 __trace_syscalls_pre_handling(struct generic_syscall *gsp);
 void __attribute__((visibility("protected")))
 __trace_syscalls_post_handling(struct generic_syscall *gsp, long ret);
+long __attribute__((visibility("protected")))
+__raw___trace_syscalls_pre_handling();
+long __attribute__((visibility("protected")))
+__raw___trace_syscalls_post_handling();
 
 __attribute__((visibility("hidden")))
 void start_tracing(ElfW(auxv_t) *p_auxv_start, _Bool apply_replacements)
@@ -194,9 +198,9 @@ void start_tracing(ElfW(auxv_t) *p_auxv_start, _Bool apply_replacements)
 	}
 
 	init_fds();
-#ifndef NOOP_SYSCALL_ACTION
-	__systrap_pre_handling = __trace_syscalls_pre_handling;
-	__systrap_post_handling = __trace_syscalls_post_handling;
+#if !defined(NOOP_SYSCALL_ACTION) && defined(__x86_64__) // FIXME: i386 version
+	__systrap_pre_handling = __raw___trace_syscalls_pre_handling;
+	__systrap_post_handling = __raw___trace_syscalls_post_handling;
 #endif
 
 	/* We can create the fake vDSO, but how can we make the program use it?
@@ -376,6 +380,7 @@ void print_post_syscall(void *stream, struct generic_syscall *gsp, void *return_
 	raw_write(trace_fd, buf, p - buf);
 }
 
+
 void __attribute__((visibility("protected")))
 __trace_syscalls_pre_handling(struct generic_syscall *gsp)
 {
@@ -383,7 +388,7 @@ __trace_syscalls_pre_handling(struct generic_syscall *gsp)
 	struct link_map *calling_object = get_highest_loaded_object_below(calling_addr);
 	print_pre_syscall(traces_out, gsp, calling_addr, calling_object, NULL);
 }
-
+WRAP_GENERIC_AS_RAW(__trace_syscalls_pre_handling);
 void __attribute__((visibility("protected")))
 __trace_syscalls_post_handling(struct generic_syscall *gsp, long ret)
 {
@@ -391,3 +396,4 @@ __trace_syscalls_post_handling(struct generic_syscall *gsp, long ret)
 	struct link_map *calling_object = get_highest_loaded_object_below(return_addr - 2);
 	print_post_syscall(traces_out, gsp, return_addr, calling_object, ret);
 }
+WRAP_GENERIC_AS_RAW(__trace_syscalls_post_handling);
