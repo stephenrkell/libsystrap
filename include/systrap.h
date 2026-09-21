@@ -3,8 +3,7 @@
 
 #include <elf.h>
 #include <link.h>
-
-#define SYSCALL_MAX 1023 /* A safe-ish overapproximation for now... */
+#include "systrap-asm.h"
 
 void install_sigill_handler(void);
 void trap_all_mappings(void);
