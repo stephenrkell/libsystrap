@@ -156,6 +156,35 @@ __raw_" #generic_fnname ":\n\
 /* NOTE: we don't save/restore %rax, %rcx, %r11. See comment above.*/
 #else
 #define WRAP_GENERIC_AS_RAW(generic_fnname)   /* FIXME: i386 version */
-#endif
+#endif /* __x86_64__ */
+
+#ifdef __x86_64__
+#define WRAP_IN_FXSAVE(extusing_fnname) \
+extern long __withfxsave_ ## extusing_fnname (); \
+__asm__(".globl __withfxsave_" #extusing_fnname "\n\
+__withfxsave_" #extusing_fnname ":\n\
+	# We are to be callable from a raw-ABI caller, so we can't assume more than 8-byte \n\
+	# stack alignment. And as usual, only %r11 is clobberable. %rcx holds the syscall site. \n\
+	push %rbp \n\
+	mov %rsp, %rbp \n\
+	sub $512, %rsp \n\
+	and $~15, %rsp \n\
+	fxsave (%rsp)\n\
+	# What can we assume about our wrapped callee? It need not be SysV. But if it is, that's OK \n\
+	# in that our stack has the correct alignment. Will it preserve %r11? No. But if it's SysV, \n\
+	# it does not conform to the raw ABI because it doesn't preserve a bunch of registers. So \n\
+	# I think we should assume that our callee is raw. The only SysV interface we care about is \n\
+	# the generic one; we define no 6-arg raw SysV ABI, for example (just use real raw!). I suppose \n\
+	# we might want such an ABI in future. If we did that, we'd want a WRAP_6ARGSYSV_AS_RAW above. \n\
+	callq " #extusing_fnname " \n\
+	fxrstor (%rsp) \n\
+	mov %rbp, %rsp \n\
+	pop %rbp \n\
+	retq \
+")
+#else
+#define WRAP_IN_FXSAVE(extusing_fnname)   /* FIXME: i386 version */
+#endif /* __x86_64__ */
+
 
 #endif
