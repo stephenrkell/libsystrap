@@ -53,10 +53,10 @@ __systrap_call_handler:
     # If it's pos N (0..63), then we'd better have at least 2^(N+1) syscalls
     # i.e. pos must be strictly < LOG_NSYSCALLS.
     # XX: might be faster to do a simple right-shift and jnz
-    bsr %rax, %r11
-    jz 2f           # if %rax is zero, we will take this branch; bsr says %r11 is undefined but zf=1
-    cmpq $LOG_NSYSCALLS, %r11
-    jae 3f
+    mov %rax, %r11
+    shr $LOG_NSYSCALLS, %r11
+    cmp $0, %r11
+    jnz 3f                     # the top bits should be zero if we want to index using %rax
     2:
     lea replaced_syscalls(%rip), %r11
     cmpq $0, (%r11,%rax,8)
