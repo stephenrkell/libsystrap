@@ -29,6 +29,9 @@
 #include <sys/mman.h>
 #include <stdint.h>
 #include <string.h>
+// #include <stdlib.h>
+void qsort(void *base, size_t nmemb, size_t size,
+                  int (*compar)(const void *, const void *));
 #include <stdarg.h>
 #include <stdio.h>
 #ifdef __linux__
@@ -91,8 +94,19 @@ void replace_instruction_with(unsigned char *pos, unsigned len,
 	}
 }
 
-unsigned __next_trap_site;
-struct trap_site __trap_sites[MAX_TRAP_SITES];
+static void insert_lcall_trap_site_with_retaddr(void *retaddr_pos, intptr_t bytes)
+{
+	/* Open "hashing"... */
+	uintptr_t retaddr = (uintptr_t) retaddr_pos;
+	unsigned shift = 0;
+#define MAX_SHIFT  (32-LCALL_LOG_NRETADDRS+1)
+	while (shift < MAX_SHIFT && __systrap_lcall_retaddrs[(retaddr >> shift) & ((1ul << LCALL_LOG_NRETADDRS) - 1)]) { ++shift; }
+	if (shift == MAX_SHIFT) abort(); // open hashing failed... FIXME: handle this properly
+	// We found an unused (null) entry. Store the site there. That's it!
+	__systrap_lcall_retaddrs[(retaddr >> shift) & ((1ul << LCALL_LOG_NRETADDRS) - 1)] = retaddr;
+#undef MAX_SHIFT
+}
+
 void replace_syscall_with_lcall(unsigned char *pos, unsigned len)
 {
 	assert(len >= 2);
@@ -121,15 +135,7 @@ void replace_syscall_with_lcall(unsigned char *pos, unsigned len)
 	if (bytes > 2097152) // HACK: more precise please
 	{
 		debug_printf(1, "Replacing syscall at %p with trap (lcall via *0xPUNNED(%rax))\n", pos);
-		__trap_sites[__next_trap_site++] = (struct trap_site) {
-			.addr = (uintptr_t) pos,
-			.indirect_access_low = /* what's the lowest address we might try to read a selector from?
-		        	  * It's the value of the next four bytes plus zero (lowest syscall number) */
-					bytes,
-			.indirect_access_high = /* what's the highest address plus one that we might try to read a selector from?
-		        	* It's the value of the next four bytes plus ASSUMED_MAX_SYSCALL_NUMBER plus one */
-					bytes + ASSUMED_MAX_SYSCALL_NUMBER + 1
-		};
+		insert_lcall_trap_site_with_retaddr(pos + 6, bytes);
 		replace_instruction_with(pos, len, replacement_lcall, sizeof replacement_lcall);
 	}
 	else
@@ -215,7 +221,6 @@ void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *e
 	// strncpy(debug_buf, line_begin_pos, line_end_pos - line_begin_pos);
 	// debug_buf[sizeof debug_buf - 1] = '\0';
 	// // assert that line_end_pos
-	unsigned orig_ntrapsites = __next_trap_site;
 	debug_printf(1, "Scanning for syscall instructions within %p-%p (%s)\n",
 		begin_instr_pos, end_instr_pos, /*debug_buf */ "FIXME: reinstate debug printout");
 	struct set_trap_closure clos = { .set_trap = set_trap, .set_trap_arg = set_trap_arg };
@@ -232,13 +237,10 @@ void trap_one_instruction_range(unsigned char *begin_instr_pos, unsigned char *e
 		}
 		++instr_pos;
 	}
-	if (__next_trap_site > orig_ntrapsites) qsort(__trap_sites, __next_trap_site,
-		sizeof (struct trap_site), compare_trap_sites_low32);
-
 	// restore original perms
 	if (!is_writable)
 	{
-		int ret = raw_mprotect(begin_page, end_page - begin_page,
+		int ret __attribute__((unused)) = raw_mprotect(begin_page, end_page - begin_page,
 			(is_readable ? PROT_READ : 0)
 		|                  PROT_EXEC
 		);
@@ -268,6 +270,7 @@ _Bool addr_is_in_ld_so(const void *pos)
 		 * find the maximum vaddr... can we do this? */
 		if (ld_so_link_map) ld_so_end = get_text_segment_end_from_load_addr(
 			(void*) ld_so_link_map->l_addr);
+	}
 
 	struct link_map *range_link_map = get_highest_loaded_object_below((void*) pos);
 	_Bool ret = (ld_so_link_map && range_link_map &&
@@ -389,7 +392,8 @@ int systrap_debug_level __attribute__((visibility("hidden"))) = 0;
 
 /* We initialize our error-reporting stuff, but don't actually 
  * set up any traps. That's left to the client. */
-static void __attribute__((constructor)) startup(void)
+__attribute__((constructor))
+static void startup(void)
 {
 	char *debug_level_str = getenv("TRAP_SYSCALLS_DEBUG");
 	char *sleep_for_seconds_str = getenv("TRAP_SYSCALLS_SLEEP_FOR_SECONDS");

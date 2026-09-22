@@ -30,25 +30,8 @@ void __libsystrap_force_init(void) __attribute__((visibility("hidden")));
 
 struct ibcs_sigframe; /* opaque */
 
-#define MAX_TRAP_SITES 2048
-#define ASSUMED_MAX_SYSCALL_NUMBER 1023
-/* We collect trap sites. In addition to recording their address,
- * we also record the absolute addresses that an lcall might
- * be trying to read a far address from. The addresses
- * are all in the low 4GB. This can be used to be selective
- * about where we mmap the special selector-filled pages. */
-struct trap_site
-{
-	uintptr_t addr;                // where the trapping instruction resides
-	uint32_t indirect_access_low;  // lowest vaddr that this might need incidental access to (lcall)
-	uint32_t indirect_access_high; // highest vaddr that this might need incidental access to
-};
-extern unsigned __next_trap_site;
-extern struct trap_site __trap_sites[MAX_TRAP_SITES];
-static inline int compare_trap_sites_low32(const void *arg1, const void *arg2)
-{
-	return (uint32_t)((struct trap_site *) arg1)->addr - (uint32_t)((struct trap_site *) arg2)->addr;
-}
+#define LCALL_LOG_NRETADDRS 12
+extern uintptr_t __systrap_lcall_retaddrs[1ul << LCALL_LOG_NRETADDRS]; /* 32kB -- quite a lot of memory? HMM, it's OK. */
 
 /* If we give the application a fake vDSO / sysinfo,
  * we have to save/restore the original. */

@@ -219,6 +219,11 @@ void start_tracing(ElfW(auxv_t) *p_auxv_start, _Bool apply_replacements)
 	 */
 	create_fake_vdso((ElfW(auxv_t) *) p_auxv_start); // creates in already-trapped form
 	trap_all_mappings(); // XXX: use this to trap the fake vdso too; have just "copy_vdso(...)"?
+#define USE_LCALL
+#ifdef USE_LCALL
+	install_descriptor();
+	map_selector_pages();
+#endif
 	install_sigill_handler();
 #if defined(__i386__)
 	/* There is a TLS slot reserved for AT_SYSINFO a.k.a. the __kernel_vsyscall

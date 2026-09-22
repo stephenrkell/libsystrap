@@ -29,6 +29,40 @@
 # Also we don't yet handle clone()... do this below. It's only a few instructions.
 
 .text
+.globl __systrap_call_handler_with_retaddr_restore
+__systrap_call_handler_with_retaddr_restore:
+    # we need to search our return addresses by the lower 32 bits of 0(%rsp)...
+    # we use an open-"hashing" lookup where hash functions are just taking
+    # 12 bits from the address, starting with [0,11] and if necessary, sliding up
+    # one by one. This deals with hash collisions but not data collisions... if
+    # two same-lower-32 addresses are trap sites, we have to trap one or both of
+    # them by some other means.
+    # free up one more register
+    push %rdx
+    mov __systrap_lcall_retaddrs@gotpcrel(%rip), %r11
+    xor %rcx, %rcx      # %rcx is a counter, 0 to 30 (potentially!)
+    0:
+    movl 8(%rsp), %edx         # %edx is the 32-bit word
+    sar %cl, %edx              # %edx is now the shifted 32-bit word
+    and $0xfff, %edx           # ... now just 12 bits of it
+    mov (%r11, %rdx, 8), %rdx  # now %rdx is the 64-bit table entry...
+    cmpl %edx, 8(%rsp)         # ... do its lower 32 match?
+    je 2f                      # match / success... we have left the 64-bit value in %rdx
+    inc %cl
+    cmp $21, %cl               # We have 21 hash functions: [0,11], [1,12], ..., [20,31]
+    je 1f                      # our counter hit 21 -- lookup failed
+    jmp 0b
+    1:
+    # hash lookup failure... what to do? just abort for now
+    jmp 6f
+    2:
+    lea -6(%rdx), %rcx         # we needed %rcx for the shift, but it's free now
+                               # lcalls are 6 bytes long, and the site addr is what we want in %rcx
+    rol $1, %rcx               # set the top bit
+    or $1, %rcx
+    ror $1, %rcx
+    pop %rdx
+# fall through!
 .globl __systrap_call_handler
 __systrap_call_handler:
     # We have the trap site in %rcx, but other registers are the same as
@@ -106,7 +140,7 @@ __systrap_call_handler:
     # What happens if the syscall is a sigreturn? We don't get to the post-action, but
     # otherwise I think it *should* all go fine. Trap the case where sigreturn returns.
     cmpq $__NR_rt_sigreturn, %r11
-    je 6f
+    je 7f
     # TODO: similar treatment here for exit_group and others? Or is any of this necessary?
     # FIXME: what happens if we're doing clone() or clone3() with a new stack? %rcx and %rax are lost.
     # We could fall back to the stack-virtualised version of clone(), but ideally wouldn't.
@@ -138,9 +172,22 @@ __systrap_call_handler:
     pop %rax
     pop %r11
     5:
-    lea 2(%rcx), %rcx
+    # XXX: if we got here by an lcall, the return address (plus some offset!) is on the stack
+    # but we put it in %rcx earlier when we fixed it up. We should clean up
+    # the stack, but also, do the appropriate kind of ret/jmp since otherwise we
+    # may defeat control-flow integrity mechanisms (CEt / endbr). Luckily, the lcall
+    # pathway has some extra instructions at the top. Maybe borrow the top bit of %rcx?
+    add $2, %rcx
+    # Since we used 'add' not 'lea', there is a flag telling us whether %rcx is negative...
+    js 6f
     jmp *%rcx
     6:
+    # This is the return path... a short return for a long call.
+    shl $1, %rcx               # clear the top bit
+    shr $1, %rcx
+    mov %rcx, 0(%rsp)
+    retq
+    7:
     # This is the "rt_sigreturn failed" path... print something then abort.
     # FIXME: assembler is generating relocs the linker barfs on, I think at the lea
     # below. Comment out for now.

@@ -151,7 +151,7 @@ vpath %.S $(DONALD)/src
 vpath %.h $(DONALD)/src
 CFLAGS += -I$(DONALD)/src
 
-CHAIN_LOADER_OBJS := chain-ext.o bootstrap.o
+CHAIN_LOADER_OBJS := chain-ext.o bootstrap.o lcall.o
 $(info CHAIN_LOADER_OBJS is $(CHAIN_LOADER_OBJS))
 # these files are built from donald sources
 LDSO_OBJS := premain.o main.o entry.o load.o debug.o start.o chain.o
