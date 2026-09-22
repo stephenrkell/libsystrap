@@ -15,9 +15,11 @@
 #endif
 
 __attribute__((visibility("hidden")))
-_Bool is_ud2(const unsigned char *ins)
+_Bool is_trap_bytes(const unsigned char *ins)
 {
-	return ins[0] == 0x0f && ins[1] == 0x0b;
+	return (ins[0] == 0xff && ins[1] == 0x98) // HACK: lcall
+			|| (ins[0] == 0x0f && ins[1] == 0x0b) // HACK: ud2
+			;
 }
 /* We have four different ways of calculating the instruction length:
  * x86-decode (preferred), libudis86, opdis (slowest) and xed (not evaluated).
@@ -331,82 +333,6 @@ int enumerate_operands(unsigned const char *ins, unsigned const char *end,
 }
 
 #endif
-#ifdef USE_OPDIS
-#define MAX_INSN_LENGTH 16
-#define OPDIS_BUF_LEN 32
-#define OPDIS_MAX_OPERANDS 5 /* ? */
-#define OPDIS_ASCII_SZ 64 /* ? */
-#define OPDIS_MNEMONIC_SZ 12 /* ? */
-#define OPDIS_OP_ASCII_SZ 8 /* ? */
-static opdis_t o;
-static THREAD opdis_insn_t *cur_insn;
-static THREAD opdis_off_t  cur_insn_len;
-static int decode_cb(const opdis_insn_buf_t in, opdis_insn_t * out,
-	   const opdis_byte_t * buf, opdis_off_t offset,
-	   opdis_vma_t vma, opdis_off_t length, void * arg)
-{
-	int ret = /* opdis_x86_att_decoder */ opdis_default_decoder(in, out, buf, offset, vma, length, NULL);
-	if (ret) *((opdis_off_t *) arg) = length;
-	return ret; /* i.e. always stop disassembling after a single instruction */
-}
-static void display_cb(const opdis_insn_t *i, void *arg) { return; }
-static opdis_insn_t *get_opdis_insn(unsigned char *ins, unsigned char *end)
-{
-	uintptr_t len = (uintptr_t) end - (uintptr_t) ins;
-	opdis_buffer_t buf = {
-		.len = (len > MAX_INSN_LENGTH) ? MAX_INSN_LENGTH : len,
-		.data = ins,
-		.vma = (bfd_vma) ins
-	};
-	assert(buf.len <= MAX_INSN_LENGTH);
-	if (!o)
-	{
-		o = opdis_init();
-		/* Unbelievably, opdis_insn_t won't tell us the encoded length of the instruction. 
-		 * So we have to snarf it via a custom decoder. */
-#if defined(__x86_64__)
-		opdis_set_arch(o, bfd_arch_i386, bfd_mach_x86_64, NULL);
-#elif defined(__i386__)
-		opdis_set_arch(o, bfd_arch_i386, bfd_mach_i386_i386 /* or bfd_mach_x64_32? */, NULL);
-#else
-#error "Unrecognised x86 architecture."
-#endif
-		opdis_set_display(o, display_cb, NULL);
-		opdis_set_decoder(o, decode_cb, &cur_insn_len);
-		// assert(o->buf);
-		// assert(o->buf->string);
-	}
-	if (!cur_insn)
-	{
-		cur_insn = opdis_insn_alloc_fixed(OPDIS_ASCII_SZ, OPDIS_MNEMONIC_SZ,
-			OPDIS_MAX_OPERANDS, OPDIS_OP_ASCII_SZ);
-	}
-	opdis_insn_clear(cur_insn);
-	/* Don't let opdis see ud2 -- seems not to like it? */
-	if (is_ud2(ins))
-	{
-		cur_insn_len = 2;
-		return NULL;
-	}
-	/* Now do the one-instruction decode. */
-	unsigned int ret = opdis_disasm_insn(o, &buf, (opdis_vma_t) ins, cur_insn);
-	if (!ret) return NULL;
-	if (cur_insn->status == opdis_decode_invalid) return NULL;
-	if (cur_insn_len == 0)
-	{
-		/* ud2 shows up with a "length" of 0 in the callback. 
-		 * but its size == 2. FIXME: why wasn't "size" good enough
-		 * earlier, but is now? */
-		cur_insn_len = cur_insn->size;
-	}
-	return cur_insn;
-}
-static int instr_len_opdis(unsigned char *ins, unsigned char *end)
-{
-	get_opdis_insn((unsigned char *) ins, (unsigned char *) end);
-	return cur_insn_len;
-}
-#endif /* opdis */
 
 static void print_hex_bytes(int fd, unsigned char *start, unsigned char *end)
 {
@@ -427,10 +353,10 @@ unsigned long
 __attribute__((visibility("protected")))
 instr_len(unsigned const char *ins, unsigned const char *end)
 {
-	/* Don't let the decoders see ud2, because they may barf, i.e. they may
+	/* Don't let the decoders see lcall, because they may barf, i.e. they may
 	 * have different answers to the following philosophical question:
 	 * is "defined to be an undefined instruction" a defined instruction? */
-	if (end - ins > 1 && is_ud2(ins)) return 2;
+	if (end - ins > 1 && is_trap_bytes(ins)) return 2; // HACK: wrong for a true lcall
 	
 	int len = 1;
 	_Bool got_len = 0;
