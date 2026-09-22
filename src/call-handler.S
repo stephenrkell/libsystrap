@@ -57,11 +57,14 @@ __systrap_call_handler_with_retaddr_restore:
     jmp 6f
     2:
     lea -6(%rdx), %rcx         # we needed %rcx for the shift, but it's free now
-                               # lcalls are 6 bytes long, and the site addr is what we want in %rcx
-    rol $1, %rcx               # set the top bit
+                               # lcalls are 6 bytes long, and the *site* addr is what we want in %rcx
+    rol $1, %rcx               # set the top bit in %rcx
     or $1, %rcx
     ror $1, %rcx
     pop %rdx
+    # We got here from a call. But we want our handler to run with the exact same %rsp
+    # as at the system call site. So drop the on-stack return address.
+    add $8, %rsp
 # fall through!
 .globl __systrap_call_handler
 __systrap_call_handler:
@@ -183,9 +186,15 @@ __systrap_call_handler:
     jmp *%rcx
     6:
     # This is the return path... a short return for a long call.
+    # We *don't* have the return address on the stack yet. (We dropped it above, if a call got us here.)
     shl $1, %rcx               # clear the top bit
     shr $1, %rcx
-    mov %rcx, 0(%rsp)
+    # The return address we want is 2 bytes after the site address...
+    # (... or 4 bytes *before* what *was* on the stack.)
+    lea 2(%rcx), %rcx
+    push %rcx
+    # We have to push %rcx because there's no return address on the stack... if we had one,
+    # we dropped it. But now we've got it back, and fixed it up.
     retq
     7:
     # This is the "rt_sigreturn failed" path... print something then abort.
