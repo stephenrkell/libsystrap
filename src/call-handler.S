@@ -186,15 +186,13 @@ __systrap_call_handler:
     jmp *%rcx
     6:
     # This is the return path... a short return for a long call.
-    # We *don't* have the return address on the stack yet. (We dropped it above, if a call got us here.)
+    # We *don't* have the return address on the stack yet...
+    # ... because we dropped it above, if a call got us here. So put it back!
+    # Note that we adjusted it by 2 above.
     shl $1, %rcx               # clear the top bit
     shr $1, %rcx
-    # The return address we want is 2 bytes after the site address...
-    # (... or 4 bytes *before* what *was* on the stack.)
-    lea 2(%rcx), %rcx
+    # ... so put it back.
     push %rcx
-    # We have to push %rcx because there's no return address on the stack... if we had one,
-    # we dropped it. But now we've got it back, and fixed it up.
     retq
     7:
     # This is the "rt_sigreturn failed" path... print something then abort.
