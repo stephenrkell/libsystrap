@@ -216,22 +216,28 @@ static
 size_t
 count_vdso_size(void *vdso_ehdr)
 {
-	unsigned long max_off_seen = 0;
-	ElfW(Ehdr) *src_ehdr = vdso_ehdr;
+	ElfW(Ehdr) *ehdr = vdso_ehdr;
+	/* Usually the section headers are the last thing in the file. */
+	unsigned long max_off_seen = ehdr->e_shoff + ehdr->e_shnum * ehdr->e_shentsize;
+	/* ... but it's possible for the program headers to go anywhere. */
+	unsigned long ph_endoff = ehdr->e_phoff + ehdr->e_phnum * ehdr->e_phentsize;
+	if (ph_endoff > max_off_seen) max_off_seen = ph_endoff;
 
-	for (unsigned i = 0; i < src_ehdr->e_shnum; ++i)
+	/* Same idea for all sections... */
+	for (unsigned i = 0; i < ehdr->e_shnum; ++i)
 	{
-		ElfW(Shdr) *shdr = (ElfW(Shdr) *) ((unsigned char *) src_ehdr + src_ehdr->e_shoff
-			+ i * src_ehdr->e_shentsize);
+		ElfW(Shdr) *shdr = (ElfW(Shdr) *) ((unsigned char *) ehdr + ehdr->e_shoff
+			+ i * ehdr->e_shentsize);
 		unsigned long endoff = shdr->sh_offset
 			+ ((shdr->sh_type == SHT_NOBITS) ? 0 : shdr->sh_size);
 		if (endoff > max_off_seen) max_off_seen = endoff;
 	}
-	ElfW(Phdr) *src_phdrs = (ElfW(Phdr) *) ((unsigned char *) vdso_ehdr + src_ehdr->e_phoff);
-	for (unsigned i = 0; i < src_ehdr->e_phnum; ++i)
+	/* ... and for all phdrs. FIXME: should limit this to some phdr types only I think. */
+	ElfW(Phdr) *phdrs = (ElfW(Phdr) *) ((unsigned char *) vdso_ehdr + ehdr->e_phoff);
+	for (unsigned i = 0; i < ehdr->e_phnum; ++i)
 	{
-		ElfW(Phdr) *phdr = (ElfW(Phdr) *) ((unsigned char *) src_phdrs + src_ehdr->e_phoff
-			+ i * src_ehdr->e_phentsize);
+		ElfW(Phdr) *phdr = (ElfW(Phdr) *) ((unsigned char *) ehdr + ehdr->e_phoff
+			+ i * ehdr->e_phentsize);
 		unsigned long endoff = phdr->p_offset + phdr->p_filesz;
 		if (endoff > max_off_seen) max_off_seen = endoff;
 	}
