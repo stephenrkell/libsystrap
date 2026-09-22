@@ -678,9 +678,16 @@ bootstrap_proto(rt_sigaction)
 		debug_printf(0, "Blocked program's attempt to install a SIGILL handler\n");
 		return -1;
 	}
+	struct __asm_sigaction realact;
+	memcpy(&realact, act, sizeof realact);
+	if (realact.sa_mask & (1<<(SIGILL-1)))
+	{
+		realact.sa_mask &= ~(1<<(SIGILL-1));
+		debug_printf(0, "Blocked program's attempt to a signal handler that runs with SIGILL blocked\n");
+	}
 /* There is no rt_sigaction wrapper, so... maybe we should raw_syscall it?
  * NOTE that our raw_ wrapper supplies the fourth argument (sigsetsize) as sizeof (__asm_sigset_t) */
-	return raw_rt_sigaction(signum, act, oldact);
+	return raw_rt_sigaction(signum, &realact, oldact);
 }
 REPLACE(rt_sigaction)
 
