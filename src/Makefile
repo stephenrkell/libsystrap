@@ -25,9 +25,17 @@ vpath %.c $(srcdir)
 vpath %.s $(srcdir)
 vpath %.S $(srcdir)
 
+#call.o: CFLAGS += -fomit-frame-pointer
 # This is only needed for the i386 build, but it does no harm on x86-64.
-# Can we do this with a pragma/attribute instead? It seems not... see comment in call.c.
-call.o: CFLAGS += -fomit-frame-pointer
+# Can we do this with a pragma/attribute instead?
+# I tried
+##pragma GCC optimize "-fomit-frame-pointer"
+# and
+#__attribute__((optimize("omit-frame-pointer")))
+# ... but these don't work. These or some equivalent is essential on i386 to
+# free enough registers for do_syscall6 to be compilable.
+#
+# HOWEVER, for now we no longer have call.o and the problem does not occur.
 
 # don't delete intermediates
 .SECONDARY:
