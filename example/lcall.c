@@ -63,18 +63,19 @@ static void print_ldt(unsigned nentries)
 	long nread = //modify_ldt(0, buf, sizeof buf);
 			syscall(SYS_modify_ldt, /* read */ 0x0, buf, (unsigned long) bufsz);
 	if (nread != bufsz) { warnx("modify_ldt failed to read %ld bytes (read only %ld)", (unsigned long) bufsz, (long) nread); }
-#if 0
-	for (unsigned i = 0; i < nread / sizeof (struct desc_struct); ++i)
+	if (debug_level > 5)
 	{
-		warnx("desc 0x% 4x has base0=%04x base1=%04x base2=%02x limit0=%04x limit1=%x "
-			  "type=%x s=%x dpl=%x p=%x avl=%x l=%x d=%x g=%x",
-			   i, (unsigned) buf[i].base0, (unsigned) buf[i].base1, (unsigned) buf[i].base2,
-			   (unsigned) buf[i].limit0, (unsigned) buf[i].limit1,
-			   (unsigned) buf[i].type, (unsigned) buf[i].s, (unsigned) buf[i].dpl,
-			   (unsigned) buf[i].p, (unsigned) buf[i].avl, (unsigned) buf[i].l, (unsigned) buf[i].d,
-			   (unsigned) buf[i].g);
+		for (unsigned i = 0; i < nread / sizeof (struct desc_struct); ++i)
+		{
+			warnx("desc 0x% 4x has base0=%04x base1=%04x base2=%02x limit0=%04x limit1=%x "
+				  "type=%x s=%x dpl=%x p=%x avl=%x l=%x d=%x g=%x",
+				   i, (unsigned) buf[i].base0, (unsigned) buf[i].base1, (unsigned) buf[i].base2,
+				   (unsigned) buf[i].limit0, (unsigned) buf[i].limit1,
+				   (unsigned) buf[i].type, (unsigned) buf[i].s, (unsigned) buf[i].dpl,
+				   (unsigned) buf[i].p, (unsigned) buf[i].avl, (unsigned) buf[i].l, (unsigned) buf[i].d,
+				   (unsigned) buf[i].g);
+		}
 	}
-#endif
 }
 
 /* We have just received control from a special unique trampoline placed
