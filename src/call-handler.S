@@ -1,33 +1,6 @@
 #include <sys/syscall.h>
 #include "systrap-asm.h"
 
-# XXX: concurrency bug. This code pathway is
-# prone to crashes in code that handles signals. WHY?
-# Previously, during a SIGILL handler, some signals were masked. WHICH?
-# And what difference did that make? Why would taking a signal during this
-# path, say, cause a problem? Is this an async safety issue?
-# 
-# If we use stdio during the handler, ... do we?
-#
-# Or let's imagine that we're interrupted by a user-handled-signal / sigreturn pair.
-# That's a *user* sigreturn on the same thread. So we will trap it! What happens?
-# We take a SIGILL then early-sigreturn to *this* path (another activation thereof)...
-# ... which will do the sigreturn with the pre-action
-# on behalf of the *user* sigreturning code
-# and the moment we do that sigreturn, we're back at the *signalled-at* code,
-# which is us!
-# All of this would seem to work fine. But there is definitely an async-signal-safety issue,
-# unless we abstain from stdio. Which we do! So maybe async-signal-safety doesn't explain it,
-# unless there are rogue stdio calls going on.
-# Now I can't reproduce the problem.
-#
-# Could we be clobbering a register if we are interrupted in the wrong place?
-# I think I saw 0xfff...fffc being jumped to or accessed.
-#
-# Could it simply be our AVX/SSE2 known weakness?
-# MAYBE. FIX THIS!
-# Also we don't yet handle clone()... do this below. It's only a few instructions.
-
 .text
 .globl __systrap_call_handler_with_retaddr_restore
 __systrap_call_handler_with_retaddr_restore:
@@ -107,55 +80,45 @@ __systrap_call_handler:
     # that's the replacement done -- now the return value is in %rax!
     jmp 4f
     3:
-    # TODO: instead of jumping to a slow path if non-zero, just jump to the
-    # handler! Then macroise the slow path written below, so that we can wrap
-    # any "raw handler" or "asm handler" in it. There are a few flavours of
-    # handler we can imagine...
-    # - "raw" or "asm": takes full responsibility for its register footprint; returns to original site?
-    # - nongeneric "scalarint-only" / "noextension" (good name needed!): can be written in C
-    #     after disabling vector and floating-point extensions, but has the plain syscall signature
-    #     rather than a generic / packed version.
-    # - generic version of the same
-    # - nongeneric wrapped in a full xsave
-    # - generic wrapped in a full xsave
-    # TODO: figure out which of these can/should return to the caller vs returning here
-    # TODO: what if we have pre/post handlers but a *non*-generic replacement? We still
-    # have to build the packed version. One solution would be to make the pre/post-handlers
-    # themselves non-generic by default, and force the user to wrap them if they want this. YES.
-    # The generic-or-no, fpavail-or-no choices are orthogonal.
-
-    # If we got here, we have no replacement so we can just do the syscall.
-    # PROBLEM: the syscall will clobber %rcx which is our return address.
+    # We land here if we need to do the actual syscall, because there's no replacement.
+    # Some syscalls have special treatment.
+    cmp $__NR_rt_sigreturn, %rax
+    je 10f                    # just do the syscall; it never returns
+    cmp $__NR_clone, %rax
+    je 11f                    # special handling path
+    cmp $__NR_clone3, %rax
+    je 12f
+    30:
+    # Generic handling follows.
+    # PROBLEM: the syscall will clobber %rcx which tells us our return address.
     # But we want to run the syscall with the exact same stack pointer as at the trap site.
     # See https://doc.liz6.com/en/systems-programming/02-system-call-abi/01-x86-64-system-call-abi
-    # We could use the red zone, but then we will clobber it if the calling code is using it.
+    #
+    # Short answer: we use the red zone. This means we assume that the calling code, doing a
+    # syscall, is not expecting the redzone to be preserved across a syscall.
+    # That is consistent with the redzone as preserved across asynchronous interruptions only,
+    # but not across calls. There may be some cursed code that expects it to be preserved
+    # across syscalls but short of borrowing %gs (which some other cursed code may use),
+    # this is the best bet.
+    #
     # The psABI says
     #   "The Linux kernel does not honor the red zone (see 3.2.2) and therefore this area is
     #   not allowed to be used by kernel code. Kernel code should be compiled by GCC
     #   with the option -mno-red-zone."
     # ... which does not tell us whether the kernel clobbers this *or* whether user code can
-    # assume it doesn't. I think "does not honor" really means "does not use" i.e. "does preserve".
+    # assume it doesn't. I *believe* that "does not honor" really means "does not use" it,
+    # i.e. the kernel does preserve the red zone. However, the vagueness of this language
+    # is perhaps positive evidence that preserving the red zone across syscalls is not guaranteed.
     mov %rcx, -8(%rsp)
     mov %rax, -16(%rsp)
+    10:                    # rt_sigreturn jumps in here since it doesn't need the redzone
     syscall
     mov -16(%rsp), %r11    # Now the syscall number is in %r11, in case post action needs it
     mov -8(%rsp), %rcx
-    # What happens if the syscall is a sigreturn? We don't get to the post-action, but
-    # otherwise I think it *should* all go fine. Trap the case where sigreturn returns.
+    # Trap the case where sigreturn returns -- it shouldn't!
+    # TODO: similar treatment here for exit_group and others? Or is any of this necessary?
     cmpq $__NR_rt_sigreturn, %r11
     je 7f
-    # TODO: similar treatment here for exit_group and others? Or is any of this necessary?
-    # FIXME: what happens if we're doing clone() or clone3() with a new stack? %rcx and %rax are lost.
-    # XXX: clone seems to work anyway? could be because child_stack=0
-    # Does it matter that %rax is lost? Yes, post-action might want to print it.
-    # Does it matter that %rcx is lost? Yes, it's the site in user code that we must return to (+n).
-    #
-    # We could fall back to the stack-virtualised version of clone(), but ideally wouldn't.
-    # Idea: pre-populate the new stack with our %rcx at -136(stack_top). This does
-    # clobber some data on that initial stack; ideally we wouldn't. I'd take that hit for now.
-    # The path where we're overwriting a non-zero word could be explicitly detected, although
-    # falling back to the generic version wouldn't make sense because that clobbers
-    # strictly more.
     4:
     cmpq $0, __systrap_post_handling(%rip)
     jz 5f
@@ -191,27 +154,72 @@ __systrap_call_handler:
     6:
     # This is the return path... a short return for a long call.
     # We *don't* have the return address on the stack yet...
-    # ... because we dropped it above, if a call got us here. So put it back!
+    # ... because we dropped it above, if present i.e. if a call got us here. So put it back!
     # Note that we adjusted it by 2 above.
     shl $1, %rcx               # clear the top bit
     shr $1, %rcx
-    # ... so put it back.
-    push %rcx
+    push %rcx                  # XXX: does this break CFI checks? Probably, at least in lcall case...
     retq
     7:
     # This is the "rt_sigreturn failed" path... print something then abort.
-    # FIXME: assembler is generating relocs the linker barfs on, I think at the lea
-    # below. Comment out for now.
-    # mov $__NR_write, %rax
-    # mov $2, %rdi
-    # lea Lrt_sigreturn_msg, %rsi
-    # mov $(Lrt_sigreturn_msg_end - Lrt_sigreturn_msg_end), %rdx
-    # syscall
-    mov $__NR_exit, %rax
-    mov $-134, %rdi       # successful return in range 0..127
+    mov $__NR_write, %rax
+    mov $2, %rdi
+    lea .Lrt_sigreturn_msg(%rip), %rsi
+    mov $(.Lrt_sigreturn_msg_end - .Lrt_sigreturn_msg), %rdx
     syscall
-.pushsection ".rodata"
-Lrt_sigreturn_msg:
-    .ascii "Aborting: rt_sigreturn returned\n"
-Lrt_sigreturn_msg_end:
+    mov $__NR_exit, %rax
+    mov $134, %rdi              # 128+SIGABRT
+    syscall
+.pushsection .rodata,"aMS",@progbits,1
+.Lrt_sigreturn_msg:
+    .ascii "Aborting: rt_sigreturn returned or unsupported clone() syscall\n"
+.Lrt_sigreturn_msg_end: # we don't need the NUL terminator but include one anyway
+    .byte 0
 .popsection
+    11:
+    # This is the clone prep path.
+    # Are we replacing the stack? YES, always I think -- NULL just means the kernel allocates it.
+    # In the NULL case, we can skip this because the kernel copies the current stack,
+    # including the stuff we save in the red zone.
+    cmpq $0, %rsi
+    je 30b
+    # To be nice, we should test whether we're overwriting nonzero data
+    cmpq $0, -8(%rsi)
+    jne 15f
+    cmpq $0, -16(%rsi)
+    jne 15f
+    # NOTE: we could share this code with the clone3 copy, below, but it has to pop %rsi.
+    # Seems clearer to keep these code paths separate rather than merge and then pop conditionally.
+    mov %rcx, -8(%rsi)      # %rsi points to "the topmost address of the new stack"
+    mov %rax, -16(%rsi)
+    jmp 30b
+    12:
+    # This is the clone3 prep path
+    push %rsi
+    push %rcx
+    mov 40(%rdi), %rsi    # *bottom* address of new stack
+    mov 48(%rdi), %rcx    # size of new stack
+    add %rcx, %rsi        # now we're like clone: %rdx is the topmost address
+    pop %rcx
+    # As in clone, we skip ahead if the stack is null
+    cmp $0, %rsi
+    je 13f
+    # To be nice, we should test whether we're overwriting nonzero data
+    cmpq $0, -8(%rsi)
+    jne 14f
+    cmpq $0, -16(%rsi)
+    jne 14f
+    mov %rcx, -8(%rsi)
+    mov %rax, -16(%rsi)
+    13:
+    pop %rsi
+    jmp 30b
+    14:
+    # This is the unsupported clone case: the stack has been prepopulated.
+    pop %rsi
+    15:
+    # what to do?
+    jmp 7b   # jump to our abort path.
+    # FIXME: distinguish the aborting cases
+    # FIXME: pull the abort code down here, for i-cache reasons
+    # FIXME: generally cache-optimise the code layout for the noop case (no replacement, no pre/post)
