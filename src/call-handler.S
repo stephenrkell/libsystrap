@@ -135,17 +135,21 @@ __systrap_call_handler:
     #   with the option -mno-red-zone."
     # ... which does not tell us whether the kernel clobbers this *or* whether user code can
     # assume it doesn't. I think "does not honor" really means "does not use" i.e. "does preserve".
-    mov %rcx, -136(%rsp)    # XXX: is this OK? using space *below* the red zone
-    mov %rax, -144(%rsp)    # XXX: is this OK? using space *below* the red zone
+    mov %rcx, -8(%rsp)
+    mov %rax, -16(%rsp)
     syscall
-    mov -144(%rsp), %r11    # Now the syscall number is in %r11, in case post action needs it
-    mov -136(%rsp), %rcx
+    mov -16(%rsp), %r11    # Now the syscall number is in %r11, in case post action needs it
+    mov -8(%rsp), %rcx
     # What happens if the syscall is a sigreturn? We don't get to the post-action, but
     # otherwise I think it *should* all go fine. Trap the case where sigreturn returns.
     cmpq $__NR_rt_sigreturn, %r11
     je 7f
     # TODO: similar treatment here for exit_group and others? Or is any of this necessary?
     # FIXME: what happens if we're doing clone() or clone3() with a new stack? %rcx and %rax are lost.
+    # XXX: clone seems to work anyway? could be because child_stack=0
+    # Does it matter that %rax is lost? Yes, post-action might want to print it.
+    # Does it matter that %rcx is lost? Yes, it's the site in user code that we must return to (+n).
+    #
     # We could fall back to the stack-virtualised version of clone(), but ideally wouldn't.
     # Idea: pre-populate the new stack with our %rcx at -136(stack_top). This does
     # clobber some data on that initial stack; ideally we wouldn't. I'd take that hit for now.
