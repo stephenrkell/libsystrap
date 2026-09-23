@@ -117,6 +117,7 @@ void trap_all_mappings(void)
 
 void init_fds(void)
 {
+	debug_printf(0, "Tracing in pid %d\n", (int) getpid());
 	if (getenv("TRACE_SYSCALLS_DELAY_STARTUP"))
 	{
 		sleep(atoi(getenv("TRACE_SYSCALLS_DELAY_STARTUP")));
