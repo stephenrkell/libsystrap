@@ -32,9 +32,9 @@ int openat(int dirfd, const char *pathname, int flags, ...);
 int open(const char *pathname, int flags, ...);
 /* Replacement syscalls for
  *
- * - in-process bootstrapping of instrumentation
+ * - in-process/image bootstrapping of instrumentation
  *         (mmap, mmap2?, mremap, munmap)
- * - cross-process bootstrapping via execve() rewriting
+ * - cross-process/image bootstrapping via execve() rewriting
  *         (also execveat)
  * */
 
@@ -79,9 +79,21 @@ __asm__( ".pushsection __replaced_syscalls,\"aw\", @progbits\n"\
   ".popsection\n"\
 );
 #define bootstrap_proto(n) __attribute__((visibility("hidden"))) n ## _ret_t  bootstrap_ ## n( n ## _args (expand_name_and_type, comma) )
-// count argv entries, not including terminator
+
 #ifdef CHAIN_LOADER
 #include "chain.h"
+
+/* FIXME: we don't want chain and preload versions of this file. Our Makefile
+ * doesn't build two different versions, so that's already broken. Which version
+ * does it build? The chain loader version.
+ * What to do?
+ * In the preload case, currently we just trap all the loaded stuff at startup
+ * and don't worry about dynamically loaded things, later mmaps, etc.
+ * That's probably fine for now, since the chain loader is the more "serious"
+ * implementation.
+ */
+
+// count argv entries, not including terminator
 static unsigned argv_count(char *const *argv)
 {
 	unsigned n = 0;
