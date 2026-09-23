@@ -252,7 +252,7 @@ $(LOADER_TARGETS): LDLIBS += -Bstatic \
   $(LIBRUNT_DIR)/build/$(librunt_frag)-$(arch)/librunt_preload.a \
   $(LIBC_A)
 
-noop-syscalls.o: CFLAGS += -DNOOP_SYSCALL_ACTION
+noop-syscalls.o: CFLAGS += -DNOOP_SYSCALL_ACTION -DDONALD_NAME=\"noop-syscalls-ld\" -DCHAIN_LOADER
 noop-syscalls.o: trace-syscalls.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
 
@@ -268,7 +268,8 @@ $(PRELOAD_TARGETS): $(TRACER_OBJS) fake-tls.o dynamic-list $(srcroot)/build/$(ar
 # ask for a spare .dynamic slot
 $(LOADER_TARGETS): LDFLAGS += -Wl,--spare-dynamic-tags=5
 
-$(LDSO_OBJS): CFLAGS += -DDONALD_NAME=\"trace-syscalls-ld\" -DCHAIN_LOADER
+$(LDSO_OBJS) trace-syscalls.o: CFLAGS += -DDONALD_NAME=\"trace-syscalls-ld\"
+$(LDSO_OBJS): CFLAGS += -DCHAIN_LOADER
 $(CHAIN_LOADER_OBJS): CFLAGS += -DCHAIN_LOADER
 
 DYNAPPEND ?= $(shell which $${ELFTIN:+$${ELFTIN}/dynappend/}dynappend)

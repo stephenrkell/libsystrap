@@ -36,6 +36,19 @@ __assert_fail (const char *assertion, const char *file,
 #include "raw-syscalls-defs.h"
 #include "trace-syscalls.h"
 
+#ifndef OUR_LDSO_DIR
+#error "No OUR_LDSO_DIR defined"
+#endif
+#ifndef DONALD_NAME
+#error "No DONALD_NAME defined"
+#endif
+
+/* HACK: x86-specific, and hard-codes installation paths */
+const char *ldso_names[] = {
+	[ELFCLASS32] = OUR_LDSO_DIR "../i386/" DONALD_NAME ".so",
+	[ELFCLASS64] = OUR_LDSO_DIR "../x86_64/" DONALD_NAME ".so"
+};
+
 int raw_open(const char *pathname, int flags, int mode);
 int raw_close(int fd);
 extern int etext;
@@ -182,7 +195,6 @@ void start_tracing(ElfW(auxv_t) *p_auxv_start, _Bool apply_replacements)
 	extern uintptr_t __stop___replaced_syscalls[] __attribute__((unused));
 	if (apply_replacements)
 	{
-#ifndef NOOP_SYSCALL_ACTION
 		/* Install replacements. Recall that these are used for bootstrapping,
 		 * since unlike the preload library case, most text is not loaded yet.
 		 *
@@ -199,7 +211,6 @@ void start_tracing(ElfW(auxv_t) *p_auxv_start, _Bool apply_replacements)
 			 = (void*)__start___replaced_syscalls[2*n + 1];
 			replaced_syscalls[syscall_n] = replacement;
 		}
-#endif
 	}
 
 	init_fds();

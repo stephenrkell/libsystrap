@@ -25,11 +25,8 @@
 #include "trace-syscalls.h" // FIXME: move us out of example/ into src/
 #include "chain-ext.h"
 
-/* HACK: x86-specific, and hard-codes installation paths */
-static const char *ldso_names[] = {
-	[ELFCLASS32] = OUR_LDSO_DIR "../i386/" DONALD_NAME ".so",
-	[ELFCLASS64] = OUR_LDSO_DIR "../x86_64/" DONALD_NAME ".so"
-};
+// FIXME: put this in a header
+extern const char *ldso_names[];
 
 int openat(int dirfd, const char *pathname, int flags, ...);
 int open(const char *pathname, int flags, ...);
