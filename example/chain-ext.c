@@ -117,6 +117,7 @@ static void clear_temporary_link_map(ElfW(Dyn) *created_dt_debug)
 	r->r_ldbase = 0;
 }
 
+struct file_metadata *__real___runt_files_metadata_by_addr(void *addr);
 struct file_metadata *__wrap___runt_files_metadata_by_addr(void *addr)
 {
 	if ((uintptr_t) addr >= ldso_load_addr
@@ -124,7 +125,9 @@ struct file_metadata *__wrap___runt_files_metadata_by_addr(void *addr)
 	{
 		return &temporary_file_metadata;
 	}
-	return NULL;
+	struct r_debug *r = dt_debug ? dt_debug->d_un.d_ptr : find_r_debug();
+	if (r->r_map == &temporary_link_map) return NULL; // too early to safely call librunt
+	return __real___runt_files_metadata_by_addr(addr);
 }
 
 // we have another special way to die
