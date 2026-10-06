@@ -67,7 +67,6 @@ CFLAGS += -DSYSTRAP_DEFINE_FILE
 CPPFLAGS += -I$(srcroot)/include
 CFLAGS += -g
 CFLAGS += -Wall -Wno-unused-label -Wno-comment
-CFLAGS += -O2
 CFLAGS += -fPIC
 CFLAGS += -ffreestanding -fno-omit-frame-pointer
 # the decoder we use nowadays is the "official" Intel one
@@ -75,7 +74,9 @@ CFLAGS += -DUSE_XED
 
 ifeq ($(DEBUG),)
 CFLAGS += -DNDEBUG
+CFLAGS += -O2
 else
+CFLAGS += -O0
 # HMM... we have temporarily disabled opdis. But good to get a second
 # opinion beside xed... maybe use udis86 instead? FIXME
 #instr.o: CFLAGS += -DUSE_OPDIS
