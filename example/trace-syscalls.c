@@ -36,6 +36,10 @@ __assert_fail (const char *assertion, const char *file,
 #include "raw-syscalls-defs.h"
 #include "trace-syscalls.h"
 
+#ifdef CHAIN_LOADER
+#include "chain-ext.h"
+#endif
+
 #ifndef OUR_LDSO_DIR
 #error "No OUR_LDSO_DIR defined"
 #endif

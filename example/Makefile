@@ -220,7 +220,9 @@ $(PRELOAD_TARGETS): LDFLAGS += \
 -Wl,--defsym,__private_free=free \
 -Wl,--defsym,__wrap___runt_files_notify_load=__runt_files_notify_load \
 -Wl,--defsym,__wrap___runt_files_metadata_by_addr=__runt_files_metadata_by_addr \
--Wl,--defsym,__private_strdup=strdup
+-Wl,--defsym,__private_strdup=strdup \
+-Wl,--defsym,__private_malloc=malloc \
+-Wl,--defsym,__private_free=free
 # hmm -- is this necessary now? FIXME: CHECK
 $(PRELOAD_TARGETS): LDFLAGS += \
 -Wl,--defsym,stat=raw_stat
@@ -249,13 +251,17 @@ $(LOADER_TARGETS): LDFLAGS += \
 # we use librunt's own file metadata thingy
 $(LOADER_TARGETS): LDFLAGS += \
 -Wl,--defsym,__wrap___runt_files_notify_load=__runt_files_notify_load \
--Wl,--wrap,__runt_files_metadata_by_addr
+-Wl,--wrap,__runt_files_metadata_by_addr \
+-Wl,--defsym,__private_strdup=strdup \
+-Wl,--defsym,__private_malloc=malloc \
+-Wl,--defsym,__private_free=free
 
 $(LOADER_TARGETS): LDLIBS += -Bstatic \
   $(srcroot)/build/$(arch)/libsystrap.a \
   $(LIBRUNT_DIR)/build/$(librunt_frag)-$(arch)/librunt_preload.a \
   $(LIBC_A)
 
+trace-syscalls.o: CFLAGS += -DCHAIN_LOADER
 noop-syscalls.o: CFLAGS += -DNOOP_SYSCALL_ACTION -DDONALD_NAME=\"noop-syscalls-ld\" -DCHAIN_LOADER
 noop-syscalls.o: trace-syscalls.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
@@ -311,7 +317,7 @@ trace-syscalls-ld.lds: $(shell which ld) $(THIS_MAKEFILE)
 
 .PHONY: clean
 clean:
-	rm -f trace-syscalls.so trace-syscalls-ld.so
+	rm -f trace-syscalls.so trace-syscalls-ld.so noop-syscalls-ld.so
 	rm -f $(ALL_OBJS) noop-syscalls.o dlmalloc.a
 	rm -f $(patsubst %.o,%.d,$(ALL_OBJS) noop-syscalls.o) noop-syscalls.o
 	rm -f syscall-macros.h $(SYS)-syscall-macros.h
