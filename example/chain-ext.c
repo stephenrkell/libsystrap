@@ -163,7 +163,7 @@ void __hook_pre_enter(struct chain_load_ctxt *cc)
 	// FIXME: libsystrap isn't being init'd, so force it
 	__libsystrap_force_init();
 
-	start_tracing(p_auxv, /* apply replacements from asm block? */ 1);
+	start_tracing(p_auxv, /* apply replacements from asm block? */ 1, cc);
 
 	// this is undoing the effect of set_temporary_link_map
 	clear_temporary_link_map(cc->our_dt_debug);

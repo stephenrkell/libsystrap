@@ -193,7 +193,7 @@ long __attribute__((visibility("protected")))
 __withfxsave___raw___trace_syscalls_post_handling();
 
 __attribute__((visibility("hidden")))
-void start_tracing(ElfW(auxv_t) *p_auxv_start, _Bool apply_replacements)
+void start_tracing(ElfW(auxv_t) *p_auxv_start, _Bool apply_replacements, void *arg)
 {
 	extern uintptr_t __start___replaced_syscalls[] __attribute__((unused));
 	extern uintptr_t __stop___replaced_syscalls[] __attribute__((unused));
@@ -317,7 +317,7 @@ static void startup(int argc, char **argv, char **environ)
 	ElfW(auxv_t) *p_auxv_terminator = NULL;
 	__runt_auxv_get_auxv(&p_auxv_start, &p_auxv_terminator);
 	__init_libc((char**) p_envv_0, (char*) *p_argv_0);
-	start_tracing(p_auxv_start, /* apply replacements from asm block? */ 0);
+	start_tracing(p_auxv_start, /* apply replacements from asm block? */ 0, /* extra arg */ NULL);
 }
 
 
