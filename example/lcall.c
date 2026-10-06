@@ -181,7 +181,7 @@ void map_selector_pages(void)
 	/* HMM. We assume we can just trample over the whole first 4GB. HACK!
 	 * If we kept a bitmap of which pages we'd trampled on, it would have
 	 * 2^20 bits or 2^17 bytes or 128kB, which is manageable. */
-	for (unsigned long long spagenum = 1; spagenum < 1ull<<11; ++spagenum)
+	for (unsigned long spagenum = 1; spagenum < 1ul<<11; ++spagenum)
 	{
 		void *addr = (void*)(spagenum << 21);
 		//warnx("asking for a mapping at %p", addr);
