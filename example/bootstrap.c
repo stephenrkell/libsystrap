@@ -401,19 +401,19 @@ bootstrap_proto(execveat)
 REPLACE(execveat)
 #endif /* CHAIN_LOADER */
 
+#ifdef __x86_64__
 /* lcall-based instrumentation: whenever we map a stack,
  * map it in the lower 32 bits. */
 static void tweak_flags(int *p_flags)
 {
-#ifdef __x86_64__
 	if (    (*p_flags & MAP_GROWSDOWN)
 		&& !(*p_flags & MAP_FIXED))
 	{
 		*p_flags |= MAP_32BIT;
 		write_string("tweaked a stack mapping!\n");
 	}
-#endif
 }
+#endif
 
 #ifdef __i386__
 #if defined(__linux__) && !defined(__NR_mmap2)
