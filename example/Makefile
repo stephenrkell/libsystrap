@@ -117,6 +117,10 @@ CFLAGS += -g
 CFLAGS += -Wall -Wno-unused-label -Wno-comment
 ifeq ($(DEBUG),)
 CFLAGS += -O2
+# not ready to turn off assertions, but for consistency...
+# CFLAGS += -DNDEBUG
+else
+CFLAGS += -Og
 endif
 CFLAGS += -fPIC
 CFLAGS += -ffreestanding -fno-omit-frame-pointer
