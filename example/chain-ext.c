@@ -67,10 +67,12 @@ struct file_metadata temporary_file_metadata = {
 /* This gets called from the CHAIN_LOADER macro-inserted call in main.c...
  * see Makefile.
  */
+static ElfW(Dyn) *dt_debug;
 static void set_temporary_link_map(ElfW(Ehdr) *ehdr, ElfW(Shdr) *shdrs, ElfW(Phdr) *phdrs,
 	uintptr_t inferior_load_addr, ElfW(Dyn) *created_dt_debug)
 {
 	if (!created_dt_debug) return;
+	dt_debug = created_dt_debug;
 	ElfW(Dyn) *found_debug = dynamic_xlookup(&_DYNAMIC[0], DT_DEBUG);
 	assert(found_debug);
 	assert(found_debug == created_dt_debug);
@@ -105,6 +107,7 @@ static void set_temporary_link_map(ElfW(Ehdr) *ehdr, ElfW(Shdr) *shdrs, ElfW(Phd
 }
 static void clear_temporary_link_map(ElfW(Dyn) *created_dt_debug)
 {
+	assert(created_dt_debug == dt_debug); // FIXME: just eliminate this arg
 	struct r_debug *r = (struct r_debug *) created_dt_debug->d_un.d_ptr;
 	assert(r);
 	r->r_version = 0;
