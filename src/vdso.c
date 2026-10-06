@@ -165,6 +165,10 @@ static void copy_data_section(void *dest, void *src, size_t sz,
 	 * we don't need to copy anything. However, the vDSO typically
 	 * uses a single LOAD for both text and rodata (there may be
 	 * no writable data), so this might be tricky. */
+
+	// XXX: we copy the section. This does not prevent text from
+	// referencing the *old*(real) vDSO's data/rodata sections.
+	memcpy(dest, src, sz);
 }
 static void copy_other_section(void *dest, void *src, size_t sz,
 	ElfW(Shdr) *shdrs, unsigned shentsz)
