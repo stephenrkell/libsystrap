@@ -510,3 +510,76 @@ void install_sigill_handler(void)
 	return;
 }
 
+void handle_sigsegv(int n) __attribute__((visibility("hidden")));
+void install_sigsegv_handler(void)
+{
+	struct __asm_sigaction action = {
+		  .sa_handler = &handle_sigsegv
+		, .sa_flags = SA_RESTORER | SA_NODEFER
+		, .sa_mask = ((__asm_sigset_t) -1) & ~(1ul<<(SIGSEGV-1)) /* we mask SIGSEGV -- hmm, concurrency? */
+		#ifndef __FreeBSD__
+		, .sa_restorer = sigill_restorer
+		#endif
+	};
+	struct __asm_sigaction oldaction;
+	int ret =
+/* FIXME: clean this up */
+#ifdef __x86_64__
+	raw_rt_sigaction
+#else
+	raw_sigaction
+#endif
+	(SIGSEGV, &action, &oldaction);
+	if (ret != 0) abort();
+	return;
+}
+
+static int trap_at_vperm_range_cb(struct vperm_range *r, void *arg)
+{
+	/* Can we get the trapping address as an ELF file with shdrs, librunt-wise? */
+	struct file_metadata *fm = __runt_files_metadata_by_addr((void*) r->addr);
+	assert(fm); // we only defer mappings... or do we? XXX: no, we don't filter for this
+	/* Just what trap_one_mapping would have done */
+	trap_one_executable_region_given_shdrs(
+		(unsigned char *) r->addr, (unsigned char *)((uintptr_t) r->addr + (r->npages << LOG_MIN_PAGE_SIZE)),
+		fm->filename,
+		/* is_writable already? if only if it has writable vperms */ prot_from_vperms(r->perms) & PROT_WRITE,
+		/* readable? */ 1, /* preserve_exec */ 0, // <-- no need to keep it x; for now, we know it's not in the ld.so
+		fm ? fm->shdrs : NULL, fm ? fm->ehdr->e_shnum : 0, fm ? fm->l->l_addr : 0,
+		/* set_trap */ set_default_trap, /*set_trap_arg*/ NULL);
+	/* Now we can make it really executable. XXX: here we always take away write permission;
+	 * if the user asked for a RWX mapping, we need to do something else here. */
+	mprotect((void*) r->addr, r->npages << LOG_MIN_PAGE_SIZE, PROT_READ | PROT_EXEC);
+
+	/* We can delete the vperm range now. */
+	return VPERM_A_DELETE;
+}
+void handle_sigsegv(int n)
+{
+	unsigned long *frame_base = __builtin_frame_address(0);
+	struct ibcs_sigframe *p_frame = (struct ibcs_sigframe *) (frame_base + 1);
+
+	/* Is this a segv we care about? That means the faulting IP is in our list of
+	 * deferred-executable mappings. */
+	uintptr_t ip = p_frame->uc.uc_mcontext.MC_REG_IP;
+	struct vperm_range *found = find_vperm_range((void*) ip);
+	if (!found) /* TODO: segue to normal segfault path */ abort();
+
+	// FIXME: do TLS swap?
+
+	/* CARE: what if multiple threads do this simultaneously?
+	 * We need to take the write (exclusive) lock..
+	 * If we fail to take the write lock and the vperm record for this
+	 * address range has gone away, it means the other thread trapped it for us.
+	 * If we just naively find and then remove, without locking, then
+	 * a concurrent SIGSEGV in another thread, segfaulting on the same range of
+	 * memory, would terminate the process.
+	 *
+	 * This one call does everything, because if nothing is found, no
+	 * action will be taken.
+	 *
+	 * FIXME: should be able to find out from ret whether anything was done
+	 * or not, I think, but the API doesn't currently allow this.
+	 */
+	/*int ret = */ with_vperm_range_exclusive((void*) ip, trap_at_vperm_range_cb, NULL);
+}

@@ -18,6 +18,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <dirent.h>
+// #include <stdatomic.h> // musl lacks this?! our old version, anyhow
 #include <string.h> // for memcpy
 #include "dso-meta.h" // includes link.h
 #include "systrap.h"
@@ -444,9 +445,16 @@ bootstrap_proto(mmap2)
 bootstrap_proto(mmap)
 {
 	tweak_flags(&flags);
-	if (!(prot & PROT_EXEC)) return mmap(addr, length, prot, flags, fd, offset);
+	if (!(prot & PROT_EXEC))
+	{
+		void *ret = mmap(addr, length, prot, flags, fd, offset);
+		if (ret != MAP_FAILED) replace_vperms_over(ret, (uintptr_t)ret + length, /* drop 'em */ -1);
+		return ret;
+	}
 	// else...
 	// always map writable, non-executable
+	// FIXME: now that we defer the rewriting, this feels dangerous... should really
+	// leave out PROT_WRITE, then re-mprotect when we're doing the rewrite
 	int temporary_prot = (prot | PROT_WRITE | PROT_READ) & ~PROT_EXEC;
 	void *mapping = (void*) mmap(addr, length, temporary_prot, flags, fd, offset);
 #endif
@@ -481,106 +489,11 @@ bootstrap_proto(mmap)
 	 * we're going to do the 'virtual R|X mappings' trick. */
 	if (mapping != MAP_FAILED)
 	{
-		ElfW(Ehdr) ehdr;
-		ssize_t nread;
-		uintptr_t inferred_vaddr;
-		/* OK, we've mapped something. */
-		if (fd == -1) goto no_file;
-		// by the way, what's the filename?
-		char buf[PROC_BUF_SZ(PID_MAX_LIMIT, INT_MAX)];
-		int ret = snprintf(buf, sizeof buf, "/proc/%d/fd/%d", getpid(), fd);
-		char buf2[/*PATH_MAX*/ 4096];
-		if (ret > 0)
-		{
-			ret = readlink(buf, buf2, sizeof buf2);
-			if (ret > 0 && ret < sizeof buf2)
-			{ buf2[ret] = '\0'; ret = 0; /* success */ }
-		} else ret = 1; // failed
-		const char *filename = (ret == 0) ? buf2 : "(unknown file)";
-		nread = pread(fd, &ehdr, sizeof ehdr, 0);
-		if (nread != sizeof ehdr) goto fail;
-		if (0 == memcmp(&ehdr, "\177ELF", 4))
-		{
-			ElfW(Shdr) shdrs[ehdr.e_shnum];
-			ElfW(Phdr) *matched = NULL;
-			_Bool match_is_unique = 1;
-			for (unsigned i = 0; i < ehdr.e_shnum; ++i)
-			{
-				nread = pread(fd, &shdrs[i], sizeof shdrs[i],
-					ehdr.e_shoff + i*ehdr.e_shentsize);
-				if (nread != sizeof shdrs[i]) goto fail;
-			}
-			ElfW(Phdr) phdrs[ehdr.e_phnum];
-			for (unsigned i = 0; i < ehdr.e_phnum; ++i)
-			{
-				nread = pread(fd, &phdrs[i], sizeof phdrs[i],
-					ehdr.e_phoff + i*ehdr.e_phentsize);
-				if (nread != sizeof phdrs[i]) goto fail;
-			}
-			for (ElfW(Phdr) *p = &phdrs[0]; p < &phdrs[ehdr.e_phnum]; ++p)
-			{
-				if (p->p_type != PT_LOAD) continue;
-				_Bool offset_matches = ((ROUND_DOWN(p->p_offset, page_size)) == offset);
-				unsigned offset_delta = p->p_offset - ROUND_DOWN(p->p_offset, page_size);
-				unsigned long vmemsz = ROUND_UP(p->p_memsz + offset_delta, page_size);
-				_Bool vsize_matches = (vmemsz == length);
-				if (offset_matches && (!matched || vsize_matches))
-				{
-					// what if there are two mappings with the same offset/pgoffset?
-					if (matched) match_is_unique = 0;
-					matched = p;
-				}
-			}
-			if (matched && !match_is_unique)
-			{
-				debug_printf(0, "strange ELF file being mapped");
-			}
-			if (matched)
-			{
-				inferred_vaddr = (uintptr_t) mapping - matched->p_vaddr;
-				// now we can trap the bugger
-				trap_one_executable_region_given_shdrs(mapping, (void*) mapping + length,
-					filename, /* is_writable */ 1, /* is_readable */ 1, /* preserve_exec */ 0,
-					shdrs, ehdr.e_shnum,
-					/* HMM. What's the load address of the file?
-					 * We can infer this if we can match the mapping to a phdr
-					 * of the file, but not otherwise.
-					 * In general, multiple phdrs may map the same parts of the
-					 * file. Can we really not get more insight into the ld.so's
-					 * state? I think SEGV is the only way. */
-					inferred_vaddr, set_default_trap, NULL);
-
-				// OK, done the trap so let's fix up the protection (always different)
-				ret = mprotect(mapping, length, prot);
-				if (ret != 0) goto fail;
-			}
-			else // !matched
-			{
-				// can't infer vaddr, so can't trap it. Proceed without executability
-				debug_printf(0, "Can't infer vaddr for mapping of %s offset 0x%llx", filename, (unsigned long long) offset);
-				goto ret;
-			}
-		} else goto not_elf;
-
-		goto ret; // success
-	no_file:
-		/* It's an anonymous mapping. Probably it's supposed
-		 * to be writable. We'll support this eventually. */
-		debug_printf(0, "Anonymous executable mapping at %p", mapping);
-		goto ret;
-	not_elf:
-		/* Well this is interesting. We've mapped part of a file and the
-		 * caller wanted it executable, but it's not an ELF file. */
-		debug_printf(0, "Failing non-ELF  executable file mapping at %p", mapping);
-		goto fail;
-	fail:
-		// fail the whole thing
-		munmap(mapping, length);
-		return MAP_FAILED;
+		//struct vperm_range *added = add_vperm_range(mapping, length, prot);
+		//if (!added) abort();
+		replace_vperms_over(mapping, (void*)((uintptr_t) mapping + length), prot);
 	}
-ret:
 	return mapping;
-
 } // end of mmap2 (32-bit) or mmap (otherwise)
 #if defined(__i386__)
 REPLACE(mmap2)
@@ -608,19 +521,37 @@ REPLACE(mmap)
     v(void *, addr, 0) sep    v(size_t, len, 1) sep    v(int, prot, 2)
 bootstrap_proto(mprotect)
 {
-	if (!((prot & PROT_WRITE) && (prot & PROT_EXEC)))
+	/* Check whether this intersects with any vperm range. We may have to
+	 * do surgery on them if it does. What's the right logic?
+	 * We could simply
+	 * - do the mprotect, dropping X
+	 * - delete existing vperms over any intersecting range
+	 * - set the X-including vperm over the affected range.
+	 * I think this works?! */
+	int ret;
+	if (!(prot & PROT_EXEC))
 	{
-		return mprotect(addr, len, prot);
+		// not executable
+		ret = mprotect(addr, len, prot);
+		if (ret != 0) return ret; // nothing changed
+
+		replace_vperms_over(addr, (void*)((uintptr_t) addr + len), /* drop 'em */ -1);
+		return ret;
 	}
-	/* We ideally want to assume that runt-reflection works here. But that might
-	 * not be the case if the ld.so does a PROT_NONE mapping and then mprotects
-	 * each segment appropriately. Unlike mmap(), we don't have the fd, so we
-	 * are in even less of a position to guess our way to the section headers. */
-	// FIXME
-	return mprotect(addr, len, prot);
+	// so now it's definitely executable...
+	// if the caller has asked for both writable and executable... that's not supported yet.
+	if (prot & PROT_WRITE) abort();
+
+	/* Defer adding the execute permission until our segfault handler. */
+	ret = mprotect(addr, len, prot & ~PROT_EXEC);
+	if (ret != 0) return ret;
+	replace_vperms_over(addr, (void*)((uintptr_t) addr + len), prot);
+	return ret;
 }
 REPLACE(mprotect)
 
+#if 0
+/* mremap doesn't change permissions, so I think we don't need to intercept it? */
 #define mremap_ret_t void *
 #define mremap_args(v, sep) \
     v(void *, old_address, 0) sep   v(size_t, old_size, 1) sep \
@@ -628,7 +559,7 @@ REPLACE(mprotect)
     v(void *, new_address, 4)
 bootstrap_proto(mremap)
 {
-	if (!((flags & PROT_WRITE) && (flags & PROT_EXEC)))
+	if (!((flags & PROT_WRITE) && (flags & PROT_EXEC))) // XXX: these are not real mremap flags!!!
 	{
 		return mremap(old_address, old_size, new_size, flags, new_address);
 	}
@@ -636,13 +567,17 @@ bootstrap_proto(mremap)
 	return mremap(old_address, old_size, new_size, flags & ~PROT_EXEC, new_address);
 }
 REPLACE(mremap)
+#endif
 
 #define munmap_ret_t int
 #define munmap_args(v, sep) \
     v(void *, addr, 0) sep   v(size_t, length, 1)
 bootstrap_proto(munmap)
 {
-	return munmap(addr, length);
+	int ret = munmap(addr, length);
+	/* If we have virtual permissions for the unmapped area, delete them. */
+	if (ret == 0) replace_vperms_over(addr, (void*)((uintptr_t) addr + length), -1);
+	return ret;
 }
 REPLACE(munmap)
 

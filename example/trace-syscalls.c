@@ -234,7 +234,44 @@ void start_tracing(ElfW(auxv_t) *p_auxv_start, _Bool apply_replacements, void *a
 	 * something about TLS.
 	 */
 	create_fake_vdso((ElfW(auxv_t) *) p_auxv_start); // creates in already-trapped form
+	/* XXX: for chain loading, perhaps I don't want this, but instead:
+	 *   install_sigsegv_handler();
+	 *   trap_ldso_text();
+	 * ... and then do all other trapping lazily?
+	 * We should have librunt metadata for all mapped libraries, including shdrs.
+	 * Ideally we'd also take the segv from the ld.so, but baby steps.
+	 */
+#define LAZY_TRAPPING
+#if defined(CHAIN_LOADER) && defined(LAZY_TRAPPING)
+	/* Any executable memory mapping will initially get "deferred", meaning it
+	 * is made without executable permission. We wait for a SIGSEGV to come in
+	 * and then do our decode-and-trap handling.  */
+	install_sigsegv_handler();
+	//trap_ldso_text();
+	// at this stage, the only mappings we've made are the ld.so's and ours, so this works
 	trap_all_mappings(); // XXX: use this to trap the fake vdso too; have just "copy_vdso(...)"?
+	// or to do it more precisely, how do we get the inferior text segment?
+	// we need an extra arg threaded through...
+#if 0
+	struct chain_load_ctxt *cc = arg;
+	assert(cc);
+	ElfW(Phdr) *loader_phdrs = (void*) cc->load->loadee_info->phdrs_addr;
+	for (unsigned i = 0; i < cc->load.ehdr->e_phnum; ++i)
+	{
+		// if this is executable, then...
+		trap_one_executable_region_given_shdrs(
+			cc->load->loadee_info->load_addr + loader_phdrs[i].p_vaddr,
+			cc->load->loadee_info->load_addr + loader_phdrs[i].p_vaddr + loader_phdrs[i].p_memsz,
+			/* filename */ cc->load->loadee_path, /* is_writable */ 0, /* is_readable */ 1, /* preserve_exec */ 1,
+			// XXX: getting section headers is tricky and why I have not finished this bit of code yet
+			fm ? fm->shdrs : NULL, fm ? fm->ehdr->e_shnum : 0, fm ? fm->l->l_addr : 0,
+			/* set_trap */ set_default_trap, /*set_trap_arg*/ NULL);
+	}
+#endif
+
+#else
+	trap_all_mappings(); // XXX: use this to trap the fake vdso too; have just "copy_vdso(...)"?
+#endif
 #define USE_LCALL
 #ifdef USE_LCALL
 	install_descriptor();
