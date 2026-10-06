@@ -137,6 +137,7 @@ __raw_" #generic_fnname ":\n\
     mov %r11, %rsi \n\
     # Now we're ready to do the call, modulo stack-alignment. We need to remember\n\
     # the amount we pad the stack by, using our callee-save register. \n\
+    mov %rsp, %r12    \n\
     and $0xf, %r12    # ... since %rbp is our only available SysV-callee-saved register! \n\
     sub %r12, %rsp    # align stack to 16 bytes \n\
     # BUT WAIT -- the generic syscall needs to know the original %rsp somehow \n\
@@ -189,5 +190,45 @@ __withfxsave_" #extusing_fnname ":\n\
 #define WRAP_IN_FXSAVE(extusing_fnname)   /* FIXME: i386 version */
 #endif /* __x86_64__ */
 
+#define MAX_VPERM_RANGES 128
+#if 0
+struct vperm_range
+{
+	volatile _Atomic void *addr;
+	size_t length;
+	int prot;
+};
+#endif
+struct vperm_range
+{
+	unsigned char      perms:2;      // interpretation is private to vperm.c
+	unsigned short     npages:14;
+#if defined(__x86_64__)
+	unsigned long long addr:48;      // could spare one more bit here, but check for bad perf (TODO)
+#elif defined(__i386__)
+	unsigned long addr; // FIXME: padding / field ordering is messed-up here on i386
+#else
+#error "Unsupported architecture"
+#endif
+};
+#define VPERM_NPAGES_MAX ((1ul<<14) - 1)
+extern struct vperm_range
+vperm_ranges[MAX_VPERM_RANGES] __attribute__((visibility("hidden")));
+extern unsigned vperm_ranges_nused __attribute__((visibility("hidden")));
+struct vperm_range *add_vperm_range(void *addr, size_t len, int prot) __attribute__((visibility("hidden")));
+struct vperm_range *find_vperm_range(void *addr) __attribute__((visibility("hidden")));
+struct vperm_range *find_first_vperm_range_in(void *begin, void *end) __attribute__((visibility("hidden")));
+int compare_vperm_ranges(const void *m1_as_void, const void *m2_as_void) __attribute__((visibility("hidden")));
+void replace_vperms_over(void *begin, void *end, int prot) __attribute__((visibility("hidden")));
+//enum vperm_perms vperms_from_prot(int prot) __attribute__((visibility("hidden")));
+int prot_from_vperms(int perms) __attribute__((visibility("hidden")));
+typedef int vperm_action_cb(struct vperm_range *r, void *arg);
+enum vperm_range_action
+{
+	VPERM_A_NOTHING,
+	VPERM_A_DELETE
+};
+int with_vperm_range_exclusive(void *addr, vperm_action_cb *cb, void *cb_arg) __attribute__((visibility("hidden")));
+int with_vperm_range_ro(void *addr, vperm_action_cb *cb, void *cb_arg) __attribute__((visibility("hidden")));
 
 #endif
