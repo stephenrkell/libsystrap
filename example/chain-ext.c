@@ -12,6 +12,7 @@
 #pragma GCC diagnostic pop
 
 #include <fcntl.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <sys/mman.h>
 #include <string.h> // for memcpy
@@ -29,7 +30,7 @@ void __attribute__((visibility("protected")))
 __trace_syscalls_post_handling(struct generic_syscall *gsp, long ret);
 
 static struct link_map temporary_link_map = {
-	.l_name = "",
+	.l_name = "", /* XXX: set the name to something sensible? Do we want to "be the executable"? */
 	.l_ld = &_DYNAMIC[0]
 };
 extern int _start;
@@ -125,13 +126,85 @@ struct file_metadata *__wrap___runt_files_metadata_by_addr(void *addr)
 	{
 		return &temporary_file_metadata;
 	}
-	struct r_debug *r = dt_debug ? dt_debug->d_un.d_ptr : find_r_debug();
+	struct r_debug *r = dt_debug ? (struct r_debug *) dt_debug->d_un.d_ptr : find_r_debug();
 	if (r->r_map == &temporary_link_map) return NULL; // too early to safely call librunt
 	return __real___runt_files_metadata_by_addr(addr);
 }
 
 // we have another special way to die
 #define die(s, ...) do { debug_printf(0, s , ##__VA_ARGS__); abort(); } while(0)
+
+#ifdef CHAIN_LOADER
+/* If we're not only chaining but also wrapping around, then we should grab
+ * a pointer to our own link map. This is used e.g. in bootstrap.c to avoid
+ * the slow path for "knot-tying" mappings. */
+struct link_map *wraparound_link_map __attribute__((visibility("hidden")));
+/*  */
+__attribute__((constructor))
+static void init_wraparound(void)
+{
+	/* wraparound_link_map = dlopen(our_canonical_loader_path, RTLD_NOW|RTLD_NOLOAD); */
+	/* Calling dlopen in a constructor is a dicey thing to do, in my
+	 * experience with glibc's ld.so. Let's use fakery instead. */
+	wraparound_link_map = get_highest_loaded_object_below(&wraparound_link_map);
+	assert(wraparound_link_map);
+	assert(0 == strcmp(wraparound_link_map->l_name, our_canonical_loader_path)
+			|| 0 == strcmp(wraparound_link_map->l_name, our_absolute_loader_path));
+}
+#endif
+
+const char *our_loader_path __attribute__((visibility("hidden")));
+const char *our_absolute_loader_path __attribute__((visibility("hidden")));
+const char *our_canonical_loader_path __attribute__((visibility("hidden")));
+__attribute__((destructor))
+static void deinit_loader_path(void)
+{
+	if (our_loader_path[0] != '/') free(our_absolute_loader_path);
+	free(our_canonical_loader_path);
+}
+
+static void print_auxv(FILE *stream, ElfW(auxv_t) *p_auxv)
+{
+	struct auxv_limits lims = get_auxv_limits(p_auxv);
+	
+	fprintf(stream, "argcount: %d at %p\n", *lims.p_argcount, lims.p_argcount);
+	fprintf(stream, "asciiz: %p to %p (%lu bytes)\n", lims.asciiz_start, lims.asciiz_end,
+		(unsigned long) (lims.asciiz_end - lims.asciiz_start));
+	
+	fprintf(stream, "args:\n");
+	assert(lims.arg_vector_terminator == lims.arg_vector_start + *lims.p_argcount);
+	for (int i = 0; i < *lims.p_argcount; ++i)
+	{
+		fprintf(stream, "[%03d] (%p) %s\n", i, lims.arg_vector_start[i], lims.arg_vector_start[i]);
+	}
+	fprintf(stream, "\nenv:\n");
+	unsigned i = 0; // new 'i'
+	char **p = (char**) lims.env_vector_start;
+	for (; p != lims.env_vector_terminator + 1; ++i, ++p)
+	{
+		fprintf(stream, "[%03d] (%p) %s\n", i, *p, *p);
+	}
+	assert(p == (char**) lims.env_vector_terminator + 1);
+	ElfW(auxv_t) *p_e = lims.aux_vector_start;
+	fprintf(stream, "\nauxv:\n");
+	i = 0;
+	for (; p_e!= lims.aux_vector_terminator + 1; ++i, ++p_e)
+	{
+#define expand_auxv_string_tags(tag) || p_e->a_type == tag
+		if (0 auxv_string_tags(expand_auxv_string_tags))
+		{
+			fprintf(stream, "[%03d] %08x : (%p) \"%s\" %swithin asciiz limit %p\n", i, (unsigned) p_e->a_type,
+				(char*) p_e->a_un.a_val, (unsigned long) p_e->a_un.a_val,
+				((char*) p_e->a_un.a_val >= lims.asciiz_start && 
+					(char*) p_e->a_un.a_val < lims.asciiz_end) ? "" : "not ", lims.asciiz_end);
+		}
+		else
+		{
+			fprintf(stream, "[%03d] %08x : %lx\n", i, (unsigned) p_e->a_type,
+				(long) p_e->a_un.a_val);
+		}
+	}
+}
 
 void __hook_pre_enter(struct chain_load_ctxt *cc)
 {
@@ -160,6 +233,28 @@ void __hook_pre_enter(struct chain_load_ctxt *cc)
 		cc->our_dt_debug);
 	close(inferior_fd);
 
+	/* What string should serve as our "canonical" path? If we were requested,
+	 * it should be the .interp string. If we were invoked, it should be an
+	 * absolutified-if-relative version of the invoked path. We free this in the
+	 * destructor above. */
+	our_loader_path = get_loader_path(cc->load);
+	if (our_loader_path[0] == '/')
+	{
+		our_absolute_loader_path = our_loader_path;
+	}
+	else
+	{
+		char *cwd = get_current_dir_name();
+		int ret = asprintf(&our_absolute_loader_path, "%s/%s", cwd,
+			our_loader_path + strspn(our_loader_path, "./"));
+		assert(ret > 0);
+		assert(our_absolute_loader_path);
+		assert(our_absolute_loader_path[0] == '/');
+		free(cwd);
+	}
+	our_canonical_loader_path = realpath(our_absolute_loader_path, NULL);
+	if (!our_canonical_loader_path) abort();
+
 	// FIXME: libsystrap isn't being init'd, so force it
 	__libsystrap_force_init();
 
@@ -168,13 +263,116 @@ void __hook_pre_enter(struct chain_load_ctxt *cc)
 	// this is undoing the effect of set_temporary_link_map
 	clear_temporary_link_map(cc->our_dt_debug);
 
+	/* Tweak the environment. We want ourselves (canonically) to be the head of the 
+	 * LD_PRELOAD list. Two cases: there's no LD_PRELOAD in envp, or there
+	 * is. */
+	/* Now ensure we have an appropriate LD_PRELOAD in place. */
+	fprintf(stderr, "Initial auxv....\n");
+	fflush(stderr);
+	print_auxv(stderr, p_auxv);
+	struct auxv_limits limits = get_auxv_limits(p_auxv);
+	const char *equals_pos = NULL;
+	char **found_existing_ld_preload = environ_get_env_vector_ptr("LD_PRELOAD",
+		(char**) limits.env_vector_start, &equals_pos);
+	char *new_ld_preload_env_string;
+	unsigned env_vector_idx_to_update = -1;
+	void *new_auxv_block = NULL;
+	if (found_existing_ld_preload)
+	{
+		/* Does the found string already begin with us? If not, we need to make it so.
+		 * TODO: do an identity check on the file, because funky paths with '../' can
+		 * still fool us. */
+		const char *preload_str = equals_pos + 1;
+		size_t nbytes_first_word = strcspn(preload_str, ": "); /* matches glibc's logic */
+		if ((strlen(our_absolute_loader_path) == nbytes_first_word
+				&& 0 == strncmp(preload_str, our_absolute_loader_path, nbytes_first_word))
+		||  (strlen(our_canonical_loader_path) == nbytes_first_word
+				&& 0 == strncmp(preload_str, our_canonical_loader_path, nbytes_first_word)))
+		{
+			/* It's a match. We don't need to change anything. */
+			goto skip_rewrite_auxv;
+		}
+		/* Else we have an LD_PRELOAD string but it is not what we require. Make a
+		 * new one and fix up the vector entry with a pointer to the new string.
+		 * To allow us to create the string in temporary heap memory, we should use the
+		 * ability of copy_and_resize_auxv to add new string data as it copies, then update
+		 * the vector entry. */
+		env_vector_idx_to_update = found_existing_ld_preload - (char**) limits.env_vector_start;
+
+		int ret = asprintf(&new_ld_preload_env_string, "LD_PRELOAD=%s %s",
+				our_absolute_loader_path, preload_str);
+		assert(ret > 0);
+		/* XXX: another quirk is that if we leave the old LD_PRELOAD string in the asciiz,
+		 * quick-and-dirty methods that reflect on the environment by dumping these strings
+		 * will be led astray. Really we may want to completely repack the asciiz area. */
+	}
+	else
+	{
+		/* We need to add a new env vector entry, as well as the string data.*/
+		int ret = asprintf(&new_ld_preload_env_string, "LD_PRELOAD=%s", our_absolute_loader_path);
+	}
+
+	fprintf(stderr, "auxv after initial copy, adding/updating LD_PRELOAD (to \"%s\"):\n",
+		new_ld_preload_env_string);
+	size_t bytes = ((uintptr_t) limits.asciiz_end - (uintptr_t) limits.p_argcount)
+		 + /* how many new vector entries? */ sizeof (char*) * ((env_vector_idx_to_update == -1) ? 1 : 0)
+		 + /* how many new characters in asciiz? */ 1 + strlen(new_ld_preload_env_string)
+		 + 15 /* alignment hack: worst-case padding when doing 16-byte alignment */;
+	char *new_env[] = { new_ld_preload_env_string + 0 }; // may or may not be used
+	new_auxv_block = malloc(bytes);
+	struct auxv_copy_status status = copy_and_resize_auxv(new_auxv_block,
+		p_auxv,
+		&limits,
+		/* n entries incl terminator */ 1 + (limits.aux_vector_terminator - p_auxv),
+		/* additional_auxv_entries   */ NULL,
+		/* n_env_entries_incl_terminator */ 1 + (limits.env_vector_terminator - limits.env_vector_start)
+			+ ((env_vector_idx_to_update == -1) ? 1 : 0),
+		/* additional_env_entries */ new_env,
+		/* n_argv_entries_incl_terminator */ 1 + (limits.arg_vector_terminator - limits.arg_vector_start),
+		/* additional_argv_entries */ NULL,
+		/* total_bytes_at_dest */ bytes,
+		/* additional_asciiz_data */ new_ld_preload_env_string,
+		1u + strlen(new_ld_preload_env_string) /* just one string */
+	);
+	if (status.last_component_copied != AUXV_ASCIIZ)
+	{
+		/* This indicates an error. */
+		die("could not copy the auxv");
+	}
+	struct auxv_limits new_lims = get_auxv_limits(status.maybe_auxv);
+	assert(new_lims.p_argcount == new_auxv_block);
+	if (env_vector_idx_to_update != -1)
+	{
+		/* This means we didn't add a new env vector entry. So we must
+		 * update the old one. Or rather its new copy.
+		 * FIXME: this is a bit fragile. We assume our string has ended up
+		 * immediately after the "old asciiz's worth" of bytes. */
+		new_lims.env_vector_start[env_vector_idx_to_update] =
+				&new_lims.asciiz_start[limits.asciiz_end - limits.asciiz_start];
+	}
+	fflush(stderr);
+	print_auxv(stderr, status.maybe_auxv);
+	assert(environ_getenv("LD_PRELOAD", (char**) new_lims.env_vector_start));
+	assert(0 == strcmp(environ_getenv("LD_PRELOAD", (char**) new_lims.env_vector_start),
+		new_ld_preload_env_string + sizeof "LD_PRELOAD=" - 1 ));
+	free(new_ld_preload_env_string); // we allocated this only if creating a new LD_PRELOAD string
+skip_rewrite_auxv:
+	// now we have "new_auxv_block" on the malloc heap; XXX: use it!
+// We can't do a single memcpy, combining with low-stack below, because
+// (1) non-x86-64 platforms don't do this, and
+// (2) the copy above also added to the asciiz, whereas the one below wants
+//     not to move asciiz. So we are forced to do two copies.
+// We are also forced to allocate *some* storage that we do not free here,
+// because the asciiz has to live somewhere.
+
 	/* For the lcall instrumentation, we need to have a low stack.
 	 * Since we don't come back here, now is the time to create a new stack
 	 * and call the entry point with it.
 	 *
-	 * HACK: pick a low 8MB, mprotect it writeable, zero it, set rsp, go! 
+	 * HACK: pick a low 8MB, mprotect it writeable, zero it, set rsp, go!
+	 * We have already mapped some memory there, but perhaps not RW.
 	 */
-#if defined(__x86_64__)
+#if defined(__x86_64__) /* FIXME: something randomised and less arbitrary, + track unused <2GB space */
 #define LOW_STACK_TOP  0x71000000
 #define LOW_STACK_SIZE    8388608
 	mprotect((void*)(LOW_STACK_TOP - LOW_STACK_SIZE), LOW_STACK_SIZE, PROT_READ|PROT_WRITE);
@@ -182,16 +380,47 @@ void __hook_pre_enter(struct chain_load_ctxt *cc)
 	/* __real_enter will reset the stack pointer, so make sure we influence it. */
 	extern ElfW(auxv_t) *p_auxv;
 	extern void *sp_on_entry;
-	struct auxv_limits limits = get_auxv_limits(p_auxv);
+	assert((uintptr_t) sp_on_entry == (uintptr_t) limits.p_argcount);
 	/* We need to memcpy the initial stack, otherwise ld.so won't be able to get
-	 * its aux vector and whatnot. */
-	size_t memcpy_len = RELF_ROUND_UP_PTR_((uintptr_t) limits.asciiz_end, 16)
-		 - (uintptr_t) sp_on_entry;
-	void *new_sp_on_entry = (void*) LOW_STACK_TOP - memcpy_len;
-	memcpy(new_sp_on_entry, sp_on_entry, memcpy_len);
+	 * its aux vector and whatnot. We copy from the *end* of the asciiz block. */
+#define N_AUXV_ENTRIES (1 + (new_auxv_block ? (new_lims.aux_vector_terminator - status.maybe_auxv) \
+			                : (limits.aux_vector_terminator   - p_auxv)))
+#define N_ENV_ENTRIES (1 + (limits.env_vector_terminator - limits.env_vector_start) \
+			+ ((new_auxv_block && env_vector_idx_to_update == -1) ? 1 : 0))
+#define N_ARGV_ENTRIES (1 + (limits.arg_vector_terminator - limits.arg_vector_start))
+	/* Need to preserve 16-byte alignment */
+	size_t copy_len = //ROUND_UP_PTR(
+		sizeof (intptr_t) /* <-- argc */ +
+		sizeof (char*) * (N_ENV_ENTRIES) +
+		sizeof (char*) * (N_ARGV_ENTRIES) +
+		sizeof (ElfW(auxv_t)) * (N_AUXV_ENTRIES) +
+		/*((uintptr_t) limits.asciiz_end - (uintptr_t) limits.asciiz_start)*/ 0 // <-- don't copy asciiz here
+		/*, 16)*/;
+	void *new_sp_on_entry =  ROUND_DOWN_PTR(LOW_STACK_TOP - copy_len, 16); // <-- we need to preserve 16-byte alignment of the stack
+	//memcpy(new_sp_on_entry, sp_on_entry, memcpy_len);
+	struct auxv_copy_status final_copy_status = copy_and_resize_auxv((char*) new_sp_on_entry,
+		new_auxv_block ? status.maybe_auxv : p_auxv,
+		new_auxv_block ? &new_lims : &limits,
+		/* n entries incl terminator -- same */
+		N_AUXV_ENTRIES,
+		/* additional_auxv_entries   */ NULL,
+		/* n_env_entries_incl_terminator */ N_ENV_ENTRIES,
+		/* additional_env_entries */ NULL,
+		/* n_argv_entries_incl_terminator */ N_ARGV_ENTRIES,
+		/* additional_argv_entries */ NULL,
+		/* total_bytes_at_dest */ copy_len,
+		/* additional_asciiz_data */ NULL,
+		0
+	);
+	assert(final_copy_status.last_component_copied == AUXV_AUX_VECTOR); // asciiz should stay where it was!
 	debug_printf(0, "low stack: replacing rsp=%p with %p\n", sp_on_entry, new_sp_on_entry);
 	sp_on_entry = new_sp_on_entry;
+	/* XXX: how will the ld.so actually locate the auxv? I'm not sure we've done enough.
+	 * Also the return value of AUXV_ENV_VECTOR, above, does not seem right. */
 #endif
+	/* FIXME: we never free this! The asciiz we need is contained within.
+	 * Should we manage this another way? Probably, yes. */
+	//if (new_auxv_block) free(new_auxv_block);
 	// now we will proceed to the real entry point
 }
 

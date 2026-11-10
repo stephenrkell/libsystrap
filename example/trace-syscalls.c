@@ -338,10 +338,15 @@ void start_tracing(ElfW(auxv_t) *p_auxv_start, _Bool apply_replacements, void *a
 
 /* This constructor is used only by the preload library. For the
  * chain loader, the equivalent code is in chain-ext.c (which is called
- * from donald, as a wrapper of donald's enter() function). */
+ * from donald, as a wrapper of donald's enter() function). In fact
+ * we need this constructor to do nothing when linked in to the chain
+ * loader. We don't build two separate (with--DCHAIN_LOADER and without-).
+ * So for now a HACK: use the _begin symbol. */
 static void startup(int argc, char **argv, char **environ) __attribute__((constructor(101)));
 static void startup(int argc, char **argv, char **environ)
 {
+	extern char _begin[] __attribute__((weak));
+	if (&_begin) return;
 	/* We use musl as our libc. That means there are (up to) two libc instances
 	 * in the process! Before we do any libc calls, make sure musl's state
 	 * is initialized. We use librunt to get the env/arg values. */

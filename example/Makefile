@@ -142,6 +142,14 @@ CFLAGS += -DASSERT_FAIL_LINE_SIGNED
 PRELOAD_TARGETS := trace-syscalls.so
 LOADER_TARGETS := trace-syscalls-ld.so noop-syscalls-ld.so
 
+# force the object(s) containing preload symbols
+preload_symbols := dlopen dlclose dlerror dlsym dladdr dladdr1 dlvsym dlmopen dl_iterate_phdr
+LDFLAGS += -Wl,--version-script,version-script -Wl,-u,dlsym
+version-script:
+	printf '{\n  global:\n$(foreach v,$(preload_symbols),$(v);\n)\n\nlocal:\n    *;\n};' > $@ \
+              || { rm -f "$@"; false; }
+$(PRELOAD_TARGETS) $(LOADER_TARGETS): version-script
+
 syscall-names.o: syscall-macros.h
 # for syscall-macros.h
 CFLAGS += -I.
@@ -232,8 +240,8 @@ $(PRELOAD_TARGETS) $(LOADER_TARGETS): LDFLAGS += \
 # generate a map file, for debugging
 $(PRELOAD_TARGETS) $(LOADER_TARGETS): LDFLAGS += -Wl,-Map,$@.map
 # don't re-export symbols from any archives we link in
-$(PRELOAD_TARGETS) $(LOADER_TARGETS): LDFLAGS += \
-      -Wl,--exclude-libs=ALL
+$(PRELOAD_TARGETS): LDFLAGS += -Wl,--exclude-libs=ALL
+# ... loader targets now use a version script instead
 
 # To avoid clashing implementations of TLS,
 # we define our own, simpler __init_tp -- wrapping DOESN'T WORK...
@@ -258,8 +266,10 @@ $(LOADER_TARGETS): LDFLAGS += \
 
 $(LOADER_TARGETS): LDLIBS += -Bstatic \
   $(srcroot)/build/$(arch)/libsystrap.a \
-  $(LIBRUNT_DIR)/build/$(librunt_frag)-$(arch)/librunt_preload.a \
+  -Wl,-u,dlsym $(LIBRUNT_DIR)/build/$(librunt_frag)-$(arch)/librunt_preload.a \
+  dlmalloc.a \
   $(LIBC_A)
+
 
 trace-syscalls.o: CFLAGS += -DCHAIN_LOADER
 noop-syscalls.o: CFLAGS += -DNOOP_SYSCALL_ACTION -DDONALD_NAME=\"noop-syscalls-ld\" -DCHAIN_LOADER
@@ -267,13 +277,12 @@ noop-syscalls.o: trace-syscalls.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
 
 trace-syscalls.so: trace-syscalls.o
-$(PRELOAD_TARGETS): $(TRACER_OBJS) fake-tls.o dynamic-list $(srcroot)/build/$(arch)/libsystrap.a dlmalloc.a
+$(PRELOAD_TARGETS): $(TRACER_OBJS) fake-tls.o $(srcroot)/build/$(arch)/libsystrap.a dlmalloc.a
 	$(CC) -fuse-ld=gold \
 		-static-libgcc -shared -o "$@" \
-		$(filter-out dynamic-list,$(filter-out %.a,$+)) \
+		$(filter-out version-script,$(filter-out %.a,$+)) \
 		$(LDFLAGS) $(LDLIBS) \
-		-Wl,-soname=$@ \
-		-Wl,--dynamic-list,dynamic-list
+		-Wl,-soname=$@
 
 # ask for a spare .dynamic slot
 $(LOADER_TARGETS): LDFLAGS += -Wl,--spare-dynamic-tags=5
@@ -282,29 +291,41 @@ $(LDSO_OBJS) trace-syscalls.o: CFLAGS += -DDONALD_NAME=\"trace-syscalls-ld\"
 $(LDSO_OBJS): CFLAGS += -DCHAIN_LOADER
 $(CHAIN_LOADER_OBJS): CFLAGS += -DCHAIN_LOADER
 
+# don't use standard relocation sections... the dynamic tags we need are special
+# XXX: this controls what premain.o looks for, but how do we get these in .dynamic?
+include $(srcroot)/example/wraparound.h.mk
+premain.o: wraparound.h
+premain.o: CFLAGS += -include wraparound.h \
+  -DRELA_DT_VALUE=$(DT_BOOTSTRAP_RELA) \
+  -DRELASZ_DT_VALUE=$(DT_BOOTSTRAP_RELASZ) \
+  -DRELAENT_DT_VALUE=$(DT_BOOTSTRAP_RELAENT)
+
 DYNAPPEND ?= $(shell which $${ELFTIN:+$${ELFTIN}/dynappend/}dynappend)
+DYNSUBST ?= $(shell which $${ELFTIN:+$${ELFTIN}/dynsubst/}dynsubst)
 ifeq ($(DYNAPPEND),)
 $(warning No DYNAPPEND or ELFTIN, so trace-syscalls-ld.so will not support debugging properly (ELFTIN is $(ELFTIN)).)
 endif
+ifeq ($(DYNSUBST),)
+$(error No DYNSUBST or ELFTIN, so can't build a wraparound loader.)
+endif
 # FIXME: localize all global symbols except maybe _start?
+export SHELL := /bin/bash             # for '<<<'
+.DELETE_ON_ERROR:                     # don't leave unfinished built files lying around
 trace-syscalls-ld.so: trace-syscalls.o
 noop-syscalls-ld.so: noop-syscalls.o
-$(LOADER_TARGETS): trace-syscalls-ld.lds $(LDSO_OBJS) $(CHAIN_LOADER_OBJS) $(TRACER_OBJS) dynamic-list $(srcroot)/build/$(arch)/libsystrap.a
+$(LOADER_TARGETS): trace-syscalls-ld.lds $(LDSO_OBJS) $(CHAIN_LOADER_OBJS) $(TRACER_OBJS) $(srcroot)/build/$(arch)/libsystrap.a
 	$(CC) $(CFLAGS) -fuse-ld=bfd \
             -Bsymbolic -nostdlib -nostartfiles -static-libgcc -shared -o "$@" \
-            $(filter-out dynamic-list,$(filter-out %.lds,$(filter-out %.a,$+))) \
+            $(filter-out version-script,$(filter-out %.lds,$(filter-out %.a,$+))) \
             $(LDFLAGS) $(LDLIBS) -lgcc -Wl,-Bsymbolic \
-            -T $(filter %.lds,$+) -Wl,-soname=trace-syscalls-ld.so \
-            -Wl,--dynamic-list,dynamic-list
+            -T $(filter %.lds,$+) -Wl,-soname=trace-syscalls-ld.so
 	if [ -n "$(DYNAPPEND)" ]; then $(DYNAPPEND) $@ 21 ; fi # DT_DYNAMIC
-
-# There is no way to make _DYNAMIC a dynamic symbol.
-# A bit of a HACK, but we look for _init and _fini to find our own load address
-# (in find_r_debug()), so try to export them.
-# XXX: I think this does nothing, because dynamic-list does not affect the dynamic symbol
-# table for shared libraries.
-dynamic-list:
-	printf '{ etext; _init; _fini; };\n' >$@ || (rm -f $@; false)
+	$(DYNSUBST) $@ $$( awk "BEGIN { print `cpp -include /usr/include/elf.h -o - <<<'DT_RELA'    | tail -n1` ;}" ) $$( awk "BEGIN { print $(DT_BOOTSTRAP_RELA); }" ) || \
+	$(DYNSUBST) $@ $$( awk "BEGIN { print `cpp -include /usr/include/elf.h -o - <<<'DT_REL'     | tail -n1` ;}" ) $$( awk "BEGIN { print $(DT_BOOTSTRAP_REL); }" )
+	$(DYNSUBST) $@ $$( awk "BEGIN { print `cpp -include /usr/include/elf.h -o - <<<'DT_RELASZ'  | tail -n1` ;}" ) $$( awk "BEGIN { print $(DT_BOOTSTRAP_RELASZ); }" ) || \
+	$(DYNSUBST) $@ $$( awk "BEGIN { print `cpp -include /usr/include/elf.h -o - <<<'DT_RELSZ'   | tail -n1` ;}" ) $$( awk "BEGIN { print $(DT_BOOTSTRAP_RELSZ); }" )
+	$(DYNSUBST) $@ $$( awk "BEGIN { print `cpp -include /usr/include/elf.h -o - <<<'DT_RELAENT' | tail -n1` ;}" ) $$( awk "BEGIN { print $(DT_BOOTSTRAP_RELAENT); }" ) || \
+	$(DYNSUBST) $@ $$( awk "BEGIN { print `cpp -include /usr/include/elf.h -o - <<<'DT_RELENT'  | tail -n1` ;}" ) $$( awk "BEGIN { print $(DT_BOOTSTRAP_RELENT); }" )
 
 trace-syscalls-ld.lds: $(shell which ld) $(THIS_MAKEFILE)
 	USE_LD=ld.bfd $(CC) $(CFLAGS) -fuse-ld=bfd -nostdlib -nostartfiles -shared \
@@ -321,7 +342,6 @@ clean:
 	rm -f $(ALL_OBJS) noop-syscalls.o dlmalloc.a
 	rm -f $(patsubst %.o,%.d,$(ALL_OBJS) noop-syscalls.o) noop-syscalls.o
 	rm -f syscall-macros.h $(SYS)-syscall-macros.h
-	rm -f dynamic-list
 	rm -f trace-syscalls-ld.lds
 	rm -f trace-syscalls-ld.so.map
 	rm -f trace-syscalls.so.map

@@ -538,7 +538,16 @@ static int trap_at_vperm_range_cb(struct vperm_range *r, void *arg)
 {
 	/* Can we get the trapping address as an ELF file with shdrs, librunt-wise? */
 	struct file_metadata *fm = __runt_files_metadata_by_addr((void*) r->addr);
-	assert(fm); // we only defer mappings... or do we? XXX: no, we don't filter for this
+	if (!fm)
+	{
+		/* It might be that we're doing dlopen of the relevant code Right Now,
+		 * so librunt hasn't had the notification yet. If we fish out a link map,
+		 * it can still add the metadata for us. Let's try that. */
+		struct link_map *l = get_highest_loaded_object_below((void*) r->addr);
+		if (l) fm = __runt_files_get_or_create_metadata(l);
+		assert(fm);
+		if (!fm) abort();
+	}
 	/* Just what trap_one_mapping would have done */
 	trap_one_executable_region_given_shdrs(
 		(unsigned char *) r->addr, (unsigned char *)((uintptr_t) r->addr + (r->npages << LOG_MIN_PAGE_SIZE)),
@@ -562,6 +571,13 @@ void handle_sigsegv(int n)
 	/* Is this a segv we care about? That means the faulting IP is in our list of
 	 * deferred-executable mappings. */
 	uintptr_t ip = p_frame->uc.uc_mcontext.MC_REG_IP;
+	/* FIXME: taking the lock here will deadlock if we are segfaulting inside
+	 * a context where we already hold the exclusive write lock. That means our
+	 * code (e.g. in librunt) has a bug. It's still not ideal, though.
+	 * We COULD detect the case where it's our pid that has the exclusive lock.
+	 * We could do this by storing the negation of the pid/tid in the lock field,
+	 * instead of -1. I *think* this is OK because Linux only uses the top half
+	 * of the range of pid_t, which is signed. */
 	struct vperm_range *found = find_vperm_range((void*) ip);
 	if (!found) /* TODO: segue to normal segfault path */ abort();
 

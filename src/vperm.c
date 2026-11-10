@@ -22,7 +22,24 @@ enum vperm_perms
 
 struct vperm_range vperm_ranges[MAX_VPERM_RANGES] __attribute__((visibility("hidden")));
 unsigned vperm_ranges_nused __attribute__((visibility("hidden")));
-
+static pid_t mytid(void)
+{
+	/* PROBLEM: can't use thread-locals in here. :-(  I did have
+	 * this working at some point, I'm sure? Using the fs/gs swap.
+	 * Maybe that is only on i386? That needs it for the sysinfo slot.
+	 * There is a subtle problem about fs/gs swapping across signal
+	 * handlers, which I think I never addressed. A signal handler
+	 * that accesses TLS probably gets the wrong one. We need to
+	 * wrap any signal handler with a fs/gs swapper, much like the
+	 * lazypoline paper did. */
+#if 0
+	static _Thread_local pid_t tid;
+	if (!tid) tid = raw_gettid();
+	return tid;
+#else
+	return -1;
+#endif
+}
 // Need a RW multi-reader single-writer lock, and don't want to rely on pthreads
 _Atomic int rwlock; // read-locked: 1..n; unlocked 0; write-locked: -1
 #define TAKE_LOCK_R() \
@@ -35,7 +52,7 @@ _Atomic int rwlock; // read-locked: 1..n; unlocked 0; write-locked: -1
 
 #define TAKE_LOCK_W() \
 	({ int seen; _Bool success = 0; do { seen = rwlock; if (seen != 0) sched_yield(); else \
-		success = __sync_bool_compare_and_swap (&rwlock, seen, -1); } while (!success); success; })
+		success = __sync_bool_compare_and_swap (&rwlock, seen, -mytid()); } while (!success); success; })
 
 #define RELEASE_LOCK_W() \
 	({  __atomic_store_n(&rwlock, 0, __ATOMIC_RELEASE); 1; })

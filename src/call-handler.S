@@ -1,6 +1,9 @@
 #include <sys/syscall.h>
 #include "systrap-asm.h"
 
+# We don't need an executable stack, so tell the toolchain.
+.section .note.GNU-stack,"",@progbits
+
 .text
 .globl __systrap_call_handler_with_retaddr_restore
 __systrap_call_handler_with_retaddr_restore:
