@@ -190,15 +190,7 @@ __withfxsave_" #extusing_fnname ":\n\
 #define WRAP_IN_FXSAVE(extusing_fnname)   /* FIXME: i386 version */
 #endif /* __x86_64__ */
 
-#define MAX_VPERM_RANGES 128
-#if 0
-struct vperm_range
-{
-	volatile _Atomic void *addr;
-	size_t length;
-	int prot;
-};
-#endif
+#define MAX_VPERM_RANGES 512
 struct vperm_range
 {
 	unsigned char      perms:2;      // interpretation is private to vperm.c
