@@ -10,6 +10,7 @@
 #include "dso-meta.h"
 #include "relf.h"
 #include "systrap.h"
+#define XED_ENCODER
 #include <xed/xed-interface.h>
 
 /* How do we handle the vDSO?
@@ -57,7 +58,8 @@ EH_FRAME off 0x0418 vaddr 0x0418 align 2**2  filesz 0x0024 memsz 0x0024 flags r-
 
 extern _Bool xed_done_init;
 static void copy_text_section(unsigned char *dest, const unsigned char *src, size_t sz,
-	ElfW(Shdr) *the_shdr, ElfW(Shdr) *all_shdrs, unsigned shentsz)
+	ElfW(Shdr) *the_shdr, ElfW(Shdr) *all_shdrs, unsigned shentsz,
+	ElfW(Addr) min_vaddr, ElfW(Addr) max_vaddr)
 {
 	/* We walk the instructions one at a time. Any that has a
 	 * memory operand outside the text section is considered
@@ -123,11 +125,41 @@ static void copy_text_section(unsigned char *dest, const unsigned char *src, siz
 					{
 						xed_int64_t disp = xed_decoded_inst_get_memory_displacement(
 							&xedd, /* mem_idx */ 0);
-						unsigned int memoplen = xed_decoded_inst_get_memory_operand_length(
+						unsigned int memdispw = xed_decoded_inst_get_memory_displacement_width(
 							&xedd, 0);
+						/* Does this displacement land us within the object, or outside it? */
+						intptr_t starting_vaddr = the_shdr->sh_addr + (inpos + len - src);
+						intptr_t target_vaddr = starting_vaddr + disp;
+						_Bool outside = target_vaddr < min_vaddr || target_vaddr >= max_vaddr;
 						/*debug_printf(0*/ fprintf(stderr,
-							"We saw an instruction at vdso vaddr %p with len %u displacement %lld memoplen %u\n",
-							(inpos - src) + the_shdr->sh_addr, len, (long long) disp, memoplen);
+							"We saw an instruction at vdso vaddr %p with len %u displacement %lld memdispw %u tgt %lx; we think it lands %s vDSO\n",
+							(inpos - src) + the_shdr->sh_addr, len, (long long) disp, memdispw, target_vaddr,
+							outside ? "outside" : "inside"
+							);
+						if (outside)
+						{
+							/* We need to re-encode the instruction. Can xed do this for us?
+							 * Yes. The encoder request type is a typedef of the decoded inst type,
+							 * so we can go straight from decode to re-encode with changes. */
+							xed_int64_t new_disp = disp + (src - dest);
+							xed_encoder_request_init_from_decode(&xedd);
+							xed_encoder_request_set_memory_displacement(&xedd, new_disp, memdispw);
+							unsigned encoded_len = 0;
+							xed_error_enum_t err = xed_encode(&xedd, (xed_uint8_t*) outpos, end - outpos,
+								&encoded_len);
+							if (err == XED_ERROR_NONE)
+							{
+								assert(encoded_len == len);
+								fprintf(stderr, "Successfully re-encoded with new displacement %lx\n",
+									(long) new_disp);
+								inpos += len;
+								outpos += encoded_len;
+								continue;
+							}
+							// else fall through to copying verbatim
+							fprintf(stderr, "Failed to encode with new displacement %lx (error %d), so falling through\n",
+								(long) new_disp, (int) err);
+						}
 					}
 					goto copy_verbatim; // FIXME
 				} break;
@@ -175,7 +207,8 @@ static void copy_other_section(void *dest, void *src, size_t sz,
 {
 	memcpy(dest, src, sz);
 }
-static void copy_and_trap_vdso_elf(void *dest, void *src, size_t sz)
+static void copy_and_trap_vdso_elf(void *dest, void *src, size_t sz,
+	ElfW(Addr) min_vaddr, ElfW(Addr) max_vaddr)
 {
 	/* In an ELF, everything is either an ELF header,
 	 * program header, section header or section. */
@@ -193,7 +226,7 @@ static void copy_and_trap_vdso_elf(void *dest, void *src, size_t sz)
 		if (src_shdr->sh_flags & SHF_EXECINSTR)
 		{
 			copy_text_section(dest_addr, src_addr, src_shdr->sh_size, src_shdr,
-				src_shdrs, src_ehdr->e_shentsize);
+				src_shdrs, src_ehdr->e_shentsize, min_vaddr, max_vaddr);
 			trap_one_instruction_range(dest_addr, dest_addr + src_shdr->sh_size,
 				1, 1, 0, set_default_trap, NULL);
 		}
@@ -282,13 +315,18 @@ void create_fake_vdso(ElfW(auxv_t) *auxv)
 				int ret = ftruncate(fd, mapping_sz);
 				if (ret == 0)
 				{
-					mapping = mmap(NULL, mapping_sz, PROT_READ|PROT_WRITE, MAP_SHARED,
+					/* HACK: need to constrain the mapping s.t. it is close to the real vDSO.
+					 * FIXME: could we map over the real vDSO? check whether Linux permits this. */
+					mapping = mmap(
+						(uintptr_t) p->a_un.a_val + 2 * MIN_PAGE_SIZE,
+						mapping_sz, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_FIXED_NOREPLACE,
 						fd, 0);
 					if (mapping != MAP_FAILED)
 					{
 						orig_vdso_ehdr_address = p->a_un.a_val;
 						fake_vdso_ehdr_address = (uintptr_t) mapping;
 					}
+					else abort();
 				}
 				close(fd);
 			} break;
@@ -311,23 +349,30 @@ void create_fake_vdso(ElfW(auxv_t) *auxv)
 	if (mapping != MAP_FAILED)
 	{
 		assert(saw_at_sysinfo_ehdr_entry);
-		copy_and_trap_vdso_elf(mapping, (void*) saw_at_sysinfo_ehdr_entry->a_un.a_val, mapping_sz);
-		int ret __attribute__((unused)) = mprotect(mapping, mapping_sz, PROT_READ|PROT_EXEC);
-		// swap in the fake vdso
-		saw_at_sysinfo_ehdr_entry->a_un.a_val = (uintptr_t) mapping;
-		assert(ret == 0);
-	}
-	if (!fake_sysinfo && saw_at_sysinfo_ehdr_entry)
-	{
-		/* Let's try to recover fake_sysinfo from the vdso's symtab. */
+		/* Let's walk the headers of the ELF file, to help us create our fake one. */
+		/* 1. Get the minimum and maximum vaddr from the PT_LOAD headers.
+		 *    This will help us tell apart internal from external PC-relative references.
+		 * 2. If we didn't see AT_SYSINFO, we won't have a fake_sysinfo value; use the vdso's
+		 *    symtab to calculate its value, for uniformity. FIXME: I think we'll never use it,
+		 *    because lack of AT_SYSINFO implies x86_64, whereas AT_SYSINFO and the TLS-based
+		 *    32-bit via-VDSO syscall/sysenter pathway are only used on i386. */
 		ElfW(Ehdr) *ehdr = (ElfW(Ehdr) *) orig_vdso_ehdr_address;
 		uintptr_t orig_load_addr = orig_vdso_ehdr_address;
 		uintptr_t fake_load_addr = (uintptr_t) mapping;
+		ElfW(Addr) min_vaddr_seen = (ElfW(Addr)) -1;
+		ElfW(Addr) max_vaddr_seen = 0;
 		for (ElfW(Phdr) *phdr0 = (ElfW(Phdr) *)((char*) ehdr + ehdr->e_phoff),
 		                *phdr = phdr0;
 		     phdr != phdr0 + ehdr->e_phnum;
 		     phdr = (ElfW(Phdr) *)(((char*) phdr) + ehdr->e_phentsize))
 		{
+			if (phdr->p_type == PT_LOAD)
+			{
+				ElfW(Addr) low = phdr->p_vaddr;
+				ElfW(Addr) high = phdr->p_vaddr + phdr->p_memsz;
+				if (low < min_vaddr_seen) min_vaddr_seen = low;
+				if (high > max_vaddr_seen) max_vaddr_seen = high;
+			}
 			if (phdr->p_type == PT_DYNAMIC)
 			{
 				ElfW(Dyn) *d = (ElfW(Dyn) *)(orig_load_addr + phdr->p_vaddr);
@@ -352,5 +397,12 @@ void create_fake_vdso(ElfW(auxv_t) *auxv)
 						vsyscall_sym);
 			}
 		}
+
+		copy_and_trap_vdso_elf(mapping, (void*) saw_at_sysinfo_ehdr_entry->a_un.a_val, mapping_sz,
+			min_vaddr_seen, max_vaddr_seen);
+		int ret __attribute__((unused)) = mprotect(mapping, mapping_sz, PROT_READ|PROT_EXEC);
+		// swap in the fake vdso
+		saw_at_sysinfo_ehdr_entry->a_un.a_val = (uintptr_t) mapping;
+		assert(ret == 0);
 	}
 }
