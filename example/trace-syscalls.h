@@ -10,6 +10,9 @@ void start_tracing(ElfW(auxv_t) *p_auxv, _Bool apply_asm_replacements, void *arg
 extern int debug_level __attribute__((visibility("hidden")));
 extern FILE **p_err_stream __attribute__((visibility("hidden")));
 extern FILE *our_fake_stderr  __attribute__((visibility("hidden"))); // will fdopen stderr if necessary
+
+/* We may or may not be using donald.h, so be conditional... */
+#ifndef debug_printf
 #define debug_printf(lvl, fmt, ...) do { \
     if ((lvl) <= debug_level) { \
       if (!p_err_stream || !*p_err_stream) { \
@@ -20,5 +23,6 @@ extern FILE *our_fake_stderr  __attribute__((visibility("hidden"))); // will fdo
       fflush(*p_err_stream); \
     } \
   } while (0)
+#endif
 
 #endif
