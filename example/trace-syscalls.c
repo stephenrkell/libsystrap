@@ -211,7 +211,7 @@ void start_tracing(ElfW(auxv_t) *p_auxv_start, _Bool apply_replacements, void *a
 		{
 			uintptr_t syscall_n = __start___replaced_syscalls[2*n];
 			assert(syscall_n < SYSCALL_MAX);
-			void (*replacement)(struct generic_syscall *s/*, post_handler *post*/)
+			long (*replacement)(struct generic_syscall *s/*, post_handler *post*/)
 			 = (void*)__start___replaced_syscalls[2*n + 1];
 			replaced_syscalls[syscall_n] = replacement;
 		}
@@ -359,10 +359,8 @@ static void startup(int argc, char **argv, char **environ)
 	ElfW(auxv_t) *p_auxv_terminator = NULL;
 	__runt_auxv_get_auxv(&p_auxv_start, &p_auxv_terminator);
 	__init_libc((char**) p_envv_0, (char*) *p_argv_0);
-	start_tracing(p_auxv_start, /* apply replacements from asm block? */ 0, /* extra arg */ NULL);
+	start_tracing((ElfW(auxv_t)*) p_auxv_start, /* apply replacements from asm block? */ 0, /* extra arg */ NULL);
 }
-
-
 
 /* Lightweight, async-signal-safe trace formatting.
  *
