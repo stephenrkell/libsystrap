@@ -159,8 +159,8 @@ const char *our_canonical_loader_path __attribute__((visibility("hidden")));
 __attribute__((destructor))
 static void deinit_loader_path(void)
 {
-	if (our_loader_path[0] != '/') free(our_absolute_loader_path);
-	free(our_canonical_loader_path);
+	if (our_loader_path[0] != '/') free((void*) our_absolute_loader_path);
+	free((void*) our_canonical_loader_path);
 }
 
 static void print_auxv(FILE *stream, ElfW(auxv_t) *p_auxv)
@@ -180,7 +180,7 @@ static void print_auxv(FILE *stream, ElfW(auxv_t) *p_auxv)
 	fprintf(stream, "\nenv:\n");
 	unsigned i = 0; // new 'i'
 	char **p = (char**) lims.env_vector_start;
-	for (; p != lims.env_vector_terminator + 1; ++i, ++p)
+	for (; p != (char**) lims.env_vector_terminator + 1; ++i, ++p)
 	{
 		fprintf(stream, "[%03d] (%p) %s\n", i, *p, *p);
 	}
@@ -188,7 +188,7 @@ static void print_auxv(FILE *stream, ElfW(auxv_t) *p_auxv)
 	ElfW(auxv_t) *p_e = lims.aux_vector_start;
 	fprintf(stream, "\nauxv:\n");
 	i = 0;
-	for (; p_e!= lims.aux_vector_terminator + 1; ++i, ++p_e)
+	for (; p_e != (ElfW(auxv_t)*) lims.aux_vector_terminator + 1; ++i, ++p_e)
 	{
 #define expand_auxv_string_tags(tag) || p_e->a_type == tag
 		if (0 auxv_string_tags(expand_auxv_string_tags))
@@ -245,7 +245,7 @@ void __hook_pre_enter(struct chain_load_ctxt *cc)
 	else
 	{
 		char *cwd = get_current_dir_name();
-		int ret = asprintf(&our_absolute_loader_path, "%s/%s", cwd,
+		int ret = asprintf((char**) &our_absolute_loader_path, "%s/%s", cwd,
 			our_loader_path + strspn(our_loader_path, "./"));
 		assert(ret > 0);
 		assert(our_absolute_loader_path);
@@ -310,6 +310,7 @@ void __hook_pre_enter(struct chain_load_ctxt *cc)
 	{
 		/* We need to add a new env vector entry, as well as the string data.*/
 		int ret = asprintf(&new_ld_preload_env_string, "LD_PRELOAD=%s", our_absolute_loader_path);
+		assert(ret > 0);
 	}
 
 	fprintf(stderr, "auxv after initial copy, adding/updating LD_PRELOAD (to \"%s\"):\n",

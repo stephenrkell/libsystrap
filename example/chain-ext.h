@@ -1,7 +1,9 @@
 #ifndef CHAIN_EXT_H_
 #define CHAIN_EXT_H_
 
+#ifndef DONALD_NAME
 #define DONALD_NAME "trace-syscalls-ld"
+#endif
 
 #include "donald.h"
 
