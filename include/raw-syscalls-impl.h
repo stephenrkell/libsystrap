@@ -240,6 +240,66 @@ fixup_sigframe_for_return(struct ibcs_sigframe *p_frame, long int ret, unsigned 
 	}
 }
 
+#ifndef SA_RESTORER
+#error "NO SA_RESTORER defined; are you including the asm signal.h as you should be?"
+#endif
+#ifndef SA_NODEFER
+/* On i386, asm/signal.h does not define SA_NODEFER so we do it ourselves. */
+#ifdef __i386__
+#define SA_NODEFER 0x40000000u
+#warning "Working around lack of SA_NODEFER in i386 asm/signal.h"
+#else
+#error "NO SA_NODEFER defined; are you including the asm signal.h as you should be?"
+#endif
+#endif
+/* Which restorer routine do we need when installing libsystrap's signal handlers? */
+#if defined(__i386__)
+#define __systrap_restorer __restore
+#define __systrap_sigaction raw_sigaction
+#elif defined(__x86_64__)
+#define __systrap_restorer __restore_rt
+#define __systrap_sigaction raw_rt_sigaction
+#else
+#error "Unsupported architecture."
+#endif
+
+#if defined(__linux__)
+
+#ifndef SA_SIGINFO
+#define SA_SIGINFO 4
+#endif
+#define make_sigaction_struct(sigfrag, SIGFRAG) \
+	(struct __asm_sigaction) { \
+		  /* kernel structures don't have .sa_sigaction -- just cast the pointer */ \
+		  .sa_handler = (void(*)(int)) &handle_ ## sigfrag \
+		, .sa_flags = SA_RESTORER | SA_NODEFER | SA_SIGINFO \
+		, .sa_restorer = __systrap_restorer \
+	}
+
+#elif defined(__FreeBSD__)
+
+#define make_sigaction_struct(sigfrag, SIGFRAG) \
+	(struct __asm_sigaction) { \
+		  .sa_handler = &handle_ ## sigfrag \
+		, .sa_flags = SA_RESTORER | SA_NODEFER | SA_SIGINFO \
+	}
+
+#else
+#error "Unrecognised operating system."
+#endif
+
+#define install_signal_handler(sigfrag, SIGFRAG) do { \
+	/* Install our SIGILL (was SIGTRAP, but that interferes with gdb) handler. */ \
+	/* Linux seems to require us to provide a restorer; the code is in restore_rt. */ \
+	/* Remember we are kernel-level asm sigaction, so no sigset_t */ \
+	/* We extern-declare the handler with hidden visibility, to bind within the same DSO. */ \
+	extern void handle_ ## sigfrag() __attribute__((visibility("hidden"))); \
+	struct __asm_sigaction action = make_sigaction_struct(sigfrag, SIGFRAG); \
+	struct __asm_sigaction oldaction; \
+	int ret = __systrap_sigaction(SIGFRAG, &action, &oldaction); \
+	if (ret != 0) abort(); \
+} while(0)
+
 // FIXME: utility code: prototypes belong here?
 unsigned long read_hex_num(const char **p_c, const char *end);
 

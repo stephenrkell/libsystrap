@@ -163,12 +163,12 @@ vpath %.S $(DONALD)/src
 vpath %.h $(DONALD)/src
 CFLAGS += -I$(DONALD)/src
 
-CHAIN_LOADER_OBJS := chain-ext.o bootstrap.o lcall.o
+CHAIN_LOADER_OBJS := chain-ext.o bootstrap.o
 $(info CHAIN_LOADER_OBJS is $(CHAIN_LOADER_OBJS))
 # these files are built from donald sources
 LDSO_OBJS := premain.o main.o entry.o load.o debug.o start.o chain.o
 $(info LDSO_OBJS is $(LDSO_OBJS))
-TRACER_OBJS := syscall-names.o
+TRACER_OBJS := syscall-names.o lcall.o
 ALL_OBJS := $(LDSO_OBJS) $(CHAIN_LOADER_OBJS) $(TRACER_OBJS) dlmalloc.o \
   trace-syscalls.o # noop-syscalls.o
 DEPS := $(patsubst %.o,%.d,$(ALL_OBJS))

@@ -382,7 +382,7 @@ void trap_one_executable_region(unsigned char *begin, unsigned char *end, const 
 	struct file_metadata *fm = __runt_files_metadata_by_addr(begin);
 	trap_one_executable_region_given_shdrs(begin, end, filename, is_writable,
 		is_readable, preserve_exec,
-		fm ? fm->shdrs : NULL, fm ? fm->ehdr->e_shnum : 0, fm ? fm->l->l_addr : 0,
+		fm ? fm->shdrs : NULL, (fm && fm->ehdr) ? fm->ehdr->e_shnum : 0, fm ? fm->l->l_addr : 0,
 		set_trap, set_trap_arg);
 }
 
@@ -463,139 +463,33 @@ long clone3_emulated_replacement(struct generic_syscall *s)
 }
 #endif
 
-void install_sigill_handler(void)
-{
-	/* Install our SIGILL (was SIGTRAP, but that interferes with gdb) handler.
-	 * Linux seems to require us to provide a restorer; the code is in restore_rt. */
-#ifndef SA_RESTORER
-#error "NO SA_RESTORER defined; are you including the asm signal.h as you should be?"
-#endif
-#ifndef SA_NODEFER
-/* On i386, asm/signal.h does not define SA_NODEFER so we do it ourselves. */
-#ifdef __i386__
-#define SA_NODEFER 0x40000000u
-#warning "Working around lack of SA_NODEFER in i386 asm/signal.h"
-#else
-#error "NO SA_NODEFER defined; are you including the asm signal.h as you should be?"
-#endif
-#endif
-
-/* Which restorer routine do we need? */
-#if defined(__i386__)
-#define sigill_restorer __restore
-#elif defined(__x86_64__)
-#define sigill_restorer __restore_rt
-#else
-#error "Unsupported architecture."
-#endif
-	// remember we are kernel-level asm sigaction, so no sigset_t
-	struct __asm_sigaction action = {
-		  .sa_handler = &handle_sigill
-		, .sa_flags = SA_RESTORER | SA_NODEFER
-		//, .sa_mask = ((__asm_sigset_t) -1) & ~(1ul<<(SIGILL-1))
-		#ifndef __FreeBSD__
-		, .sa_restorer = sigill_restorer
-		#endif
-	};
-	struct __asm_sigaction oldaction;
-	int ret =
-/* FIXME: clean this up */
-#ifdef __x86_64__
-	raw_rt_sigaction
-#else
-	raw_sigaction
-#endif
-	(SIGILL, &action, &oldaction);
-	if (ret != 0) abort();
-	return;
-}
-
-void handle_sigsegv(int n) __attribute__((visibility("hidden")));
-void install_sigsegv_handler(void)
-{
-	struct __asm_sigaction action = {
-		  .sa_handler = &handle_sigsegv
-		, .sa_flags = SA_RESTORER | SA_NODEFER
-		, .sa_mask = ((__asm_sigset_t) -1) & ~(1ul<<(SIGSEGV-1)) /* we mask SIGSEGV -- hmm, concurrency? */
-		#ifndef __FreeBSD__
-		, .sa_restorer = sigill_restorer
-		#endif
-	};
-	struct __asm_sigaction oldaction;
-	int ret =
-/* FIXME: clean this up */
-#ifdef __x86_64__
-	raw_rt_sigaction
-#else
-	raw_sigaction
-#endif
-	(SIGSEGV, &action, &oldaction);
-	if (ret != 0) abort();
-	return;
-}
-
-static int trap_at_vperm_range_cb(struct vperm_range *r, void *arg)
+__attribute__((visibility("hidden")))
+int trap_at_vperm_range_cb(struct vperm_range *r, void *arg)
 {
 	/* Can we get the trapping address as an ELF file with shdrs, librunt-wise? */
-	struct file_metadata *fm = __runt_files_metadata_by_addr((void*) r->addr);
+	struct file_metadata *fm = __runt_files_metadata_by_addr((void*)(uintptr_t) r->addr);
 	if (!fm)
 	{
 		/* It might be that we're doing dlopen of the relevant code Right Now,
 		 * so librunt hasn't had the notification yet. If we fish out a link map,
 		 * it can still add the metadata for us. Let's try that. */
-		struct link_map *l = get_highest_loaded_object_below((void*) r->addr);
+		struct link_map *l = get_highest_loaded_object_below((void*)(uintptr_t) r->addr);
 		if (l) fm = __runt_files_get_or_create_metadata(l);
 		assert(fm);
 		if (!fm) abort();
 	}
 	/* Just what trap_one_mapping would have done */
 	trap_one_executable_region_given_shdrs(
-		(unsigned char *) r->addr, (unsigned char *)((uintptr_t) r->addr + (r->npages << LOG_MIN_PAGE_SIZE)),
+		(unsigned char *)(uintptr_t) r->addr, (unsigned char *)((uintptr_t) r->addr + (r->npages << LOG_MIN_PAGE_SIZE)),
 		fm->filename,
 		/* is_writable already? if only if it has writable vperms */ prot_from_vperms(r->perms) & PROT_WRITE,
 		/* readable? */ 1, /* preserve_exec */ 0, // <-- no need to keep it x; for now, we know it's not in the ld.so
-		fm ? fm->shdrs : NULL, fm ? fm->ehdr->e_shnum : 0, fm ? fm->l->l_addr : 0,
+		fm ? fm->shdrs : NULL, (fm && fm->ehdr) ? fm->ehdr->e_shnum : 0, fm ? fm->l->l_addr : 0,
 		/* set_trap */ set_default_trap, /*set_trap_arg*/ NULL);
 	/* Now we can make it really executable. XXX: here we always take away write permission;
 	 * if the user asked for a RWX mapping, we need to do something else here. */
-	mprotect((void*) r->addr, r->npages << LOG_MIN_PAGE_SIZE, PROT_READ | PROT_EXEC);
+	mprotect((void*)(uintptr_t) r->addr, r->npages << LOG_MIN_PAGE_SIZE, PROT_READ | PROT_EXEC);
 
 	/* We can delete the vperm range now. */
 	return VPERM_A_DELETE;
-}
-void handle_sigsegv(int n)
-{
-	unsigned long *frame_base = __builtin_frame_address(0);
-	struct ibcs_sigframe *p_frame = (struct ibcs_sigframe *) (frame_base + 1);
-
-	/* Is this a segv we care about? That means the faulting IP is in our list of
-	 * deferred-executable mappings. */
-	uintptr_t ip = p_frame->uc.uc_mcontext.MC_REG_IP;
-	/* FIXME: taking the lock here will deadlock if we are segfaulting inside
-	 * a context where we already hold the exclusive write lock. That means our
-	 * code (e.g. in librunt) has a bug. It's still not ideal, though.
-	 * We COULD detect the case where it's our pid that has the exclusive lock.
-	 * We could do this by storing the negation of the pid/tid in the lock field,
-	 * instead of -1. I *think* this is OK because Linux only uses the top half
-	 * of the range of pid_t, which is signed. */
-	struct vperm_range *found = find_vperm_range((void*) ip);
-	if (!found) /* TODO: segue to normal segfault path */ abort();
-
-	// FIXME: do TLS swap?
-
-	/* CARE: what if multiple threads do this simultaneously?
-	 * We need to take the write (exclusive) lock..
-	 * If we fail to take the write lock and the vperm record for this
-	 * address range has gone away, it means the other thread trapped it for us.
-	 * If we just naively find and then remove, without locking, then
-	 * a concurrent SIGSEGV in another thread, segfaulting on the same range of
-	 * memory, would terminate the process.
-	 *
-	 * This one call does everything, because if nothing is found, no
-	 * action will be taken.
-	 *
-	 * FIXME: should be able to find out from ret whether anything was done
-	 * or not, I think, but the API doesn't currently allow this.
-	 */
-	/*int ret = */ with_vperm_range_exclusive((void*) ip, trap_at_vperm_range_cb, NULL);
 }

@@ -13,6 +13,7 @@
 #include <wchar.h>
 #include <assert.h>
 #include "systrap.h"
+#include "vas.h"
 #include "relf.h"
 #include "trace-syscalls.h"
 
@@ -22,6 +23,8 @@
 #include <sys/mman.h>
 #include <linux/memfd.h>
 #include <string.h> /* for memcpy */
+
+void install_sigbus_handler(void); /* forward decl */
 
 /* This is an open-hashed table keyed on 12 bits from the lower 32
  * of the trap site. Each word is an absolute linear address, and
@@ -156,48 +159,35 @@ __asm__(".set __systrap_lcall_handler, 0x1f1f1f1f\n\
 #define SYSTRAP_LCALL_HANDLER_8BYTE_OFFSET (0x2d + 2 - 0x1f)
 #endif
 
-void map_selector_pages(void)
+static int flipper_fd;
+
+static void install_syscall_lcall_handler(void)
 {
-	int the_fd = memfd_create("selector", MFD_CLOEXEC/*|MFD_HUGETLB*//*|MFD_HUGE_2MB*/);
-	if (the_fd == -1) warnx("memfd_create failed");
-	assert(the_fd != -1);
-	/* do it in superpages (TODO: restore this / figure out why HUGETLB doesn't work) */
-#define SELECTOR_MAPPING_UNIT 2097152
-	int ret = ftruncate(the_fd, SELECTOR_MAPPING_UNIT);
-	if (ret != 0) warnx("ftruncate");
-	ssize_t written = 0;
-	short unsigned dummy;
-	ssize_t nread = read(the_fd, &dummy, 2);
-	assert(nread == 2); // reading works OK
-	off_t seekset = lseek(the_fd, 0, SEEK_SET);
-	assert(seekset == 0);
-	static char selbuf[2048];
-	wmemset((wchar_t *) selbuf, (wchar_t) 0x1f1f1f1fu, sizeof selbuf / sizeof (wchar_t));
-	for (unsigned n = 0; n < SELECTOR_MAPPING_UNIT / sizeof selbuf; ++n)
-	{
-		written = write(the_fd, &selbuf[0], sizeof selbuf);
-		assert(written == sizeof selbuf);
-	}
-	/* HMM. We assume we can just trample over the whole first 4GB. HACK!
-	 * If we kept a bitmap of which pages we'd trampled on, it would have
-	 * 2^20 bits or 2^17 bytes or 128kB, which is manageable. */
-	for (unsigned long spagenum = 1; spagenum < 1ul<<11; ++spagenum)
-	{
-		void *addr = (void*)(spagenum << 21);
-		//warnx("asking for a mapping at %p", addr);
-		void *ret = raw_mmap(addr, SELECTOR_MAPPING_UNIT,
-				PROT_READ|PROT_EXEC, MAP_PRIVATE|MAP_FIXED/*|MAP_HUGETLB|MAP_HUGE_2MB*/, the_fd, 0);
-		if (!(ret == (void*)(spagenum << 21))) warnx("mmap said %p cf addr %p", ret, addr);
-		assert(ret == (void*)(spagenum << 21));
-	}
-	close(the_fd);
+#ifdef LCALL_FLIPPER_MAPPING_EAGER
+	/* We already have memory here. Just mprotect it*/
 	mprotect((void*) 0x1f1f1000, 4096, PROT_READ|PROT_WRITE);
+#else
+	/* Over the top of the mapping we just created, create some space just for the
+	 * actual call target code sequence. We happen to initialize it with the flipper
+	 * sequence, just so that we minimse the intrusion into the flipper address range. */
+
+	/* XXX: it's a bit unfortunate that our lcall handler overlaps the flipper area.
+	 * It doesn't have to! An offset of 0x1f1f1f1f will always be applied, but
+	 * the base address can be anywhere, with byte granularity. So (TODO) let's put 
+	 * it somewhere else. We will have to fix up the hand-crafted machine code above. */
+	raw_mmap((void*) 0x1f1f1000, MIN_PAGE_SIZE,
+			PROT_READ|PROT_WRITE /* writable just temporarily */,
+			MAP_PRIVATE|MAP_FIXED/*|MAP_HUGETLB|MAP_HUGE_2MB*/, flipper_fd, 0);
+#endif
 	memcpy((void*) 0x1f1f1f1f, __systrap_lcall_handler_template, SYSTRAP_LCALL_HANDLER_LENGTH);
 	void *tgt = __systrap_call_handler_with_retaddr_restore;
 	memcpy((char*) 0x1f1f1f1f + SYSTRAP_LCALL_HANDLER_8BYTE_OFFSET, &tgt, 8);
+	/* turn off writeability */
 	mprotect((void*) 0x1f1f1000, 4096, PROT_READ|PROT_EXEC);
 }
-void install_descriptor(void)
+
+__attribute__((visibility("hidden")))
+void install_lcall_flipper(void)
 {
 	print_ldt(8192);
 #if 0
@@ -299,4 +289,143 @@ void install_descriptor(void)
 	 * Are all call gates "system"?
 	 * OK, trying the fancier solution
 	 */
+
+	flipper_fd = memfd_create("lcall-flipper", MFD_CLOEXEC/*|MFD_HUGETLB*//*|MFD_HUGE_2MB*/);
+	if (flipper_fd == -1) warnx("memfd_create failed");
+	assert(flipper_fd != -1);
+	/* do it in superpages (TODO: restore this / figure out why HUGETLB doesn't work) */
+//#define LCALL_FLIPPER_MAPPING_UNIT MIN_HUGEPAGE_SIZE
+#define LCALL_FLIPPER_MAPPING_UNIT MIN_PAGE_SIZE
+	ret = ftruncate(flipper_fd, LCALL_FLIPPER_MAPPING_UNIT);
+	if (ret != 0) warnx("ftruncate");
+	ssize_t written = 0;
+	short unsigned dummy;
+	ssize_t nread = read(flipper_fd, &dummy, 2);
+	assert(nread == 2); // reading works OK
+	off_t seekset = lseek(flipper_fd, 0, SEEK_SET);
+	assert(seekset == 0);
+	static char selbuf[2048];
+	wmemset((wchar_t *) selbuf, (wchar_t) 0x1f1f1f1fu, sizeof selbuf / sizeof (wchar_t));
+	for (unsigned n = 0; n < LCALL_FLIPPER_MAPPING_UNIT / sizeof selbuf; ++n)
+	{
+		written = write(flipper_fd, &selbuf[0], sizeof selbuf);
+		assert(written == sizeof selbuf);
+	}
+#ifdef LCALL_FLIPPER_MAPPING_EAGER
+	/* HMM. We assume we can just trample over the whole first 4GB. HACK!
+	 * If we kept a bitmap of which pages we'd trampled on, it would have
+	 * 2^20 bits or 2^17 bytes or 128kB, which is manageable. */
+	for (unsigned long spagenum = 1; spagenum < 1ul<<11; ++spagenum)
+	{
+		void *addr = (void*)(spagenum << 21);
+		//warnx("asking for a mapping at %p", addr);
+		void *ret = raw_mmap(addr, LCALL_FLIPPER_MAPPING_UNIT,
+				PROT_READ|PROT_EXEC, MAP_PRIVATE|MAP_FIXED/*|MAP_HUGETLB|MAP_HUGE_2MB*/, flipper_fd, 0);
+		if (!(ret == (void*)(spagenum << 21))) warnx("mmap said %p cf addr %p", ret, addr);
+		assert(ret == (void*)(spagenum << 21));
+	}
+#else /* non-eager version follows */
+
+#define LCALL_FLIPPER_AREA_LIMIT (1u<<31)  /* 2GB */
+#define LCALL_FLIPPER_AREA_BASE  MMAP_MIN
+#define LCALL_FLIPPER_AREA_SIZE  (LCALL_FLIPPER_AREA_LIMIT - LCALL_FLIPPER_AREA_BASE)
+
+#if 0 /* I think userfaultfd is the wrong mechanism... */
+	/* Set up userfaultfd and a SIGBUS handler */
+	long uffd;          /* userfaultfd file descriptor */
+	struct uffdio_api uffdio_api;
+	bzero(&uffdio_api, sizeof uffdio_api);
+	struct uffdio_register uffdio_register;
+	bzero(&uffdio_register, sizeof uffdio_register);
+
+	uffd = syscall(__NR_userfaultfd, O_CLOEXEC | O_NONBLOCK);
+	if (uffd == -1) abort();
+
+	uffdio_api.api = UFFD_API;
+	uffdio_api.features = UFFD_FEATURE_SIGBUS;
+	if (ioctl(uffd, UFFDIO_API, &uffdio_api) == -1) abort();
+	uffdio_register.range.start = LCALL_FLIPPER_AREA_BASE;
+	uffdio_register.range.len = LCALL_FLIPPER_AREA_SIZE;
+	uffdio_register.mode = UFFDIO_REGISTER_MODE_MISSING;
+	if (ioctl(uffd, UFFDIO_REGISTER, &uffdio_register) == -1) abort();
+#else
+	/* Let's create a SIGBUS-generating area */
+	int empty_fd = memfd_create("lcall-flipper-unmapped", MFD_CLOEXEC/*|MFD_HUGETLB*//*|MFD_HUGE_2MB*/);
+	if (empty_fd == -1) warnx("memfd_create failed");
+	assert(empty_fd != -1);
+	void *retaddr = raw_mmap((void*) LCALL_FLIPPER_AREA_BASE, LCALL_FLIPPER_AREA_LIMIT - MMAP_MIN,
+			PROT_READ /* writable just temporarily */,
+			MAP_PRIVATE|MAP_FIXED, empty_fd, 0);
+	if (retaddr != (void*) MMAP_MIN) abort();
+#endif /* 0 / userfaultfd */
+
+	/* As traps in the flipper area come in, we handle them in the SIGBUS handler. */
+	install_sigbus_handler();
+
+#endif /* LCALL_FLIPPER_MAPPING_EAGER */
+	// close(flipper_fd);
+	/* FIXME: for now we don't close the flipper fd, but we want to, because
+	 * leaving a file descriptor open across startup disrupts the fd numbering
+	 * and makes strace comparison more difficult (for testing purposes). Let's
+	 * come back to this. Is there a way to CoW-duplicate some pages? We could
+	 * directly manipulate the memfd's tmpfs file. copy_file_range, but CARE:
+	 * e.g. say we truncate the file up to including the page we took the sigbus
+	 * at. Then we would also want to do the userfaultfd thing to catch intervening
+	 * copies and ensure they are also flipper-initialized. */
+
+	/* Take our template code and put it at the necessary address, agreeing with
+	 * the LDT entry we created earlier. */
+	install_syscall_lcall_handler();
 }
+
+#ifndef LCALL_FLIPPER_MAPPING_EAGER
+/* We use sigbus to fill in pages in the low 2GB with our
+ * "flipper" pages used by %rax-relative lcalls. */
+
+__attribute__((visibility("hidden")))
+void handle_sigbus(int n, __asm_siginfo_t *info, void *ucontext)
+{
+	unsigned long *frame_base = __builtin_frame_address(0);
+	struct ibcs_sigframe *p_frame = (struct ibcs_sigframe *) (frame_base + 1);
+
+	/* Is this a sigbus we care about? FIXME: very very sysdep. */
+	uintptr_t ip __attribute__((unused)) = p_frame->uc.uc_mcontext.MC_REG_IP;
+	if ((uintptr_t) info->si_addr >= LCALL_FLIPPER_AREA_LIMIT
+		|| (uintptr_t) info->si_addr < LCALL_FLIPPER_AREA_BASE)
+	{
+		/* TODO: segue to normal sigbus path */ abort();
+	}
+	/* Currently it's a sigbus-generating void.
+	 * Map something over the top. What? The flipper page, for now. */
+	void *mapping_addr = (void*) ROUND_DOWN((uintptr_t) info->si_addr, MIN_PAGE_SIZE);
+	void *ret = raw_mmap((void*) mapping_addr,
+			MIN_PAGE_SIZE, PROT_READ|PROT_EXEC, MAP_PRIVATE|MAP_FIXED, flipper_fd, 0);
+	if (ret != mapping_addr) abort();
+}
+
+__attribute__((visibility("hidden")))
+void install_sigbus_handler(void)
+{
+	install_signal_handler(sigbus, SIGBUS);
+}
+
+__attribute__((visibility("hidden")))
+void *create_initial_low_stack(void)
+{
+#define LOW_STACK_TOP  0x81000000         /* this is just *above* 2GB... FIXME: randomize? */
+#define LOW_STACK_SIZE    8388608
+#if /*defined(LCALL_FLIPPER_MAPPING_EAGER)*/ 0
+	mprotect((void*)(LOW_STACK_TOP - LOW_STACK_SIZE), LOW_STACK_SIZE, PROT_READ|PROT_WRITE);
+	bzero((void*)(LOW_STACK_TOP - LOW_STACK_SIZE), LOW_STACK_SIZE);
+	return (void*) LOW_STACK_TOP;
+#else
+	/* Nothing is mapped there currently. Either way! It's outside the low 2GB. */
+	void *ret = raw_mmap((void*)(LOW_STACK_TOP - LOW_STACK_SIZE), LOW_STACK_SIZE,
+		PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_GROWSDOWN|MAP_STACK|MAP_FIXED_NOREPLACE,
+		-1, 0);
+	if (MMAP_RETURN_IS_ERROR((uintptr_t) ret)) abort();
+	return (void*) LOW_STACK_TOP;
+#endif
+}
+
+#endif

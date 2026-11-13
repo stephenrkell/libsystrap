@@ -240,3 +240,7 @@ out:
 #endif
 }
 
+void install_sigill_handler(void)
+{
+	install_signal_handler(sigill, SIGILL);
+}

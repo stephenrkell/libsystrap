@@ -5,7 +5,6 @@
 #include <link.h>
 #include "systrap-asm.h"
 
-void install_sigill_handler(void);
 void trap_all_mappings(void);
 void create_fake_vdso(ElfW(auxv_t) *auxv);
 typedef int set_trap_fn_t(unsigned char *addr, unsigned len, void *arg);
@@ -18,12 +17,15 @@ void trap_one_executable_region_given_shdrs(unsigned char *begin,
 	unsigned char *end, const char *filename,
 	_Bool is_writable, _Bool is_readable, _Bool preserve_exec,
 	ElfW(Shdr) *shdrs, unsigned nshdr, ElfW(Addr) laddr, set_trap_fn_t *set_trap, void *set_trap_arg);
+
+/* These functions are more for a private header, really... FIXME. */
 _Bool addr_is_in_ld_so(const void *pos);
 void walk_instructions(unsigned char *pos, unsigned char *end,
 	void (*cb)(unsigned char *pos, unsigned len, void *arg), void *arg);
 void replace_instruction_with(unsigned char *pos, unsigned len,
 		unsigned char const *replacement, unsigned replacement_len);
 void replace_syscall_with_ud2(unsigned char *pos, unsigned len);
+_Bool is_trap_bytes(const unsigned char *ins);
 
 /* really funky clients, e.g. a ld.so, might not run their own constructor, so ... */
 void __libsystrap_force_init(void) __attribute__((visibility("hidden")));
@@ -222,5 +224,13 @@ enum vperm_range_action
 };
 int with_vperm_range_exclusive(void *addr, vperm_action_cb *cb, void *cb_arg) __attribute__((visibility("hidden")));
 int with_vperm_range_ro(void *addr, vperm_action_cb *cb, void *cb_arg) __attribute__((visibility("hidden")));
+int trap_at_vperm_range_cb(struct vperm_range *r, void *arg) __attribute__((visibility("hidden")));
+
+void install_sigill_handler(void) __attribute__((visibility("hidden")));
+void install_sigsegv_handler(void) __attribute__((visibility("hidden")));
+void install_lcall_flipper(void) __attribute__((visibility("hidden"))); /* may or may not also install a SIGBUS handler */
+
+/* specific to the lcall stuff... all this is x86_64-only (FIXME) */
+void *create_initial_low_stack(void) __attribute__((visibility("hidden")));
 
 #endif

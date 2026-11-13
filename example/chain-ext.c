@@ -374,10 +374,7 @@ skip_rewrite_auxv:
 	 * We have already mapped some memory there, but perhaps not RW.
 	 */
 #if defined(__x86_64__) /* FIXME: something randomised and less arbitrary, + track unused <2GB space */
-#define LOW_STACK_TOP  0x71000000
-#define LOW_STACK_SIZE    8388608
-	mprotect((void*)(LOW_STACK_TOP - LOW_STACK_SIZE), LOW_STACK_SIZE, PROT_READ|PROT_WRITE);
-	bzero((void*)(LOW_STACK_TOP - LOW_STACK_SIZE), LOW_STACK_SIZE);
+	void *low_stack_top = create_initial_low_stack();
 	/* __real_enter will reset the stack pointer, so make sure we influence it. */
 	extern ElfW(auxv_t) *p_auxv;
 	extern void *sp_on_entry;
@@ -397,7 +394,7 @@ skip_rewrite_auxv:
 		sizeof (ElfW(auxv_t)) * (N_AUXV_ENTRIES) +
 		/*((uintptr_t) limits.asciiz_end - (uintptr_t) limits.asciiz_start)*/ 0 // <-- don't copy asciiz here
 		/*, 16)*/;
-	void *new_sp_on_entry =  ROUND_DOWN_PTR(LOW_STACK_TOP - copy_len, 16); // <-- we need to preserve 16-byte alignment of the stack
+	void *new_sp_on_entry =  ROUND_DOWN_PTR(low_stack_top - copy_len, 16); // <-- we need to preserve 16-byte alignment of the stack
 	//memcpy(new_sp_on_entry, sp_on_entry, memcpy_len);
 	struct auxv_copy_status final_copy_status = copy_and_resize_auxv((char*) new_sp_on_entry,
 		new_auxv_block ? status.maybe_auxv : p_auxv,

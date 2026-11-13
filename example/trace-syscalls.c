@@ -273,10 +273,13 @@ void start_tracing(ElfW(auxv_t) *p_auxv_start, _Bool apply_replacements, void *a
 	trap_all_mappings(); // XXX: use this to trap the fake vdso too; have just "copy_vdso(...)"?
 #endif
 #define USE_LCALL
-#ifdef USE_LCALL
-	install_descriptor();
-	map_selector_pages();
+#if defined(USE_LCALL) && defined(CHAIN_LOADER)
+	install_lcall_flipper();
 #endif
+	/* If we are not a chain loader, we don't get a flipper but also we shouldn't
+	 * get lcalls happening. Or, hmm, maybe we should? */
+
+	/* All configurations have a handler for SIGILL. */
 	install_sigill_handler();
 #if defined(__i386__)
 	/* There is a TLS slot reserved for AT_SYSINFO a.k.a. the __kernel_vsyscall
