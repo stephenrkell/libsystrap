@@ -270,7 +270,6 @@ count_vdso_size(void *vdso_ehdr)
 		if (endoff > max_off_seen) max_off_seen = endoff;
 	}
 	/* ... and for all phdrs. FIXME: should limit this to some phdr types only I think. */
-	ElfW(Phdr) *phdrs = (ElfW(Phdr) *) ((unsigned char *) vdso_ehdr + ehdr->e_phoff);
 	for (unsigned i = 0; i < ehdr->e_phnum; ++i)
 	{
 		ElfW(Phdr) *phdr = (ElfW(Phdr) *) ((unsigned char *) ehdr + ehdr->e_phoff
@@ -317,10 +316,21 @@ void create_fake_vdso(ElfW(auxv_t) *auxv)
 				{
 					/* HACK: need to constrain the mapping s.t. it is close to the real vDSO.
 					 * FIXME: could we map over the real vDSO? check whether Linux permits this. */
-					mapping = mmap(
-						(uintptr_t) p->a_un.a_val + 2 * MIN_PAGE_SIZE,
-						mapping_sz, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_FIXED_NOREPLACE,
-						fd, 0);
+#define MAX_ATTEMPTS 128
+					for (unsigned i = 0; i < MAX_ATTEMPTS; ++i)
+					{
+						mapping = mmap(
+							(void*)((uintptr_t) p->a_un.a_val + (2+i) * MIN_PAGE_SIZE),
+							mapping_sz, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_FIXED_NOREPLACE,
+							fd, 0);
+						if (mapping != MAP_FAILED) break;
+						/* Alternate going backwards in MIN_HUGEPAGE_SIZE units */
+						mapping = mmap(
+							(void*)((uintptr_t) p->a_un.a_val - (2+i) * MIN_HUGEPAGE_SIZE),
+							mapping_sz, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_FIXED_NOREPLACE,
+							fd, 0);
+						if (mapping != MAP_FAILED) break;
+					}
 					if (mapping != MAP_FAILED)
 					{
 						orig_vdso_ehdr_address = p->a_un.a_val;
