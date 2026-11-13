@@ -410,7 +410,7 @@ REPLACE(execveat)
  * map it in the lower 32 bits. */
 static void tweak_flags(int *p_flags)
 {
-	if (    (*p_flags & MAP_GROWSDOWN)
+	if (    ((*p_flags & MAP_GROWSDOWN) || (*p_flags & MAP_STACK))
 		&& !(*p_flags & MAP_FIXED))
 	{
 		*p_flags |= MAP_32BIT;
