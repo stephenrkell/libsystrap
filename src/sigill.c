@@ -105,9 +105,12 @@ void handle_sigill(int n)
 #endif
 	assert(syscall_num >= 0);
 	assert(syscall_num < SYSCALL_MAX);
+/* Suppress bogus GCC warning about address never being null -- weak linkage... */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Waddress"
 	_handle_sigill_debug_printf(1, " which we think is syscall %s/%ld\n",
 		&syscall_names[0] ? syscall_names[syscall_num] : "(names not linked in)", syscall_num);
-
+#pragma GCC diagnostic pop
 	/* FIXME: check whether this syscall creates executable mappings; if so,
 	 * we make them nx, do the rewrite, then make them x. */
 
