@@ -284,7 +284,7 @@ static void replace_vperms_over_nolock(void *begin, void *end, int prot_or_negat
 			// we need to pre-chop it and then add a new one; found_first should be only the overlap
 			size_t npages_chopped = (((uintptr_t) begin - found_first->addr) >> LOG_MIN_PAGE_SIZE);
 			assert(npages_chopped < found_first->npages);
-			add_vperm_range_nolock_nosort((void*) found_first->addr, npages_chopped << LOG_MIN_PAGE_SIZE, prot_from_vperms(found_first->perms));
+			add_vperm_range_nolock_nosort((void*)(uintptr_t) found_first->addr, npages_chopped << LOG_MIN_PAGE_SIZE, prot_from_vperms(found_first->perms));
 			// NOTE that this ^^ has incremented nused
 			found_first->addr = (uintptr_t) begin;
 			assert(npages_chopped < found_first->npages);
@@ -402,14 +402,14 @@ int with_vperm_range_exclusive(void *addr, vperm_action_cb *cb, void *cb_arg)
 	void *found_end = NULL;
 	if (found)
 	{
-		found_end = (void*)(found->addr + (found->npages * MIN_PAGE_SIZE));
+		found_end = (void*)(uintptr_t)(found->addr + (found->npages * MIN_PAGE_SIZE));
 		ret = cb(found, cb_arg);
 	}
 	switch (ret)
 	{
 		VPERM_A_NOTHING: break;
 		VPERM_A_DELETE:
-			replace_vperms_over((void*) found->addr, found_end, /* drop 'em */ -1);
+			replace_vperms_over_nolock((void*)(uintptr_t) found->addr, found_end, /* drop 'em */ -1);
 		default: break;
 	}
 	RELEASE_LOCK_W();
@@ -429,5 +429,5 @@ int with_vperm_range_ro(void *addr, vperm_action_cb *cb, void *cb_arg)
 	// no need to check for an action, because deletion is not an option
 	RELEASE_LOCK_R();
 	return ret;
-
 }
+
