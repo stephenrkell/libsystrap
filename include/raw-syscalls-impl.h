@@ -156,6 +156,7 @@ struct __libc_timeval;
 #define assert(cond) \
 	do { ((cond) ? ((void) 0) : (__assert_fail("Assertion failed: \"" stringify((cond)) "\"", __FILE__, __LINE__, __func__ ))); }  while (0)
 #endif
+void abort(void) __attribute__((noreturn));
 
 /* In kernel-speak this is a "struct sigframe" / "struct rt_sigframe" --
  * sadly no user-level header defines it. But it seems to be vaguely standard
