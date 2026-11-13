@@ -432,33 +432,8 @@ static char *fd_to_name(int fd, char *buf, size_t bufsz)
 	return buf;
 }
 
-#ifdef __i386__
-#if defined(__linux__) && !defined(__NR_mmap2)
-#define __NR_mmap2 192
-#endif
-#define mmap2_ret_t void *
-#define mmap2_args(v, sep) \
-    v(void *, addr, 0) sep   v(size_t, length, 1) sep \
-    v(int, prot, 2) sep      v(int, flags, 3) sep \
-    v(int, fd, 4) sep        v(unsigned long, pgoffset, 5)
-bootstrap_proto(mmap2)
-{
-	if (!(prot & PROT_EXEC))
-	{
-		return (void*) syscall(__NR_mmap2, addr, length, prot, flags, fd, pgoffset);
-	}
-	// else...
-	// always map writable, non-executable
-	int temporary_prot = (prot | PROT_WRITE | PROT_READ) & ~PROT_EXEC;
-	void *mapping = (void*) syscall(__NR_mmap2, addr, length, temporary_prot, flags, fd, pgoffset);
-	unsigned long long offset = (unsigned long long) pgoffset * page_size;
-#else
-#define mmap_ret_t void *
-#define mmap_args(v, sep) \
-    v(void *, addr, 0) sep   v(size_t, length, 1) sep \
-    v(int, prot, 2) sep      v(int, flags, 3) sep \
-    v(int, fd, 4) sep        v(unsigned long, offset, 5)
-bootstrap_proto(mmap)
+static void *detect_wraparound_mapping_request(void *addr, size_t length, int prot,
+	int flags, int fd, off_t offset, void *caller)
 {
 	/* "Wraparound loading" / "tying the knot": if we are being
 	 * called by the dynamic loader and it is trying to map *us*,
@@ -512,7 +487,7 @@ bootstrap_proto(mmap)
 					if (!out || 0 != strncmp(out, our_canonical_loader_path, bufsz))
 					{
 						// the mapping isn't us after all
-						goto not_wraparound; //break;
+						goto not_wraparound;
 					}
 				} /* end else fd != -1 */
 
@@ -603,7 +578,7 @@ bootstrap_proto(mmap)
 								// we *could* match this one, but is it the right one?
 								if (mapping_last_full_page_first_byte_offset >= phdr->p_offset &&
 									mapping_last_full_page_first_byte_offset
-									< ROUND_UP_PTR_TO_PAGE(phdr->p_offset + phdr->p_filesz))
+									< (intptr_t) (ROUND_UP_PTR_TO_PAGE(phdr->p_offset + phdr->p_filesz)))
 								{
 									// OK, just return the vaddr corresponding to this offset
 									if (flags & MAP_FIXED)
@@ -633,11 +608,12 @@ bootstrap_proto(mmap)
 			} // end if we have r_map and state is RT_ADD
 		} // end if we have no wraparound_link_map yet
 	} // end if caller is ld.so
+
+	/* HACK for debugging: the program is not allowed to map us, the chain loader,
+	 * except along the wraparound path. It is almost certainly a sign of the
+	 * wraparound logic above being incomplete w.r.t. some dynamic linker behaviour.
+	 * (Our own librunt is allowed to, but it should not be coming down this code path.) */
 not_wraparound:
-	/* HACK for debugging: the program is not allowed to map us except along the
-	 * wraparound path. It is almost certainly a sign of the wraparound logic above
-	 * being incomplete w.r.t. some dynamic linker behaviour. (Our own librunt is
-	 * allowed to, but it should not be coming down this code path.) */
 #ifndef NDEBUG
 	if (fd != -1)
 	{
@@ -647,6 +623,72 @@ not_wraparound:
 		assert(!out || 0 != strncmp(out, our_canonical_loader_path, bufsz));
 	}
 #endif
+	return NULL;
+}
+
+/* TODO: also make "bumper" pages around each mapped lib, for %rip-relative calls/lcalls.
+ * Where is the right place to allocate these? When an mmap comes in, it is hard to
+ * detect a new lib is being mapped. Maybe if the fd refers to an ELF binary, place
+ * the map with space for its 2GB bumpers? One way would be to artificially increase
+ * the mapped size by 4GB, say, then remap immediately at a +2GB address and the
+ * original size, and remap the surrounding areas similarly. Add these bumpers to the
+ * lazy sigbus handling, initially; if we want to try the plain indirect call, that
+ * is a separate "optimisation" (or, really, spending time for memory; note there is
+ * NOT a small downward step in security because unlike e9-based patching, we don't
+ * add any extra executable instructions).
+ *
+ * XXX: check my thinking about %rax-relative puns with controllable immediates.
+ * Does it matter if our pun bytes are negative? We can load a high immediate into
+ * %rax... will it be sign-extended? That's important s.t. the high (negative) pun
+ * bytes are added to a negative earlier-loaded immediate value to yield a smallish
+ * positive number. I am almost certain it will be sign-extended and so we are fine.
+ *
+ * Spending 4GB of VAS per DSO is fine normally but could cause problems... in a 48-bit
+ * address space, the hard limit is 64k such DSOs. I am fine with this for now, but
+ * I do know there are workloads with thousands of small DSOs.
+ */
+
+/* In i386, mmap2 is the main mmap function and we define mmap separately.
+ * Otherwise, mmap is the main one. Either way, what follows is the main code. */
+#ifdef __i386__
+#if defined(__linux__) && !defined(__NR_mmap2)
+#define __NR_mmap2 192
+#endif
+#define mmap2_ret_t void *
+#define mmap2_args(v, sep) \
+    v(void *, addr, 0) sep   v(size_t, length, 1) sep \
+    v(int, prot, 2) sep      v(int, flags, 3) sep \
+    v(int, fd, 4) sep        v(unsigned long, pgoffset, 5)
+bootstrap_proto(mmap2)
+{
+	unsigned long long offset = (unsigned long long) pgoffset * page_size;
+	void *wraparound_ret = detect_wraparound_mapping_request(addr, length, prot, flags,
+			fd, offset, caller);
+	if (wraparound_ret) return wraparound_ret;
+	if (!(prot & PROT_EXEC))
+	{
+		void *ret = (void*) syscall(__NR_mmap2, addr, length, prot, flags, fd, pgoffset);
+		if (ret != MAP_FAILED) replace_vperms_over(ret, (void*)((uintptr_t)ret + length), /* drop 'em */ -1);
+		return ret;
+	}
+	// else...
+	// always map writable, non-executable
+	// FIXME: now that we defer the rewriting of syscall instructions, this feels dangerous...
+	// should really leave out PROT_WRITE, then re-mprotect when we're doing the rewrite
+	int temporary_prot = (prot | PROT_WRITE | PROT_READ) & ~PROT_EXEC;
+	void *mapping = (void*) syscall(__NR_mmap2, addr, length, temporary_prot, flags, fd, pgoffset);
+#else
+#define mmap_ret_t void *
+#define mmap_args(v, sep) \
+    v(void *, addr, 0) sep   v(size_t, length, 1) sep \
+    v(int, prot, 2) sep      v(int, flags, 3) sep \
+    v(int, fd, 4) sep        v(unsigned long, offset, 5)
+bootstrap_proto(mmap)
+{
+	void *wraparound_ret = detect_wraparound_mapping_request(addr, length, prot, flags,
+			fd, offset, caller);
+	if (wraparound_ret) return wraparound_ret;
+
 	tweak_flags(&flags);
 	if (!(prot & PROT_EXEC))
 	{
@@ -660,7 +702,7 @@ not_wraparound:
 	// should really leave out PROT_WRITE, then re-mprotect when we're doing the rewrite
 	int temporary_prot = (prot | PROT_WRITE | PROT_READ) & ~PROT_EXEC;
 	void *mapping = (void*) mmap(addr, length, temporary_prot, flags, fd, offset);
-#endif
+#endif /* end of mmap2 versus mmap alternation...  */
 	/* Trap -- HOW? We could go eager or lazy; let's try eager for now.
 	 *
 	 * When we are called, we may not be able to runt-reflect on the
@@ -831,6 +873,10 @@ static int do_sigaction_alike_call(int signum, const struct __asm_sigaction *act
 #ifdef USE_VPERMS
 		|| signum == SIGSEGV
 #endif
+#define USE_LCALL /* FIXME: use this consistently and pervasively */
+#ifdef USE_LCALL
+		|| signum == SIGBUS
+#endif
 	)
 	{
 		/* "can be called with a NULL second argument to query the current signal handler" */
@@ -842,7 +888,7 @@ static int do_sigaction_alike_call(int signum, const struct __asm_sigaction *act
 		}
 		/* else the caller is actually trying to set a new handler */
 		debug_printf(0, "Blocked program's attempt to install a %s handler\n",
-				(signum == SIGILL) ? "SIGILL" : "SIGSEGV");
+				(signum == SIGILL) ? "SIGILL" : (signum == SIGSEGV) ? "SIGSEGV" : "SIGBUS");
 		return -1;
 	}
 	if (!act)
@@ -865,6 +911,13 @@ static int do_sigaction_alike_call(int signum, const struct __asm_sigaction *act
 		debug_printf(0, "Blocked program's attempt to a signal handler that runs with SIGSEGV blocked\n");
 	}
 #endif
+#ifdef USE_LCALL
+	if (realact.sa_mask & (1<<(SIGBUS-1)))
+	{
+		realact.sa_mask &= ~(1<<(SIGBUS-1));
+		debug_printf(0, "Blocked program's attempt to a signal handler that runs with SIGBUS blocked\n");
+	}
+#endif
 /* There is no rt_sigaction wrapper, so... maybe we should raw_syscall it?
  * NOTE that our raw_ wrapper supplies the fourth argument (sigsetsize) as sizeof (__asm_sigset_t) */
 	return raw_call(signum, &realact, oldact);
@@ -880,15 +933,69 @@ bootstrap_proto(rt_sigaction)
 REPLACE(rt_sigaction)
 
 #if defined(__i386__)
-struct sigaction;
-int sigaction(int, const struct sigaction *, struct sigaction *);
+struct __asm_sigaction;
+int sigaction(int, const struct __asm_sigaction *, struct __asm_sigaction *);
 #define sigaction_ret_t int
 #define sigaction_args(v, sep) \
-    v(int, signum, 0) sep  v(const struct sigaction *, act, 1) sep \
-    v(struct sigaction *, oldact, 2)
+    v(int, signum, 0) sep  v(const struct __asm_sigaction *, act, 1) sep \
+    v(struct __asm_sigaction *, oldact, 2)
 bootstrap_proto(sigaction)
 {
 	return do_sigaction_alike_call(signum, act, oldact, sigaction);
 }
 REPLACE(sigaction)
+#endif
+
+int rt_sigprocmask(int how, const __asm_sigset_t *set, __asm_sigset_t *oldset, size_t setsize);
+static int do_sigprocmask_alike_call(int how, const __asm_sigset_t *p_set,
+    __asm_sigset_t *oldset, size_t setsize,
+    int (*raw_call)(int, const __asm_sigset_t *, __asm_sigset_t *, size_t))
+{
+	__asm_sigset_t set;
+	bzero(&set, sizeof set);
+	if (p_set) set = *p_set;
+	if (p_set && set & (1<<(SIGILL-1)))
+	{
+		set &= ~(1<<(SIGILL-1));
+		debug_printf(0, "Foiling program's attempt to mask SIGILL\n");
+	}
+#ifdef USE_VPERMS
+	if (p_set && set & (1<<(SIGSEGV-1)))
+	{
+		set &= ~(1<<(SIGSEGV-1));
+		debug_printf(0, "Foiling program's attempt to mask SIGSEGV\n");
+	}
+#endif
+#ifdef USE_LCALL
+	if (p_set && set & (1<<(SIGBUS-1)))
+	{
+		set &= ~(1<<(SIGBUS-1));
+		debug_printf(0, "Foiling program's attempt to mask SIGBUS\n");
+	}
+#endif
+	return raw_call(how, p_set ? &set : NULL, oldset, setsize);
+}
+#define rt_sigprocmask_ret_t int
+#define rt_sigprocmask_args(v, sep) \
+    v(int, how, 0) sep  v(const __asm_sigset_t *, set, 1) sep \
+    v(__asm_sigset_t *, oldset, 2) sep \
+    v(size_t, setsize, 3)
+bootstrap_proto(rt_sigprocmask)
+{
+	return do_sigprocmask_alike_call(how, set, oldset, setsize, raw_rt_sigprocmask);
+}
+REPLACE(rt_sigprocmask)
+
+#if defined(__i386__)
+int sigprocmask(int, const __asm_sigset_t *, __asm_sigset_t *);
+#define sigprocmask_ret_t int
+#define sigprocmask_args(v, sep) \
+    v(int, how, 0) sep  v(const __asm_sigset_t *, set, 1) sep \
+    v(__asm_sigset_t *, oldset, 2) sep \
+    v(size_t, setsize, 3)
+bootstrap_proto(sigprocmask)
+{
+	return do_sigprocmask_alike_call(how, set, oldset, setsize, raw_sigprocmask);
+}
+REPLACE(sigprocmask)
 #endif
