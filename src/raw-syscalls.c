@@ -156,3 +156,18 @@ int sleep_quick(int n)
 	return ret;
 }
 
+int __attribute__((noinline)) raw_rt_sigprocmask(int how, const __asm_sigset_t *set,
+		     __asm_sigset_t *oldset, size_t setsize)
+{
+	struct generic_syscall gs = MKGS4(SYS_rt_sigprocmask, how, set, oldset, setsize);
+	return do_syscall4(&gs);
+}
+
+#ifdef __i386__
+int __attribute__((noinline)) raw_sigprocmask(int how, const __asm_sigset_t *set,
+		     __asm_sigset_t *oldset, size_t setsize)
+{
+	struct generic_syscall gs = MKGS4(SYS_sigprocmask, how, set, oldset, setsize);
+	return do_syscall4(&gs);
+}
+#endif

@@ -54,6 +54,13 @@ struct user_desc;
 int raw_set_thread_area(struct user_desc *u_info) __attribute__((noinline));
 int raw_arch_prctl(int code, unsigned long addr) __attribute__((noinline));
 
+//struct __sigset_t; /* FIXME: seems rather fragile */
+/* The problem is that kernel headers (asm/signal.h) do "typedef unsigned long sigset_t;". */
+int raw_rt_sigprocmask(/*int how, const struct __sigset_t *set, struct __sigset_t *oldset, size_t setsize*/);
+#ifdef __i386__
+int raw_sigprocmask(/*int how, const struct __sitset_t *set, struct __sigset_t *oldset, size_t setsize*/);
+#endif
+
 /* Some utilities for our clients. */
 int sleep_quick(int n);
 
