@@ -81,6 +81,24 @@ static void print_ldt(unsigned nentries)
 	}
 }
 
+/* Instead of selector 0x1f1f, we might consider other values, e.g. to allow
+ * a smaller LDT. Selector 0x0707 would use LDT entry 0xe0 (224), for example,
+ * cf. 0x3e3 (995) at present. The only hazard is that some future ISA extension,
+ * 0x07 is the head byte of a valid instruction; in the PLDI '17 instruction
+ * punning paper, it was listed as always-trapping in known x86 ISA variants.
+ *
+ * Our flipper/bumper pages should never be executable, of course, so it doesn't
+ * actually matter if the selector looks like a valid instruction.
+ *
+ * 0x0707 has a nice symmetry with 0x7, a.k.a. LDT entry 0, which was historically
+ * a system call gate on x86 Unix implementations.
+ *
+ * Then, instead of putting our lcall handler at 0x1f1f1f1f, we might put it at
+ * a randomized address in the 2--4GB range. We must set the offset of our LDT
+ * entry accordingly. Also, the contents of the lcall trampoline need to be fixed
+ * up to reflect this. We could structify them.
+ */
+
 /* We have just received control from a special unique trampoline placed
  * at 0x1f1f1f1f. The stack and register state should be identical to a normal
  * call made at the site of a syscall, except that the return address is a
@@ -320,7 +338,7 @@ void install_lcall_flipper(void)
 		void *addr = (void*)(spagenum << 21);
 		//warnx("asking for a mapping at %p", addr);
 		void *ret = raw_mmap(addr, LCALL_FLIPPER_MAPPING_UNIT,
-				PROT_READ|PROT_EXEC, MAP_PRIVATE|MAP_FIXED/*|MAP_HUGETLB|MAP_HUGE_2MB*/, flipper_fd, 0);
+				PROT_READ, MAP_PRIVATE|MAP_FIXED/*|MAP_HUGETLB|MAP_HUGE_2MB*/, flipper_fd, 0);
 		if (!(ret == (void*)(spagenum << 21))) warnx("mmap said %p cf addr %p", ret, addr);
 		assert(ret == (void*)(spagenum << 21));
 	}
@@ -355,7 +373,7 @@ void install_lcall_flipper(void)
 	assert(empty_fd != -1);
 	void *retaddr = raw_mmap((void*) LCALL_FLIPPER_AREA_BASE, LCALL_FLIPPER_AREA_LIMIT - MMAP_MIN,
 			PROT_READ /* writable just temporarily */,
-			MAP_PRIVATE|MAP_FIXED, empty_fd, 0);
+			MAP_PRIVATE|MAP_FIXED|MAP_NORESERVE, empty_fd, 0);
 	if (retaddr != (void*) MMAP_MIN) abort();
 #endif /* 0 / userfaultfd */
 
@@ -399,7 +417,7 @@ void handle_sigbus(int n, __asm_siginfo_t *info, void *ucontext)
 	 * Map something over the top. What? The flipper page, for now. */
 	void *mapping_addr = (void*) ROUND_DOWN((uintptr_t) info->si_addr, MIN_PAGE_SIZE);
 	void *ret = raw_mmap((void*) mapping_addr,
-			MIN_PAGE_SIZE, PROT_READ|PROT_EXEC, MAP_PRIVATE|MAP_FIXED, flipper_fd, 0);
+			MIN_PAGE_SIZE, PROT_READ, MAP_PRIVATE|MAP_FIXED, flipper_fd, 0);
 	if (ret != mapping_addr) abort();
 }
 
@@ -412,8 +430,6 @@ void install_sigbus_handler(void)
 __attribute__((visibility("hidden")))
 void *create_initial_low_stack(void)
 {
-#define LOW_STACK_TOP  0x81000000         /* this is just *above* 2GB... FIXME: randomize? */
-#define LOW_STACK_SIZE    8388608
 #if /*defined(LCALL_FLIPPER_MAPPING_EAGER)*/ 0
 	mprotect((void*)(LOW_STACK_TOP - LOW_STACK_SIZE), LOW_STACK_SIZE, PROT_READ|PROT_WRITE);
 	bzero((void*)(LOW_STACK_TOP - LOW_STACK_SIZE), LOW_STACK_SIZE);

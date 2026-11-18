@@ -107,7 +107,7 @@ static void insert_lcall_trap_site_with_retaddr(void *retaddr_pos, intptr_t byte
 #undef MAX_SHIFT
 }
 
-void replace_syscall_with_lcall(unsigned char *pos, unsigned len)
+void replace_syscall(unsigned char *pos, unsigned len, void *limit)
 {
 	assert(len >= 2);
 	unsigned char replacement_ud2[] = { (unsigned char) 0x0f, (unsigned char) 0x0b }; // ud2
@@ -119,7 +119,9 @@ void replace_syscall_with_lcall(unsigned char *pos, unsigned len)
 	{
 		sysinfo_sysenter_offset = (uintptr_t) pos - (uintptr_t) fake_sysinfo;
 		/* We're instrumenting the sysenter position in the *fake* ld.so.
-		 * Remember its offset. */
+		 * Remember its offset. Ditto for the int 0x80 instruction that follows
+		 * soon after the sysenter, and serves as its "virtual" system call site
+		 * in the kernel. All actual instrumentation happens later, below. */
 		unsigned char *forward_pos = pos;
 		while (!is_int80_instr(forward_pos, forward_pos + 2)
 			&& forward_pos <= (unsigned char *) fake_sysinfo + KERNEL_VSYSCALL_MAX_SIZE - 2)
@@ -131,12 +133,32 @@ void replace_syscall_with_lcall(unsigned char *pos, unsigned len)
 		}
 	}
 #endif
-	int32_t bytes; memcpy(&bytes, pos+len, 4); // HACK
-	if (bytes > 2097152) // HACK: more precise please
+	int32_t bytes; /* we are reading beyond 'len' so need to check against limit */
+	if (
+#ifdef __x86_64__
+		pos + len + 4 <= (unsigned char *) limit &&
+		(memcpy(&bytes, pos+len, 4),    /* FIXME: use LCALL_FLIPPER_* defines */
+				bytes   >= MMAP_MIN &&  /* bytes are added to %rax, which >= 0 and <= SYSCALL_MAX */
+				bytes   <= 0x7fffffff - SYSCALL_MAX) /* ... but a high 'bytes' still mustn't exceed 2GB */
+#else
+		0 /* we don't use lcall except on x86_64 */
+#endif
+	)
 	{
 		debug_printf(1, "Replacing syscall at %p with trap (lcall via *0xPUNNED(%rax))\n", pos);
 		insert_lcall_trap_site_with_retaddr(pos + 6, bytes);
 		replace_instruction_with(pos, len, replacement_lcall, sizeof replacement_lcall);
+		/* We need to mark the low-2GB flipper page(s) touched by this pun as
+		 * unavailable for other use. */
+		// TODO: check that the bit is not already set! oh, but hmm, other puns are OK.
+		// GAH. One bitmap is not enough after all. For now, we just skip the check,
+		// meaning later-loaded code may silently start punning into non-flipper mappings,
+		// which is bad.
+		if (set_low_addr_in_use)
+		{
+			set_low_addr_in_use((void*) bytes);
+			set_low_addr_in_use((void*)(bytes + SYSCALL_MAX));
+		}
 	}
 	else
 	{
@@ -162,9 +184,9 @@ void walk_instructions(unsigned char *pos, unsigned char *end,
 	}
 }
 
-int set_default_trap(unsigned char *pos, unsigned len, void *arg_ignored)
+int set_default_trap(unsigned char *pos, unsigned len, void *limit)
 {
-	replace_syscall_with_lcall(pos, len);
+	replace_syscall(pos, len, limit);
 	return 0;
 }
 struct set_trap_closure
@@ -479,13 +501,14 @@ int trap_at_vperm_range_cb(struct vperm_range *r, void *arg)
 		if (!fm) abort();
 	}
 	/* Just what trap_one_mapping would have done */
+	unsigned char *limit = (unsigned char *)((uintptr_t) r->addr + (r->npages << LOG_MIN_PAGE_SIZE));
 	trap_one_executable_region_given_shdrs(
-		(unsigned char *)(uintptr_t) r->addr, (unsigned char *)((uintptr_t) r->addr + (r->npages << LOG_MIN_PAGE_SIZE)),
+		(unsigned char *)(uintptr_t) r->addr, limit,
 		fm->filename,
 		/* is_writable already? if only if it has writable vperms */ prot_from_vperms(r->perms) & PROT_WRITE,
 		/* readable? */ 1, /* preserve_exec */ 0, // <-- no need to keep it x; for now, we know it's not in the ld.so
 		fm ? fm->shdrs : NULL, (fm && fm->ehdr) ? fm->ehdr->e_shnum : 0, fm ? fm->l->l_addr : 0,
-		/* set_trap */ set_default_trap, /*set_trap_arg*/ NULL);
+		/* set_trap */ set_default_trap, /*set_trap_arg*/ limit);
 	/* Now we can make it really executable. XXX: here we always take away write permission;
 	 * if the user asked for a RWX mapping, we need to do something else here. */
 	mprotect((void*)(uintptr_t) r->addr, r->npages << LOG_MIN_PAGE_SIZE, PROT_READ | PROT_EXEC);

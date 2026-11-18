@@ -228,7 +228,7 @@ static void copy_and_trap_vdso_elf(void *dest, void *src, size_t sz,
 			copy_text_section(dest_addr, src_addr, src_shdr->sh_size, src_shdr,
 				src_shdrs, src_ehdr->e_shentsize, min_vaddr, max_vaddr);
 			trap_one_instruction_range(dest_addr, dest_addr + src_shdr->sh_size,
-				1, 1, 0, set_default_trap, NULL);
+				1, 1, 0, set_default_trap, (void*) (dest_addr + src_shdr->sh_size));
 		}
 		else if (src_shdr->sh_flags & SHF_ALLOC && src_shdr->sh_type != SHT_NOBITS)
 		{

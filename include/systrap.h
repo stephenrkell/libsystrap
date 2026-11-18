@@ -24,7 +24,7 @@ void walk_instructions(unsigned char *pos, unsigned char *end,
 	void (*cb)(unsigned char *pos, unsigned len, void *arg), void *arg);
 void replace_instruction_with(unsigned char *pos, unsigned len,
 		unsigned char const *replacement, unsigned replacement_len);
-void replace_syscall_with_ud2(unsigned char *pos, unsigned len);
+void replace_syscall(unsigned char *pos, unsigned len, void *limit);
 _Bool is_trap_bytes(const unsigned char *ins);
 
 /* really funky clients, e.g. a ld.so, might not run their own constructor, so ... */
@@ -232,5 +232,8 @@ void install_lcall_flipper(void) __attribute__((visibility("hidden"))); /* may o
 
 /* specific to the lcall stuff... all this is x86_64-only (FIXME) */
 void *create_initial_low_stack(void) __attribute__((visibility("hidden")));
+void set_low_addr_in_use(void *addr) __attribute__((weak,visibility("hidden")));
+#define LOW_STACK_TOP  0x81000000         /* this is just *above* 2GB... FIXME: randomize!111 */
+#define LOW_STACK_SIZE    8388608
 
 #endif

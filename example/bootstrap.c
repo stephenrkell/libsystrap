@@ -26,6 +26,7 @@
 #include "trace-syscalls.h" // FIXME: move us out of example/ into src/
 #include "chain-ext.h"
 #include "relf.h"
+#include "bitmap.h"
 
 // FIXME: put this in a header
 extern const char *ldso_names[];
@@ -406,15 +407,158 @@ REPLACE(execveat)
 #endif /* CHAIN_LOADER */
 
 #ifdef __x86_64__
+
+static bitmap_word_t used_low4gb_pages[
+	((1ull << 32) >> LOG_MIN_PAGE_SIZE) / (8 * sizeof (bitmap_word_t))
+];
+static _Bool inited_low4gb_bitmap;
+static void ensure_inited_low4gb_bitmap(void)
+{
+	/* We need to set some areas as unusable a.k.a. already "used".
+	 * - initial stack, just above 2GB
+	 * - below MMAP_MIN
+	 */
+	if (__builtin_expect(!inited_low4gb_bitmap, 0))
+	{
+		memset(used_low4gb_pages, 0xff, (MMAP_MIN >> LOG_MIN_PAGE_SIZE) / 8);
+		memset(used_low4gb_pages
+			 + ((LOW_STACK_TOP - LOW_STACK_SIZE) >> LOG_MIN_PAGE_SIZE) / (8 * sizeof (bitmap_word_t)),
+			0xff,
+			(LOW_STACK_SIZE >> LOG_MIN_PAGE_SIZE) /  (8 * sizeof (bitmap_word_t))
+		);
+		inited_low4gb_bitmap = 1;
+	}
+
+}
+
 /* lcall-based instrumentation: whenever we map a stack,
  * map it in the lower 32 bits. */
-static void tweak_flags(int *p_flags)
+static _Bool tweak_mmap_request(int *p_flags, void **p_addr, size_t *p_length)
 {
-	if (    ((*p_flags & MAP_GROWSDOWN) || (*p_flags & MAP_STACK))
-		&& !(*p_flags & MAP_FIXED))
+	/* FIXME: need some locking here, on the bitmap. */
+
+	void *old_addr = *p_addr;
+	if (*p_flags & MAP_32BIT)
 	{
-		*p_flags |= MAP_32BIT;
-		write_string("tweaked a stack mapping!\n");
+		/* This forces Linux to put it in the bottom *2GB* of the address space.
+		 * (You might think it would be 4GB, but it's 2GB.) That poses a problem
+		 * for us when using lcall, because we want to take over the whole lower
+		 * 2GB for our flipper area. */
+		*p_flags &= ~MAP_32BIT;
+		 /* XXX: on a MAP_32BIT call from the user, we silently return something
+		  * in 2--4GB -- this breaks the documented contract! */
+		goto force_2gb_4gb;
+	}
+	if ((*p_flags & MAP_FIXED)
+		&& old_addr != NULL
+		&& (uintptr_t) old_addr < 0x80000000)
+	{
+		ensure_inited_low4gb_bitmap();
+		/* Fixed request starting <2GB. What to do? Just check the pages are
+		 * not in use, and abort otherwise. */
+		for (unsigned pagenum =  (uintptr_t) old_addr               >> LOG_MIN_PAGE_SIZE;
+		              pagenum != ((uintptr_t) old_addr + *p_length) >> LOG_MIN_PAGE_SIZE;
+		     ++pagenum)
+		{
+			if (bitmap_get_l(used_low4gb_pages, pagenum))
+			{
+				write_string("MAP_FIXED in the low 2GB could not be satisfied, sorry\n");
+				abort();
+			}
+		}
+	}
+	if ((*p_flags & MAP_GROWSDOWN) || (*p_flags & MAP_STACK))
+	{
+		if (*p_flags & MAP_FIXED)
+		{
+			assert((uintptr_t) old_addr > 0xffffffffu); // else our case above should have caught it
+			/* Fixed, stack, but not low-4GB. We can't deal with this. */
+			write_string("Fixed stack above 4GB is not supported, sorry; must disable lcall\n");
+			abort();
+		}
+		/* TODO: check early on that nothing is mapped below 4GB, from /proc/self/maps
+		 * TODO: catch MAP_FIXED mappings of a non-PIE executable like xterm
+		 * - from then on, keep track over the lower 4GB in a simple array (somehow)
+		 * TODO: check for mmap returning something <4GB from a NULL addr -- it shouldn't!
+		 * TODO: we have the full complexity of mremap() etc to
+		 * deal with... perhaps we can simply forbid mremap in the low 4GB.
+		 *
+		 * This relates to our xterm problem *and* our 'bumper' mapping, in the sense
+		 * that we want to detect when an mmap is occurring from the ld.so mapping an
+		 * executable. In that case we may do something different, e.g. permit it to
+		 * map over the low 2GB and update our metadata.
+		 *
+		 * Keep a bitmap. One bit per page would mean 2^20 bits or 2^17 bytes or 2^5 pages.
+		 * The bitmap records only "in use". That includes "mapped something for the user",
+		 * e.g. xterm or the MAP_FIXED case above, and it also includes a flipper page where
+		 * we know some %rax-relative lcall site requires that page.
+		 *
+		 * We considered other bitmaps, e.g. "mapped a real piece of flipper" would be another;
+		 * "mapped either of the above" would be a third. However, all we really want to do
+		 * is to be able to search for "free" areas.
+		 *
+		 * XXX: not true. In the low 2GB we also care to distinguish "used as flipper"
+		 * from "used for a mapping" e.g. for a non-PIE executable.
+		 */
+		goto force_2gb_4gb;
+	}
+	// if we got here, there is nothing to tweak
+	return 0;
+force_2gb_4gb:
+	ensure_inited_low4gb_bitmap();
+	/* search for a free range in 2GB--4GB, then do a MAP_FIXED there */
+	bitmap_word_t *start_word = used_low4gb_pages +
+		(0x80000000 >> LOG_MIN_PAGE_SIZE) / (8 * sizeof (bitmap_word_t));
+	bitmap_word_t *limit = (void*)((unsigned char *) used_low4gb_pages + sizeof used_low4gb_pages);
+	unsigned npages = ROUND_UP(*p_length, MIN_PAGE_SIZE) >> LOG_MIN_PAGE_SIZE;
+	unsigned long found_bit_offset = bitmap_find_n_zero_l(start_word, limit, npages);
+	if (found_bit_offset == -1) abort();
+
+	write_string("tweaking a stack mapping! will request ");
+	uintptr_t new_addr = 0x80000000ul + (found_bit_offset << LOG_MIN_PAGE_SIZE);
+	*p_addr = (void*) new_addr;
+	write_string(fmt_hex_num(new_addr));
+	write_string("--");
+	write_string(fmt_hex_num(new_addr + *p_length - 1));
+	write_string("\n");
+	*p_flags |= MAP_FIXED_NOREPLACE;
+	return 1;
+}
+
+__attribute__((visibility("hidden")))
+void set_low_addr_in_use(void *addr)
+{
+	bitmap_word_t *start_word = used_low4gb_pages;
+	bitmap_word_t *limit = (void*)((unsigned char *) used_low4gb_pages + sizeof used_low4gb_pages);
+	bitmap_set_l(start_word, (uintptr_t) addr >> LOG_MIN_PAGE_SIZE);
+}
+
+static void tweak_mmap_response(void *mapped, void *requested_addr, size_t length)
+{
+	if (mapped == requested_addr)
+	{
+		write_string("tweak successful\n");
+		assert((uintptr_t) requested_addr < (1ull << 32)); // under 4GB
+		/* set all the relevant bits */
+		// we only ever issue page-aligned addresses
+		unsigned npages = ROUND_UP(length, MIN_PAGE_SIZE) >> LOG_MIN_PAGE_SIZE;
+		unsigned firstpage = (uintptr_t) mapped >> LOG_MIN_PAGE_SIZE;
+		/* FIXME: we should set the bits preemptively in the pre-tweak, and then
+		 * unset them in the *failure* case. With appropriate locking. If we fail
+		 * with -EEXIST, then we should report what has been mapped there (to the
+		 * extent that we know) because this shouldn't happen. */
+		for (unsigned i = 0; i < npages; ++i)
+		{
+			bitmap_set_l(used_low4gb_pages, firstpage + i);
+		}
+	}
+	else
+	{
+		write_string("tweaked low-4GB address ");
+		write_string(fmt_hex_num((uintptr_t) requested_addr));
+		write_string(" could not be mapped MAP_FIXED_NOREPLACE, sorry (check the bitmap / races?)\n");
+		/* HMM. There can be races here, currently, which might explain this -- FIXME. */
+		abort();
 	}
 }
 #endif
@@ -688,20 +832,23 @@ bootstrap_proto(mmap)
 	void *wraparound_ret = detect_wraparound_mapping_request(addr, length, prot, flags,
 			fd, offset, caller);
 	if (wraparound_ret) return wraparound_ret;
+	int temporary_prot; // may be used later
 
-	tweak_flags(&flags);
+	_Bool tweaked = tweak_mmap_request(&flags, &addr, &length);
+	void *mapping;
 	if (!(prot & PROT_EXEC))
 	{
-		void *ret = mmap(addr, length, prot, flags, fd, offset);
-		if (ret != MAP_FAILED) replace_vperms_over(ret, (void*)((uintptr_t)ret + length), /* drop 'em */ -1);
-		return ret;
+		/* no need to set vperms, but we clear any that existed and are now being mapped over */
+		mapping = mmap(addr, length, prot, flags, fd, offset);
+		if (mapping != MAP_FAILED) replace_vperms_over(mapping, (void*)((uintptr_t)mapping + length), /* drop 'em */ -1);
+		goto out;
 	}
 	// else...
 	// always map writable, non-executable
 	// FIXME: now that we defer the rewriting of syscall instructions, this feels dangerous...
 	// should really leave out PROT_WRITE, then re-mprotect when we're doing the rewrite
-	int temporary_prot = (prot | PROT_WRITE | PROT_READ) & ~PROT_EXEC;
-	void *mapping = (void*) mmap(addr, length, temporary_prot, flags, fd, offset);
+	temporary_prot = (prot | PROT_WRITE | PROT_READ) & ~PROT_EXEC;
+	mapping = (void*) mmap(addr, length, temporary_prot, flags, fd, offset);
 #endif /* end of mmap2 versus mmap alternation...  */
 	/* Trap -- HOW? We could go eager or lazy; let's try eager for now.
 	 *
@@ -738,6 +885,10 @@ bootstrap_proto(mmap)
 		//if (!added) abort();
 		replace_vperms_over(mapping, (void*)((uintptr_t) mapping + length), prot);
 	}
+out:
+#ifdef __x86_64__
+	if (tweaked) tweak_mmap_response(mapping, addr, length);
+#endif
 	return mapping;
 } // end of mmap2 (32-bit) or mmap (otherwise)
 #if defined(__i386__)
