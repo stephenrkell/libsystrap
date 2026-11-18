@@ -17,21 +17,21 @@ __systrap_call_handler_with_retaddr_restore:
     push %rdx
     mov __systrap_lcall_retaddrs@gotpcrel(%rip), %r11
     xor %rcx, %rcx      # %rcx is a counter, 0 to 30 (potentially!)
-    0:
+    .Llookup_loop:
     movl 8(%rsp), %edx         # %edx is the 32-bit word
     sar %cl, %edx              # %edx is now the shifted 32-bit word
     and $0xfff, %edx           # ... now just 12 bits of it
     mov (%r11, %rdx, 8), %rdx  # now %rdx is the 64-bit table entry...
     cmpl %edx, 8(%rsp)         # ... do its lower 32 match?
-    je 2f                      # match / success... we have left the 64-bit value in %rdx
+    je .Lsuccess               # match / success... we have left the 64-bit value in %rdx
     inc %cl
     cmp $21, %cl               # We have 21 hash functions: [0,11], [1,12], ..., [20,31]
-    je 1f                      # our counter hit 21 -- lookup failed
-    jmp 0b
-    1:
+    je .Lfailure               # our counter hit 21 -- lookup failed
+    jmp .Llookup_loop
+    .Lfailure:
     # hash lookup failure... what to do? just abort for now
-    jmp 6f
-    2:
+    jmp .Ldo_return   # XXX: is this correct?
+    .Lsuccess:
     lea -6(%rdx), %rcx         # we needed %rcx for the shift, but it's free now
                                # lcalls are 6 bytes long, and the *site* addr is what we want in %rcx
     rol $1, %rcx               # set the top bit in %rcx
@@ -52,14 +52,14 @@ __systrap_call_handler:
     #
     # If we have no generic handlers defined, we can execute a straight replacement.
     cmpq $0, __systrap_pre_handling(%rip)
-    jz 1f
+    jz .Ldone_pre_handling
     push %rax
     push %rcx
     mov __systrap_pre_handling(%rip), %r11
     call *%r11
     pop %rcx
     pop %rax
-    1:
+    .Ldone_pre_handling:
     # Do we have a replacement for this syscall?
     # To avoid buffer-overflow if %rax has a bogus value, or is x32-ABI, count leading zeroes...
     # we do this by "bit-scan reverse" which gives us the bit idx of the most significant 1 set.
@@ -69,11 +69,11 @@ __systrap_call_handler:
     mov %rax, %r11
     shr $LOG_NSYSCALLS, %r11
     cmp $0, %r11
-    jnz 3f                     # the top bits should be zero if we want to index using %rax
-    2:
+    jnz .Lactual_syscall         # bounds check: top bits should be zero if safe to index using %rax
+    .Lcheck_for_replacement:
     lea replaced_syscalls(%rip), %r11
-    cmpq $0, (%r11,%rax,8)
-    jz 3f
+    cmpq $0, (%r11,%rax,8)       # the replacement pointer may be null
+    jz .Lactual_syscall
     push %rax   # must save the syscall number, in case post action wants it
     push %rcx
     mov (%r11,%rax,8), %r11
@@ -81,17 +81,17 @@ __systrap_call_handler:
     pop %rcx
     pop %r11    # Now the syscall number is moved into %r11
     # that's the replacement done -- now the return value is in %rax!
-    jmp 4f
-    3:
+    jmp .Lcheck_for_post_handling
+    .Lactual_syscall:
     # We land here if we need to do the actual syscall, because there's no replacement.
     # Some syscalls have special treatment.
     cmp $__NR_rt_sigreturn, %rax
-    je 10f                    # just do the syscall; it never returns
+    je .Ldo_syscall_no_redzone  # just do the syscall; it never returns
     cmp $__NR_clone, %rax
-    je 11f                    # special handling path
+    je .Ldo_clone                    # special handling path
     cmp $__NR_clone3, %rax
-    je 12f
-    30:
+    je .Ldo_clone3
+    .Ldo_syscall:
     # Generic handling follows.
     # PROBLEM: the syscall will clobber %rcx which tells us our return address.
     # But we want to run the syscall with the exact same stack pointer as at the trap site.
@@ -114,17 +114,17 @@ __systrap_call_handler:
     # is perhaps positive evidence that preserving the red zone across syscalls is not guaranteed.
     mov %rcx, -8(%rsp)
     mov %rax, -16(%rsp)
-    10:                    # rt_sigreturn jumps in here since it doesn't need the redzone
+    .Ldo_syscall_no_redzone:            # rt_sigreturn jumps in here since it doesn't need the redzone
     syscall
     mov -16(%rsp), %r11    # Now the syscall number is in %r11, in case post action needs it
     mov -8(%rsp), %rcx
     # Trap the case where sigreturn returns -- it shouldn't!
     # TODO: similar treatment here for exit_group and others? Or is any of this necessary?
     cmpq $__NR_rt_sigreturn, %r11
-    je 7f
-    4:
+    je .Lmisc_failure
+    .Lcheck_for_post_handling:
     cmpq $0, __systrap_post_handling(%rip)
-    jz 5f
+    jz .Ldone_post_handling
     # As we arrive here, %rax holds the syscall return value and %r11 the syscall number.
     # Unlike before, %r11 is not scratch. Nor is %rax; it contains the return value.
     # To keep the calling convention for raw pre- and post-handling wrappers the same,
@@ -144,7 +144,7 @@ __systrap_call_handler:
     pop %rcx
     pop %rax
     pop %r11
-    5:
+    .Ldone_post_handling:
     # XXX: if we got here by an lcall, the return address (plus some offset!) is on the stack
     # but we put it in %rcx earlier when we fixed it up. We should clean up
     # the stack, but also, do the appropriate kind of ret/jmp since otherwise we
@@ -152,9 +152,9 @@ __systrap_call_handler:
     # pathway has some extra instructions at the top. Maybe borrow the top bit of %rcx?
     add $2, %rcx
     # Since we used 'add' not 'lea', there is a flag telling us whether %rcx is negative...
-    js 6f
+    js .Ldo_return
     jmp *%rcx
-    6:
+    .Ldo_return:
     # This is the return path... a short return for a long call.
     # We *don't* have the return address on the stack yet...
     # ... because we dropped it above, if present i.e. if a call got us here. So put it back!
@@ -163,7 +163,7 @@ __systrap_call_handler:
     shr $1, %rcx
     push %rcx                  # XXX: does this break CFI checks? Probably, at least in lcall case...
     retq
-    7:
+    .Lmisc_failure:
     # This is the "rt_sigreturn failed" path... print something then abort.
     mov $__NR_write, %rax
     mov $2, %rdi
@@ -179,50 +179,69 @@ __systrap_call_handler:
 .Lrt_sigreturn_msg_end: # we don't need the NUL terminator but include one anyway
     .byte 0
 .popsection
-    11:
+    .Ldo_clone:
     # This is the clone prep path.
     # Are we replacing the stack? YES, always I think -- NULL just means the kernel allocates it.
     # In the NULL case, we can skip this because the kernel copies the current stack,
     # including the stuff we save in the red zone.
     cmpq $0, %rsi
-    je 30b
+    je .Ldo_syscall      # go to generic handling path, which stashes %rcx and %rax in the red zone
     # To be nice, we should test whether we're overwriting nonzero data
     cmpq $0, -8(%rsi)
-    jne 15f
+    jne .Labort_clone_or_clone3
     cmpq $0, -16(%rsi)
-    jne 15f
-    # NOTE: we could share this code with the clone3 copy, below, but it has to pop %rsi.
-    # Seems clearer to keep these code paths separate rather than merge and then pop conditionally.
-    mov %rcx, -8(%rsi)      # %rsi points to "the topmost address of the new stack"
-    mov %rax, -16(%rsi)
-    jmp 30b
-    12:
+    jne .Labort_clone_or_clone3
+    mov %rcx, -8192(%rsi)  # %rsi points to "the topmost address of the new stack"
+    mov %rax, -8184(%rsi)  # ... we stash to-be-clobbered stuff low-ish down the new thread's stack
+    # Share what we can with the clone3 path
+    jmp .Ldo_clone_or_clone3_call
     # This is the clone3 prep path
+    .Ldo_clone3:
     push %rsi
-    push %rcx
+    push %rdx
     mov 40(%rdi), %rsi    # *bottom* address of new stack
-    mov 48(%rdi), %rcx    # size of new stack
-    add %rcx, %rsi        # now we're like clone: %rdx is the topmost address
-    pop %rcx
-    # As in clone, we skip ahead if the stack is null
+    mov 48(%rdi), %rdx    # size of new stack
+    add %rdx, %rsi        # now we're like clone: %rsi is the topmost address
+    # As in clone, we skip ahead if the stack is null, but here we first have to undo our pushes above
     cmp $0, %rsi
-    je 13f
-    # To be nice, we should test whether we're overwriting nonzero data
-    cmpq $0, -8(%rsi)
-    jne 14f
-    cmpq $0, -16(%rsi)
-    jne 14f
-    mov %rcx, -8(%rsi)
-    mov %rax, -16(%rsi)
-    13:
+    je .Lfinish_clone3_prep_child_stack
+    # We are going to stash the caller's %rcx (ret addr) and %rax (syscall number) on the *new* stack.
+    # We want to support prepopulated stacks but there's a tension: we need some stack space for
+    # stashing our temporary data. Also, we can't detect prepopulation because stacks aren't
+    # routinely zeroed, so anything could be here. We use a semi-distant part of the stack and hope.
+    # We can't use the very bottom of the stack, because the length of the stack is not retrievable
+    # in a clone3'd child thread. Instead we check the length is at least 8192 bytes, and use the
+    # bottom two slots in that 8kB window. This means we support up to 8176 bytes of prepopulation.
+    cmpq $8192, %rdx
+    jl .Lpop_then_abort    # i.e. unsupported
+    mov %rcx, -8192(%rsi) # stash to-be-clobbered stuff low-ish down the new thread's stack
+    mov %rax, -8184(%rsi)
+    .Lfinish_clone3_prep_child_stack:
+    pop %rdx
     pop %rsi
-    jmp 30b
-    14:
-    # This is the unsupported clone case: the stack has been prepopulated.
+    .Ldo_clone_or_clone3_call:
+    mov %rcx, -8(%rsp)    # stash to-be-clobbered stuff in the red zone of the calling thread's stack
+    mov %rax, -16(%rsp)
+    syscall
+    # Now test whether we are the child and if so, retrieve from the new-stack stash.
+    # Note that we have to address via %rsp, i.e. the new stack pointer. %rsi was popped and
+    # when we are a clone3, the struct on the caller's stack may be long gone.
+    cmp $0, %rax
+    jne .Lrestore_from_red_zone
+    mov -8184(%rsp), %r11  # Now the syscall number is in %r11, in case post action needs it
+    mov -8192(%rsp), %rcx  # Now the return address is in %rcx
+    jmp .Lcheck_for_post_handling     # go to the post- handling path
+    .Lrestore_from_red_zone:
+    mov -16(%rsp), %r11    # Now the syscall number is in %r11, in case post action needs it
+    mov -8(%rsp), %rcx
+    jmp .Lcheck_for_post_handling     # go to the post- handling path
+    .Lpop_then_abort:
+    # This is the unsupported clone case: the stack is too small.
+    pop %rdx
     pop %rsi
-    15:
+    .Labort_clone_or_clone3:
     # what to do?
-    jmp 7b   # jump to our abort path.
+    jmp .Lmisc_failure   # jump to our abort path.
     # FIXME: distinguish the aborting cases
     # FIXME: pull the abort code down here, for i-cache reasons
     # FIXME: generally cache-optimise the code layout for the noop case (no replacement, no pre/post)
