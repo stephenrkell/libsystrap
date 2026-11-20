@@ -386,11 +386,9 @@ int compare_vperm_ranges(const void *m1_as_void, const void *m2_as_void)
 	if (!m2->addr) /* m1 < m2 */ return -1;
 	// the usual case
 	intptr_t diff = (intptr_t) m1->addr - (intptr_t) m2->addr;
-	/* We need to turn it into an 'int' in a sign-preserving way. */
-#ifdef __LP64__
-	if (diff > INT_MAX || diff < INT_MIN) return diff >> 32;
-#endif
-	return (int) diff;
+	/* Danger: 'diff' is a 64-bit quantity so we cannot simply return it as an 'int'.
+	 * truncation will not preserve its zero/pos/neg property, nor will taking it >>32. */
+	return (diff > 0) ? /* m1 > m2 */ 1 : /* m1 < m2 */ -1; /* we handled the equal case above */
 }
 
 __attribute__((visibility("hidden")))
