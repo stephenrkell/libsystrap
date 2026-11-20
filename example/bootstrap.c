@@ -428,15 +428,14 @@ static void ensure_inited_low4gb_bitmap(void)
 		);
 		inited_low4gb_bitmap = 1;
 	}
-
 }
 
-/* lcall-based instrumentation: whenever we map a stack,
- * map it in the lower 32 bits. */
-static _Bool tweak_mmap_request(int *p_flags, void **p_addr, size_t *p_length)
+#define NBYTES_2GB 0x80000000ul
+/* %rax-relative lcall-based instrumentation: whenever we map a stack,
+ * map it in the 2--4GB range. */
+static _Bool tweak_stack_or_low_mmap_request(int *p_flags, void **p_addr, size_t *p_length)
 {
 	/* FIXME: need some locking here, on the bitmap. */
-
 	void *old_addr = *p_addr;
 	if (*p_flags & MAP_32BIT)
 	{
@@ -451,7 +450,7 @@ static _Bool tweak_mmap_request(int *p_flags, void **p_addr, size_t *p_length)
 	}
 	if ((*p_flags & MAP_FIXED)
 		&& old_addr != NULL
-		&& (uintptr_t) old_addr < 0x80000000)
+		&& (uintptr_t) old_addr < NBYTES_2GB)
 	{
 		ensure_inited_low4gb_bitmap();
 		/* Fixed request starting <2GB. What to do? Just check the pages are
@@ -508,18 +507,18 @@ force_2gb_4gb:
 	ensure_inited_low4gb_bitmap();
 	/* search for a free range in 2GB--4GB, then do a MAP_FIXED there */
 	bitmap_word_t *start_word = used_low4gb_pages +
-		(0x80000000 >> LOG_MIN_PAGE_SIZE) / (8 * sizeof (bitmap_word_t));
+		(NBYTES_2GB >> LOG_MIN_PAGE_SIZE) / (8 * sizeof (bitmap_word_t));
 	bitmap_word_t *limit = (void*)((unsigned char *) used_low4gb_pages + sizeof used_low4gb_pages);
 	unsigned npages = ROUND_UP(*p_length, MIN_PAGE_SIZE) >> LOG_MIN_PAGE_SIZE;
 	unsigned long found_bit_offset = bitmap_find_n_zero_l(start_word, limit, npages);
 	if (found_bit_offset == -1) abort();
 
 	write_string("tweaking a stack mapping! will request ");
-	uintptr_t new_addr = 0x80000000ul + (found_bit_offset << LOG_MIN_PAGE_SIZE);
+	uintptr_t new_addr = NBYTES_2GB + (found_bit_offset << LOG_MIN_PAGE_SIZE);
 	*p_addr = (void*) new_addr;
-	write_string(fmt_hex_num(new_addr));
+	write_ulong(new_addr);
 	write_string("--");
-	write_string(fmt_hex_num(new_addr + *p_length - 1));
+	write_ulong(new_addr + *p_length - 1);
 	write_string("\n");
 	*p_flags |= MAP_FIXED_NOREPLACE;
 	return 1;
@@ -533,7 +532,7 @@ void set_low_addr_in_use(void *addr)
 	bitmap_set_l(start_word, (uintptr_t) addr >> LOG_MIN_PAGE_SIZE);
 }
 
-static void tweak_mmap_response(void *mapped, void *requested_addr, size_t length)
+static void tweak_stack_or_low_mmap_response(void *mapped, void *requested_addr, size_t length)
 {
 	if (mapped == requested_addr)
 	{
@@ -555,7 +554,7 @@ static void tweak_mmap_response(void *mapped, void *requested_addr, size_t lengt
 	else
 	{
 		write_string("tweaked low-4GB address ");
-		write_string(fmt_hex_num((uintptr_t) requested_addr));
+		write_ulong((uintptr_t) requested_addr);
 		write_string(" could not be mapped MAP_FIXED_NOREPLACE, sorry (check the bitmap / races?)\n");
 		/* HMM. There can be races here, currently, which might explain this -- FIXME. */
 		abort();
@@ -574,6 +573,79 @@ static char *fd_to_name(int fd, char *buf, size_t bufsz)
 	if (nread <= 0) return NULL; // something very strange going on
 	buf[nread] = '\0'; // readlink() requires NUL termination ourselves
 	return buf;
+}
+
+static char *remembered_filename;
+static void *remembered_base;
+static size_t remembered_length;
+static _Bool detect_fresh_elf_mapping_request(void *addr, size_t length, int prot,
+	int flags, int fd, off_t offset, void *caller)
+{
+	if ((uintptr_t) caller >= load_ctxt.loadee->base_addr
+		&& (uintptr_t) caller < load_ctxt.loadee->base_addr + load_ctxt.loadee->max_vaddr
+		&& 0 != (flags & MAP_PRIVATE)
+		&& fd != -1)
+	{
+		/* Q. How do we initialize "wraparound link map"?
+		 * A. Use a constructor? TODO: add this, otherwise we will
+		 * be slower than necessary. */
+		struct r_debug *r_debug = find_r_debug();
+		if (r_debug->r_map && r_debug->r_state == RT_ADD)
+		{
+			/* Is this an ELF file? */
+			char bytes[4];
+			ssize_t nread = pread(fd, bytes, 4, 0);
+			if (nread == 4 && 0 == strncmp(bytes, "\177ELF", 4))
+			{
+				/* We're mapping an ELF file under RT_ADD. Check it's not
+				 * already in the link map. */
+				char buf[/*PATH_MAX*/ 4096];
+				char *out = fd_to_name(fd, buf, /*PATH_MAX*/ 4096);
+				if (!out) abort(); // no name or name too long, so it must be fresh, no?
+				for (struct link_map *l = r_debug->r_map; l; l = l->l_next)
+				{
+					/* FIXME: strcmp is not a good enough check here. The link map name
+					 * need not correspond to the /proc/self/fd name. */
+					if (0 == strncmp(out, l->l_name, /* PATH_MAX */ 4096)) return 0;
+				}
+				/* If we got here, it seems to be fresh... but we will get *many*
+				 * mapping requests for the same object, and as things are, we will
+				 * say they are all fresh! The link map entry has not yet been created.
+				 * How can we recognise the second mapping of a sequence? One idea
+				 * is to catch where we are overlapping an existing mapping... assuming the
+				 * pattern of a big "reservation" mapping followed by overlapping mappings
+				 * for further segments. Perhaps not all loaders do this, though.
+				 * Another might be to build up some state and catch
+				 * calls to _dl_debug_state() to reset it, since that is called whenever
+				 * the dynamic linker has finished the job. Requires care though: we might
+				 * be mapping multiple DSOs before the call comes in.
+				 *
+				 * For now, let's remember a filename and an extent. We check for same-filename
+				 * and overlap; in such a case it's not fresh.
+				 * The single shared filename/extent is prone to races in theory; I think
+				 * we are mostly protected by the ld.so's own locking, but there may be
+				 * corner cases (FIXME). E.g. what if the RT_ADD is actually activity on
+				 * another thread, while the first is racily mapping the same object? */
+				if (remembered_filename
+					&& 0 == strcmp(buf, remembered_filename)
+					&& (flags & MAP_FIXED)
+					&& addr
+					&& (uintptr_t) addr >= (uintptr_t) remembered_base
+					&& (uintptr_t) addr < (uintptr_t) remembered_base + remembered_length)
+				{
+					/* not fresh! matches the last-seen go-around */
+					return 0;
+				}
+			return_fresh:
+				/* Seems fresh. Remember it for future go-arounds.
+				 * We will have to fill in the base and length in the caller. */
+				if (remembered_filename) free(remembered_filename);
+				remembered_filename = strdup(buf);
+				return 1;
+			}
+		}
+	}
+	return 0;
 }
 
 static void *detect_wraparound_mapping_request(void *addr, size_t length, int prot,
@@ -615,7 +687,12 @@ static void *detect_wraparound_mapping_request(void *addr, size_t length, int pr
 			 * A. Use a constructor? TODO: add this, otherwise we will
 			 * be slower than necessary. */
 			struct r_debug *r_debug = find_r_debug();
-			if (r_debug->r_map && r_debug->r_state == RT_ADD)
+			/* XXX: if the ld.so is "invoked" not requested, it has to load
+			 * the executable. While it does so, the link map state is RT_CONSISTENT
+			 * not RT_ADD. How can we catch this case? Maybe r_map == NULL? */
+			if (r_debug->r_map &&
+					(r_debug->r_state == RT_ADD
+					|| r_debug->r_map == NULL))
 			{
 				if (fd == -1)
 				{
@@ -832,63 +909,206 @@ bootstrap_proto(mmap)
 	void *wraparound_ret = detect_wraparound_mapping_request(addr, length, prot, flags,
 			fd, offset, caller);
 	if (wraparound_ret) return wraparound_ret;
-	int temporary_prot; // may be used later
 
-	_Bool tweaked = tweak_mmap_request(&flags, &addr, &length);
-	void *mapping;
-	if (!(prot & PROT_EXEC))
-	{
-		/* no need to set vperms, but we clear any that existed and are now being mapped over */
-		mapping = mmap(addr, length, prot, flags, fd, offset);
-		if (mapping != MAP_FAILED) replace_vperms_over(mapping, (void*)((uintptr_t)mapping + length), /* drop 'em */ -1);
-		goto out;
-	}
-	// else...
-	// always map writable, non-executable
-	// FIXME: now that we defer the rewriting of syscall instructions, this feels dangerous...
-	// should really leave out PROT_WRITE, then re-mprotect when we're doing the rewrite
-	temporary_prot = (prot | PROT_WRITE | PROT_READ) & ~PROT_EXEC;
-	mapping = (void*) mmap(addr, length, temporary_prot, flags, fd, offset);
-#endif /* end of mmap2 versus mmap alternation...  */
-	/* Trap -- HOW? We could go eager or lazy; let's try eager for now.
+	/* Is this a PROT_NONE mapping created by the ld.so to align a smaller mapping within?
+	 * If so, we have to allow space for bumpers now, because the placeholder mapping is
+	 * what allocates the address space. We will handle this case a bit like a fresh ELF. */
+	_Bool mapping_is_ld_so_placeholder = /*detect_ld_so_placeholder_mapping_request(addr, length, prot, flags,
+			fd, offset, caller);*/
+			((uintptr_t) caller >= load_ctxt.loadee->base_addr
+			&& (uintptr_t) caller < load_ctxt.loadee->base_addr + load_ctxt.loadee->max_vaddr
+			&& 0 != (flags & MAP_PRIVATE)
+			&& 0 != (flags & MAP_ANONYMOUS)
+			&& prot == PROT_NONE
+			&& fd == -1);
+	/* Is this mapping a new ELF? If so, we will add lcall bumpers. */
+	_Bool fresh_elf = detect_fresh_elf_mapping_request(addr, length, prot, flags,
+			fd, offset, caller);
+	/* PROBLEM: sometimes alignment dictates that the ld.so will map a large
+	 * anonymous mapping and then map the segment MAP_FIXED in its place, a
+	 * small offset from the start. This won't look like a fresh ELF but it
+	 * will cause us to fail later, if extending it by 4GB overlaps other
+	 * mappings.
 	 *
-	 * When we are called, we may not be able to runt-reflect on the
-	 * mapping, because it is probably not in the link map.
+	 * Perhaps we could preemptively resize this anonymous mapping too?
+	 * We do get a clue in the form of PROT_NONE, though. So perhaps we should...
 	 *
-	 * How does liballocs deal with this? It doesn't. It doesn't track
-	 * what's going on during ld.so. When it catches dlopen mmaps, it
-	 * registers the segments (etc) later.
-	 *
-	 * Our best bet is to tweak how we do trap_one_executable_region()
-	 * so that we can provide the section headers. Given the fd, it will
-	 * be trivial to scrape them out of the ELF file. This refactoring
-	 * is now done.
+	 * - if the ld.so is trying to reserve some address space with PROT_NONE,
+	 *   reserve 4GB more than it asks for, add MAP_NORESERVE, and return addr+2GB.
+	 *   We remember this as our "placeholder" mapping. We have at most one of these.
+	 * - if a later MAP_FIXED request comes in with a fresh ELF, we will naturally
+	 *   map over it with our bumpers, *as long as* we know *not* to add
+	 *   MAP_FIXED_NOREPLACE to the flags in such a case.
+	 * - if the next fresh ELF that comes in does *not* use the placeholder, we
+	 *   drop it. i.e. we have at most one placeholder at a time.
 	 */
-	/* Doesn't this undermine the concept of librunt as sitting underneath
-	 * us and similar tools? Maybe a little. But we are still using relf.h
-	 * a lot, and much of the librunt utility code is useful in code contexts
-	 * that aren't pre-dynload/link, e.g. pretty-printing addresses etc.
-	 *
-	 * Also, it's inefficient. We're doing all this snarfing for every mmap,
-	 * and basically we're re-gathering the same metadata that librunt can
-	 * grab for us "the right way" shortly, once the ld.so has registered the
-	 * mapping. However, it's simple.
-	 *
-	 * We may decide to be lazy: clear execute permission, record the range
-	 * as virtually executable, and wait for the SEGV, which we must handle.
-	 * This would also let us trap gradually, which may be good for performance
-	 * (not sure... it means taking more faults). Handling SEGV is necessary if
-	 * we're going to do the 'virtual R|X mappings' trick. */
+	static void *placeholder_adjusted_base;
+	static size_t placeholder_adjusted_length;
+	static _Bool placeholder_used;
+
+	size_t orig_length = length;
+	int orig_flags = flags;
+	_Bool fresh_elf_overlaps_placeholder = 0;
+	if (fresh_elf || mapping_is_ld_so_placeholder)
+	{
+		/* XXX: currently we remap the user-desired portion of this huge "bumpered" mapping
+		 * into its mid-bumpers position, which is the address returned to the caller. That
+		 * does not give us an opportunity to unset this MAP_NORESERVE flag. Perhaps we
+		 * should create the final mapping by a fresh mmap rather than mremap. */
+		if (fresh_elf && ((flags & MAP_FIXED) || (flags & MAP_FIXED_NOREPLACE)))
+		{
+			assert(addr);
+			fresh_elf_overlaps_placeholder =
+			   (uintptr_t) addr >= (uintptr_t) placeholder_adjusted_base + NBYTES_2GB &&
+			   (uintptr_t) addr + orig_length < (uintptr_t) placeholder_adjusted_base + placeholder_adjusted_length;
+
+			/* XXX: what do we do with 'length' if we previously mapped a placeholder?
+			 * that means we have a large PROT_NONE region, big enough for bumpers.
+			 * I think we need to map over it,  */
+
+			write_string("warning: fixed mapping requested for fresh object ");
+			raw_write(2, remembered_filename, strlen(remembered_filename));
+			write_string(" at ");
+			write_ulong((uintptr_t) addr);
+			write_string(", length ");
+			write_ulong((uintptr_t) orig_length);
+			if (fresh_elf_overlaps_placeholder) write_string("; it does "); else write_string("; it does not ");
+			write_string("overlap known placeholder");
+			if (placeholder_adjusted_base)
+			{
+				write_string(" from ");
+				write_ulong((uintptr_t) placeholder_adjusted_base);
+				write_string(" to ");
+				write_ulong((uintptr_t) placeholder_adjusted_base + placeholder_adjusted_length);
+				write_string("\n");
+			}
+			else write_string (" (no placeholder)\n");
+			if ((uintptr_t) addr < (3 * NBYTES_2GB + MMAP_MIN)) abort(); // 6GB minimum
+
+			if (!fresh_elf_overlaps_placeholder)
+			{
+				write_string("warning: freshly loaded ELF file being mapped MAP_FIXED for some reason\n");
+				addr = (void*)((uintptr_t) addr - NBYTES_2GB); // subtract 2GB
+				length = ROUND_UP(length, MIN_PAGE_SIZE) + (1ull<<32); /* add 4GB to the mapping size! */
+				flags |= MAP_NORESERVE; /* it'd be a lot of swap... */
+				flags |= MAP_FIXED_NOREPLACE; // we're mapping more than the caller bargained for, so safeguard against clobbering
+			}
+			else
+			{
+				/* If it overlaps a placeholder, we just map the length requested because
+				 * we've already mapped the bumper space in the placeholder */
+			}
+		}
+		else // not fresh elf (i.e. is ld.so placeholder) or not fixed mapping of fresh ELF
+		{
+			length = ROUND_UP(length, MIN_PAGE_SIZE) + (1ull<<32); /* add 4GB to the mapping size! */
+			flags |= MAP_NORESERVE; /* it'd be a lot of swap... */
+		}
+	}
+	/* Tweaking handles stack mappings: it ensures they are placed in the 2--4GB range. */
+	_Bool tweaked = tweak_stack_or_low_mmap_request(&flags, &addr, &length);
+	void *mapping;
+	int temporary_prot;
+	if (!(prot & PROT_EXEC)) temporary_prot = prot;
+	else
+	{
+		// always map writable, non-executable
+		// FIXME: now that we defer the rewriting of syscall instructions, this feels dangerous...
+		// should really leave out PROT_WRITE, then re-mprotect when we're doing the rewrite
+		temporary_prot = (prot | PROT_WRITE | PROT_READ) & ~PROT_EXEC;
+	}
+	mapping = mmap(addr, length, temporary_prot, flags, fd, offset);
+#endif /* end of mmap2 versus mmap alternation...  */
+#ifdef __x86_64__
+	if (tweaked) { assert(!fresh_elf); tweak_stack_or_low_mmap_response(mapping, addr, length); }
+	if ((fresh_elf || mapping_is_ld_so_placeholder) && mapping != MAP_FAILED)
+	{
+		void *orig_mapping = mapping;
+		if (mapping_is_ld_so_placeholder)
+		{
+			// remember this placeholder
+			placeholder_adjusted_base = mapping;
+			placeholder_adjusted_length = length;
+			placeholder_used = 0; // we haven't yet seen it being used
+			/* for returning to the caller, pretend the extra placeholder space thing never happened */
+			mapping = (void*)((uintptr_t) mapping + NBYTES_2GB);
+			length = orig_length;
+		}
+		/* Does this mapping overlap our placeholder? */
+		if (fresh_elf && !fresh_elf_overlaps_placeholder)
+		{
+			assert(!mapping_is_ld_so_placeholder);
+
+			/* No, so forget about the placeholder.
+			 * And unmap the parts that the ld.so didn't actually ask for, unless
+			 * we have put a bumper in them. */
+			if (placeholder_adjusted_base && !placeholder_used)
+			{
+				munmap((void*)((uintptr_t) placeholder_adjusted_base), NBYTES_2GB);
+				munmap((void*)((uintptr_t) placeholder_adjusted_base + placeholder_adjusted_length - NBYTES_2GB), NBYTES_2GB);
+			}
+			placeholder_adjusted_base = NULL;
+			placeholder_adjusted_length = 0;
+			placeholder_used = 0;
+		}
+		if (fresh_elf)
+		{
+			void *prebumper_2gb_start;
+			void *postbumper_2gb_start;
+			if (fresh_elf_overlaps_placeholder)
+			{
+				/* We've mapped over the top of a placeholder. That's good. The placeholder
+				 * includes space for bumpers, but not the bumpers yet. */
+				mapping = addr; // this is effectively doing += 2GB thing
+				assert(length == orig_length); // we did not tweak the length this time around
+				prebumper_2gb_start = (void*)((uintptr_t) addr - NBYTES_2GB);
+				postbumper_2gb_start = (void*)((uintptr_t) addr + ROUND_UP(orig_length, MIN_PAGE_SIZE));
+				placeholder_used = 1; /* don't unmap the bumper! */
+			}
+			else
+			{
+				/* Of the entire expanse we mapped, remap the first 'length' at addr + 2GB.
+				 * Then replace the first and last 2GB with a bumper mapping. */
+				void *remapped
+				 = mremap(mapping, ROUND_UP(orig_length, MIN_PAGE_SIZE), ROUND_UP(orig_length, MIN_PAGE_SIZE),
+					MREMAP_FIXED/*|MREMAP_DONTUNMAP*/|MREMAP_MAYMOVE,
+					(void*)((uintptr_t) mapping + NBYTES_2GB));
+				/* FIXME: we leave the original area unmapped briefly, so this is racy... but
+				 * MREMAP_DONTUNMAP only works for private anonymous mappings. */
+				if (remapped == MAP_FAILED) abort();
+				assert(remapped == (void*)((uintptr_t) mapping + NBYTES_2GB));
+				mapping = remapped;
+				length = orig_length; /* used for vperms, below */
+				prebumper_2gb_start = orig_mapping;
+				postbumper_2gb_start = (void*)((uintptr_t) remapped + ROUND_UP(orig_length, MIN_PAGE_SIZE));
+			}
+			// either way, we have to map the bumpers
+			extern int bumper_fd_empty __attribute__((visibility("hidden"))); /* FIXME: goes in a header please */
+			void *prebumper = mmap(prebumper_2gb_start, NBYTES_2GB, PROT_READ,
+				MAP_PRIVATE|MAP_NORESERVE|MAP_FIXED, bumper_fd_empty, 0);
+			if (prebumper == MAP_FAILED) abort();
+			void *postbumper = mmap(postbumper_2gb_start, NBYTES_2GB, PROT_READ,
+				MAP_PRIVATE|MAP_NORESERVE|MAP_FIXED, bumper_fd_empty, 0);
+			if (postbumper == MAP_FAILED) abort();
+
+			/* We remember a mapping to catch later not-so-fresh ELF requests;
+			 * we remembered the filename earlier. */
+			remembered_base = mapping; // not the orig mapping!
+			remembered_length = orig_length;
+		}
+	}
+#endif
 	if (mapping != MAP_FAILED)
 	{
 		//struct vperm_range *added = add_vperm_range(mapping, length, prot);
 		//if (!added) abort();
-		replace_vperms_over(mapping, (void*)((uintptr_t) mapping + length), prot);
+		if (!(prot & PROT_EXEC)) // this includes the placeholder PROT_NONE case
+		{
+			/* no need to set vperms, but we clear any that existed and are now being mapped over */
+			replace_vperms_over(mapping, (void*)((uintptr_t)mapping + length), /* drop 'em */ -1);
+		}
+		else replace_vperms_over(mapping, (void*)((uintptr_t) mapping + length), prot);
 	}
-out:
-#ifdef __x86_64__
-	if (tweaked) tweak_mmap_response(mapping, addr, length);
-#endif
 	return mapping;
 } // end of mmap2 (32-bit) or mmap (otherwise)
 #if defined(__i386__)

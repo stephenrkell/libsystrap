@@ -177,7 +177,9 @@ __asm__(".set __systrap_lcall_handler, 0x1f1f1f1f\n\
 #define SYSTRAP_LCALL_HANDLER_8BYTE_OFFSET (0x2d + 2 - 0x1f)
 #endif
 
-static int flipper_fd;
+int flipper_fd_selector __attribute__((visibility("hidden")));
+int flipper_fd_empty __attribute__((visibility("hidden")));
+int bumper_fd_empty __attribute__((visibility("hidden")));
 
 static void install_syscall_lcall_handler(void)
 {
@@ -195,7 +197,7 @@ static void install_syscall_lcall_handler(void)
 	 * it somewhere else. We will have to fix up the hand-crafted machine code above. */
 	raw_mmap((void*) 0x1f1f1000, MIN_PAGE_SIZE,
 			PROT_READ|PROT_WRITE /* writable just temporarily */,
-			MAP_PRIVATE|MAP_FIXED/*|MAP_HUGETLB|MAP_HUGE_2MB*/, flipper_fd, 0);
+			MAP_PRIVATE|MAP_FIXED/*|MAP_HUGETLB|MAP_HUGE_2MB*/, flipper_fd_selector, 0);
 #endif
 	memcpy((void*) 0x1f1f1f1f, __systrap_lcall_handler_template, SYSTRAP_LCALL_HANDLER_LENGTH);
 	void *tgt = __systrap_call_handler_with_retaddr_restore;
@@ -308,25 +310,25 @@ void install_lcall_flipper(void)
 	 * OK, trying the fancier solution
 	 */
 
-	flipper_fd = memfd_create("lcall-flipper", MFD_CLOEXEC/*|MFD_HUGETLB*//*|MFD_HUGE_2MB*/);
-	if (flipper_fd == -1) warnx("memfd_create failed");
-	assert(flipper_fd != -1);
+	flipper_fd_selector = memfd_create("lcall-flipper", MFD_CLOEXEC/*|MFD_HUGETLB*//*|MFD_HUGE_2MB*/);
+	if (flipper_fd_selector == -1) warnx("memfd_create failed");
+	assert(flipper_fd_selector != -1);
 	/* do it in superpages (TODO: restore this / figure out why HUGETLB doesn't work) */
 //#define LCALL_FLIPPER_MAPPING_UNIT MIN_HUGEPAGE_SIZE
 #define LCALL_FLIPPER_MAPPING_UNIT MIN_PAGE_SIZE
-	ret = ftruncate(flipper_fd, LCALL_FLIPPER_MAPPING_UNIT);
+	ret = ftruncate(flipper_fd_selector, LCALL_FLIPPER_MAPPING_UNIT);
 	if (ret != 0) warnx("ftruncate");
 	ssize_t written = 0;
 	short unsigned dummy;
-	ssize_t nread = read(flipper_fd, &dummy, 2);
+	ssize_t nread = read(flipper_fd_selector, &dummy, 2);
 	assert(nread == 2); // reading works OK
-	off_t seekset = lseek(flipper_fd, 0, SEEK_SET);
+	off_t seekset = lseek(flipper_fd_selector, 0, SEEK_SET);
 	assert(seekset == 0);
 	static char selbuf[2048];
 	wmemset((wchar_t *) selbuf, (wchar_t) 0x1f1f1f1fu, sizeof selbuf / sizeof (wchar_t));
 	for (unsigned n = 0; n < LCALL_FLIPPER_MAPPING_UNIT / sizeof selbuf; ++n)
 	{
-		written = write(flipper_fd, &selbuf[0], sizeof selbuf);
+		written = write(flipper_fd_selector, &selbuf[0], sizeof selbuf);
 		assert(written == sizeof selbuf);
 	}
 #ifdef LCALL_FLIPPER_MAPPING_EAGER
@@ -338,7 +340,7 @@ void install_lcall_flipper(void)
 		void *addr = (void*)(spagenum << 21);
 		//warnx("asking for a mapping at %p", addr);
 		void *ret = raw_mmap(addr, LCALL_FLIPPER_MAPPING_UNIT,
-				PROT_READ, MAP_PRIVATE|MAP_FIXED/*|MAP_HUGETLB|MAP_HUGE_2MB*/, flipper_fd, 0);
+				PROT_READ, MAP_PRIVATE|MAP_FIXED/*|MAP_HUGETLB|MAP_HUGE_2MB*/, flipper_fd_selector, 0);
 		if (!(ret == (void*)(spagenum << 21))) warnx("mmap said %p cf addr %p", ret, addr);
 		assert(ret == (void*)(spagenum << 21));
 	}
@@ -368,12 +370,16 @@ void install_lcall_flipper(void)
 	if (ioctl(uffd, UFFDIO_REGISTER, &uffdio_register) == -1) abort();
 #else
 	/* Let's create a SIGBUS-generating area */
-	int empty_fd = memfd_create("lcall-flipper-unmapped", MFD_CLOEXEC/*|MFD_HUGETLB*//*|MFD_HUGE_2MB*/);
-	if (empty_fd == -1) warnx("memfd_create failed");
-	assert(empty_fd != -1);
+	flipper_fd_empty = memfd_create("lcall-flipper-unmapped", MFD_CLOEXEC/*|MFD_HUGETLB*//*|MFD_HUGE_2MB*/);
+	if (flipper_fd_empty == -1) warnx("memfd_create failed");
+	assert(flipper_fd_empty != -1);
+	/* For good measure, create one for the bumpers too. */
+	bumper_fd_empty = memfd_create("lcall-bumper-unmapped", MFD_CLOEXEC/*|MFD_HUGETLB*//*|MFD_HUGE_2MB*/);
+	if (bumper_fd_empty == -1) warnx("memfd_create failed");
+	assert(bumper_fd_empty != -1);
 	void *retaddr = raw_mmap((void*) LCALL_FLIPPER_AREA_BASE, LCALL_FLIPPER_AREA_LIMIT - MMAP_MIN,
 			PROT_READ /* writable just temporarily */,
-			MAP_PRIVATE|MAP_FIXED|MAP_NORESERVE, empty_fd, 0);
+			MAP_PRIVATE|MAP_FIXED|MAP_NORESERVE, flipper_fd_empty, 0);
 	if (retaddr != (void*) MMAP_MIN) abort();
 #endif /* 0 / userfaultfd */
 
@@ -417,7 +423,7 @@ void handle_sigbus(int n, __asm_siginfo_t *info, void *ucontext)
 	 * Map something over the top. What? The flipper page, for now. */
 	void *mapping_addr = (void*) ROUND_DOWN((uintptr_t) info->si_addr, MIN_PAGE_SIZE);
 	void *ret = raw_mmap((void*) mapping_addr,
-			MIN_PAGE_SIZE, PROT_READ, MAP_PRIVATE|MAP_FIXED, flipper_fd, 0);
+			MIN_PAGE_SIZE, PROT_READ, MAP_PRIVATE|MAP_FIXED, flipper_fd_selector, 0);
 	if (ret != mapping_addr) abort();
 }
 
@@ -439,7 +445,7 @@ void *create_initial_low_stack(void)
 	void *ret = raw_mmap((void*)(LOW_STACK_TOP - LOW_STACK_SIZE), LOW_STACK_SIZE,
 		PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_GROWSDOWN|MAP_STACK|MAP_FIXED_NOREPLACE,
 		-1, 0);
-	if (MMAP_RETURN_IS_ERROR((uintptr_t) ret)) abort();
+	if (MMAP_RETURN_IS_ERROR(ret)) abort();
 	return (void*) LOW_STACK_TOP;
 #endif
 }
